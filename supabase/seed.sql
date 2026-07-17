@@ -1,0 +1,2 @@
+-- Seed data is currently provided by src/lib/seed.ts for local UI development.
+-- Add SQL seed records here when the Supabase-backed data layer is enabled.
