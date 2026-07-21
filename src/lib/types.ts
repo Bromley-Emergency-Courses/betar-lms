@@ -226,6 +226,10 @@ export interface ExamResult {
   passMark: number;
   passed: boolean;
   resitRequired: boolean;
+  isResit: boolean;
+  attemptNumber: number;
+  resitOfResultId?: string;
+  priorAttemptMissing: boolean;
   takenOn: string;
   importedAt: string;
 }

@@ -404,6 +404,9 @@ export const appData: AppData = {
       passMark: 50,
       passed: true,
       resitRequired: false,
+      isResit: false,
+      attemptNumber: 1,
+      priorAttemptMissing: false,
       takenOn: "2026-06-29",
       importedAt: "2026-07-01T09:00:00.000Z"
     },
@@ -418,6 +421,9 @@ export const appData: AppData = {
       passMark: 50,
       passed: false,
       resitRequired: true,
+      isResit: false,
+      attemptNumber: 1,
+      priorAttemptMissing: false,
       takenOn: "2026-06-30",
       importedAt: "2026-07-01T09:05:00.000Z"
     }

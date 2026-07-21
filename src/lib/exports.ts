@@ -22,6 +22,9 @@ export function cccuExamExportRows(data: AppData): string[][] {
       "Pass Mark",
       "Passed",
       "Resit Required",
+      "Attempt Number",
+      "Is Resit",
+      "Prior Attempt Missing",
       "Taken On",
       "Source System"
     ]
@@ -47,6 +50,9 @@ export function cccuExamExportRows(data: AppData): string[][] {
       String(result.passMark),
       result.passed ? "Yes" : "No",
       result.resitRequired ? "Yes" : "No",
+      String(result.attemptNumber),
+      result.isResit ? "Yes" : "No",
+      result.priorAttemptMissing ? "Yes" : "No",
       result.takenOn,
       result.sourceSystem
     ]);

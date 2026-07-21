@@ -826,15 +826,21 @@ export default async function StudentProfilePage({
               {examResults.map((result) => {
                 const offering = data.offerings.find((candidate) => candidate.id === result.offeringId);
                 const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
+                const term = offering ? data.terms.find((candidate) => candidate.id === offering.termId) : undefined;
+                const priorResult = result.resitOfResultId ? data.examResults.find((candidate) => candidate.id === result.resitOfResultId) : undefined;
                 return (
                   <Link className="timeline-item linked-row" href={`/exams?student=${student.id}`} key={result.id}>
                     <span className="muted small">{result.takenOn}</span>
                     <div>
                       <StatusPill value={result.passed ? "passed" : "failed"} />
+                      {result.isResit ? <StatusPill value="resit" label={`resit attempt ${result.attemptNumber}`} /> : <StatusPill value="not_due" label={`attempt ${result.attemptNumber}`} />}
                       <p>
                         {courseModule?.code ? `${courseModule.code} · ` : ""}
+                        {term?.name ? `${term.name} · ` : ""}
                         {result.componentType} score {result.score}% from {result.sourceSystem}
                       </p>
+                      {priorResult ? <span className="muted small">Prior fail {priorResult.score}% on {priorResult.takenOn}</span> : null}
+                      {result.priorAttemptMissing ? <span className="muted small">Previous failed attempt missing</span> : null}
                       <span className="muted small">Open exam results</span>
                     </div>
                   </Link>

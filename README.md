@@ -8,6 +8,10 @@ Production-oriented MVP scaffold for BETAR's PGCert POCUS learning management sy
 - Supabase Auth, PostgreSQL, and private object storage
 - Vitest for domain-rule coverage
 
+## Staff Guide
+
+See [docs/staff-user-guide.md](docs/staff-user-guide.md) for a non-technical how-to guide covering daily LMS workflows.
+
 ## Run Locally
 
 ```bash

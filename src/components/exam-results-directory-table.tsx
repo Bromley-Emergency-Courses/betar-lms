@@ -17,6 +17,7 @@ interface ExamResultRow {
   student: Student;
   term: Term;
   module: CourseModule;
+  priorResult?: ExamResult;
   studentSearch: string;
   outcome: "passed" | "failed";
 }
@@ -82,6 +83,7 @@ export function ExamResultsDirectoryTable({
           student,
           term,
           module: courseModule,
+          priorResult: result.resitOfResultId ? data.examResults.find((candidate) => candidate.id === result.resitOfResultId) : undefined,
           studentSearch: `${studentDisplayName(student)} ${externalStudentIdentifier(student)} ${student.email}`.toLowerCase(),
           outcome: result.passed ? "passed" : "failed"
         }
@@ -125,7 +127,7 @@ export function ExamResultsDirectoryTable({
         if (outcomeFilter === "failed" && row.result.passed) {
           return false;
         }
-        if (outcomeFilter === "resit" && !row.result.resitRequired) {
+        if (outcomeFilter === "resit" && !row.result.resitRequired && !row.result.isResit) {
           return false;
         }
         if (takenFrom && row.result.takenOn < takenFrom) {
@@ -264,7 +266,7 @@ export function ExamResultsDirectoryTable({
               <option value="all">All outcomes</option>
               <option value="passed">Passed</option>
               <option value="failed">Failed</option>
-              <option value="resit">Resit required</option>
+              <option value="resit">Resit required/attempts</option>
             </select>
           </label>
           <div className="field">
@@ -302,6 +304,7 @@ export function ExamResultsDirectoryTable({
                 <th>
                   <SortButton label="Outcome" sortKey="outcome" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
                 </th>
+                <th>Attempt</th>
                 <th>
                   <SortButton label="Source" sortKey="source" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
                 </th>
@@ -333,6 +336,27 @@ export function ExamResultsDirectoryTable({
                       <>
                         <br />
                         <StatusPill value="watch" label="resit required" />
+                      </>
+                    ) : null}
+                  </td>
+                  <td>
+                    <StatusPill value={row.result.isResit ? "resit" : "not_due"} label={`Attempt ${row.result.attemptNumber}`} />
+                    {row.result.isResit ? (
+                      <>
+                        <br />
+                        <StatusPill value="resit" label="resit" />
+                      </>
+                    ) : null}
+                    {row.priorResult ? (
+                      <>
+                        <br />
+                        <span className="muted small">Prior fail {row.priorResult.score}% on {row.priorResult.takenOn}</span>
+                      </>
+                    ) : null}
+                    {row.result.priorAttemptMissing ? (
+                      <>
+                        <br />
+                        <span className="muted small">Previous failed attempt missing</span>
                       </>
                     ) : null}
                   </td>
