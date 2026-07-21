@@ -86,9 +86,9 @@ export function ExamPortalMappingForm({
         )}
       </Field>
       <FormGrid>
-        <Field label="Term" htmlFor="portal-term">
+        <Field label="Exam sitting term" htmlFor="portal-term">
           <select id="portal-term" name="term_id" className="select" required>
-            <option value="">Select term</option>
+            <option value="">Select exam sitting term</option>
             {terms.map((term) => (
               <option key={term.id} value={term.id}>
                 {term.name}

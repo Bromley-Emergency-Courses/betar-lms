@@ -230,6 +230,10 @@ function mapExamResult(row: DbRow): ExamResult {
     passMark: Number(row.pass_mark),
     passed: Boolean(row.passed),
     resitRequired: Boolean(row.resit_required),
+    isResit: Boolean(row.is_resit),
+    attemptNumber: Number(row.attempt_number ?? 1),
+    resitOfResultId: optionalString(row.resit_of_result_id),
+    priorAttemptMissing: Boolean(row.prior_attempt_missing),
     takenOn: String(row.taken_on),
     importedAt: String(row.imported_at)
   };

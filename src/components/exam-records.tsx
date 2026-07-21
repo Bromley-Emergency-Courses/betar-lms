@@ -26,7 +26,9 @@ function examplePayload(data: AppData): string {
         termName: term?.name ?? "April 2026",
         score: 72,
         passMark: 50,
-        takenOn: new Date().toISOString().slice(0, 10)
+        takenOn: new Date().toISOString().slice(0, 10),
+        isResit: false,
+        attemptNumber: 1
       }
     ],
     null,
@@ -112,7 +114,7 @@ export function ExamTools({
         <div className="section-header">
           <div>
             <h2>Exam Portal Mappings</h2>
-            <p>Sync reviewed results from mapped production Exam Portal exams</p>
+            <p>Sync reviewed results from mapped production Exam Portal exams. The mapping term is the exam sitting term.</p>
           </div>
         </div>
         {data.examPortalMappings.length === 0 ? (
@@ -130,7 +132,7 @@ export function ExamTools({
                       <div>
                         <h2>{mapping.examTitle ?? mapping.portalExamId}</h2>
                         <p>
-                          {term?.name ?? "Term"} · {mapping.portalExamKind === "physics_equipment" ? "Physics/equipment" : courseModule?.code}
+                          Sitting {term?.name ?? "term"} · {mapping.portalExamKind === "physics_equipment" ? "Physics/equipment" : courseModule?.code}
                         </p>
                       </div>
                       <StatusPill value={mapping.lastSyncStatus === "imported" ? "paid" : "watch"} label={mapping.lastSyncStatus ?? "not synced"} />
@@ -142,7 +144,7 @@ export function ExamTools({
                       <input id={`portal-exam-title-${mapping.id}`} name="exam_title" className="input" defaultValue={mapping.examTitle ?? ""} />
                     </Field>
                     <FormGrid>
-                      <Field label="Term" htmlFor={`portal-term-${mapping.id}`}>
+                      <Field label="Exam sitting term" htmlFor={`portal-term-${mapping.id}`}>
                         <select id={`portal-term-${mapping.id}`} name="term_id" className="select" defaultValue={mapping.termId} required>
                           {data.terms.map((termOption) => (
                             <option key={termOption.id} value={termOption.id}>
@@ -214,7 +216,7 @@ export function ExamTools({
                     <span>
                       <strong>{mapping.examTitle ?? mapping.portalExamId}</strong>
                       <span className="muted small">
-                        {term?.name ?? "Term"} · {mapping.portalExamKind === "physics_equipment" ? "Physics/equipment" : courseModule?.code ?? "Module"} · {unmatched.length} unmatched
+                        Sitting {term?.name ?? "term"} · {mapping.portalExamKind === "physics_equipment" ? "Physics/equipment" : courseModule?.code ?? "Module"} · {unmatched.length} unmatched
                       </span>
                     </span>
                   </summary>

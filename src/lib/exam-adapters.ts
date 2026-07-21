@@ -13,7 +13,9 @@ export const inboundExamResultSchema = z.object({
   termName: z.string().min(1),
   score: z.number().min(0).max(100),
   passMark: z.number().min(0).max(100).default(50),
-  takenOn: z.string().min(1)
+  takenOn: z.string().min(1),
+  isResit: z.boolean().optional(),
+  attemptNumber: z.number().int().positive().optional()
 });
 
 export type InboundExamResult = z.infer<typeof inboundExamResultSchema>;
@@ -33,6 +35,129 @@ export interface ExamIngestionSummary {
   accepted: number;
   rejected: number;
   results: Array<NormalizedExamResult | FailedExamResult>;
+}
+
+interface ResolveExamResultInput {
+  studentId: string;
+  moduleId: string;
+  sittingTermId: string;
+  componentType: ExamComponentType;
+  sourceSystem: "theory_portal" | "practical_osce" | "manual";
+  sourceAttemptId: string;
+  score: number;
+  passMark: number;
+  takenOn: string;
+  importedAt?: string;
+  isResit?: boolean;
+  attemptNumber?: number;
+}
+
+function termStartMs(termId: string, data: AppData): number {
+  const term = data.terms.find((candidate) => candidate.id === termId);
+  return term ? Date.parse(term.startsOn) : Number.NaN;
+}
+
+function offeringForEnrolment(enrolmentOfferingId: string, data: AppData) {
+  return data.offerings.find((candidate) => candidate.id === enrolmentOfferingId);
+}
+
+function latestPriorEnrolmentForModule(input: Pick<ResolveExamResultInput, "studentId" | "moduleId" | "sittingTermId">, data: AppData) {
+  const sittingStart = termStartMs(input.sittingTermId, data);
+  return data.enrolments
+    .map((enrolment) => ({
+      enrolment,
+      offering: offeringForEnrolment(enrolment.offeringId, data)
+    }))
+    .filter(({ enrolment, offering }) => {
+      if (!offering || enrolment.studentId !== input.studentId || offering.moduleId !== input.moduleId) {
+        return false;
+      }
+      const offeringStart = termStartMs(offering.termId, data);
+      return Number.isFinite(sittingStart) && Number.isFinite(offeringStart) && offeringStart < sittingStart;
+    })
+    .sort((a, b) => termStartMs(b.offering!.termId, data) - termStartMs(a.offering!.termId, data))[0];
+}
+
+function sameTermEnrolmentForModule(input: Pick<ResolveExamResultInput, "studentId" | "moduleId" | "sittingTermId">, data: AppData) {
+  return data.enrolments
+    .map((enrolment) => ({
+      enrolment,
+      offering: offeringForEnrolment(enrolment.offeringId, data)
+    }))
+    .find(({ enrolment, offering }) => {
+      return (
+        enrolment.studentId === input.studentId &&
+        offering?.moduleId === input.moduleId &&
+        offering.termId === input.sittingTermId
+      );
+    });
+}
+
+function latestPriorFailedResult(input: Pick<ResolveExamResultInput, "studentId" | "componentType" | "sourceAttemptId"> & { offeringId: string }, data: AppData): ExamResult | undefined {
+  return data.examResults
+    .filter((result) => {
+      return (
+        result.studentId === input.studentId &&
+        result.offeringId === input.offeringId &&
+        result.componentType === input.componentType &&
+        result.sourceAttemptId !== input.sourceAttemptId &&
+        !result.passed
+      );
+    })
+    .sort((a, b) => {
+      return (
+        (b.attemptNumber ?? 1) - (a.attemptNumber ?? 1) ||
+        b.takenOn.localeCompare(a.takenOn) ||
+        b.importedAt.localeCompare(a.importedAt)
+      );
+    })[0];
+}
+
+export function resolveExamResultForStudent(input: ResolveExamResultInput, data: AppData): NormalizedExamResult | FailedExamResult {
+  const sameTerm = sameTermEnrolmentForModule(input, data);
+  const prior = sameTerm ? undefined : latestPriorEnrolmentForModule(input, data);
+  const target = sameTerm ?? prior;
+  if (!target?.offering) {
+    return { ok: false, sourceAttemptId: input.sourceAttemptId, reason: "offering_not_found" };
+  }
+
+  const inferredResit = !sameTerm;
+  const isResit = input.isResit ?? inferredResit;
+  const priorFailedResult = isResit
+    ? latestPriorFailedResult(
+        {
+          studentId: input.studentId,
+          offeringId: target.offering.id,
+          componentType: input.componentType,
+          sourceAttemptId: input.sourceAttemptId
+        },
+        data
+      )
+    : undefined;
+  const attemptNumber = input.attemptNumber ?? (isResit ? Math.max(2, (priorFailedResult?.attemptNumber ?? 1) + 1) : 1);
+  const outcome = normalizeExamResultScore(input.score, input.passMark);
+
+  return {
+    ok: true,
+    result: {
+      id: `exam-${input.sourceAttemptId}`,
+      studentId: input.studentId,
+      offeringId: target.offering.id,
+      componentType: input.componentType,
+      sourceSystem: input.sourceSystem,
+      sourceAttemptId: input.sourceAttemptId,
+      score: input.score,
+      passMark: input.passMark,
+      passed: outcome.passed,
+      resitRequired: outcome.resitRequired,
+      isResit,
+      attemptNumber,
+      resitOfResultId: priorFailedResult?.id,
+      priorAttemptMissing: isResit && !priorFailedResult,
+      takenOn: input.takenOn,
+      importedAt: input.importedAt ?? new Date().toISOString()
+    }
+  };
 }
 
 export function normalizeInboundExamResult(input: InboundExamResult, data: AppData): NormalizedExamResult | FailedExamResult {
@@ -55,33 +180,19 @@ export function normalizeInboundExamResult(input: InboundExamResult, data: AppDa
     return { ok: false, sourceAttemptId: input.sourceAttemptId, reason: "term_not_found" };
   }
 
-  const offering = data.offerings.find(
-    (candidate) => candidate.moduleId === courseModule.id && candidate.termId === term.id
-  );
-  if (!offering) {
-    return { ok: false, sourceAttemptId: input.sourceAttemptId, reason: "offering_not_found" };
-  }
-
-  const outcome = normalizeExamResultScore(input.score, input.passMark);
-  const componentType: ExamComponentType = input.componentType;
-
-  return {
-    ok: true,
-    result: {
-      id: `exam-${input.sourceAttemptId}`,
-      studentId: student.id,
-      offeringId: offering.id,
-      componentType,
-      sourceSystem: input.sourceSystem,
-      sourceAttemptId: input.sourceAttemptId,
-      score: input.score,
-      passMark: input.passMark,
-      passed: outcome.passed,
-      resitRequired: outcome.resitRequired,
-      takenOn: input.takenOn,
-      importedAt: new Date().toISOString()
-    }
-  };
+  return resolveExamResultForStudent({
+    studentId: student.id,
+    moduleId: courseModule.id,
+    sittingTermId: term.id,
+    componentType: input.componentType,
+    sourceSystem: input.sourceSystem,
+    sourceAttemptId: input.sourceAttemptId,
+    score: input.score,
+    passMark: input.passMark,
+    takenOn: input.takenOn,
+    isResit: input.isResit,
+    attemptNumber: input.attemptNumber
+  }, data);
 }
 
 export function parseExamAdapterPayload(payload: unknown): InboundExamResult[] {
@@ -105,6 +216,10 @@ export async function persistNormalizedExamResults(
       pass_mark: result.passMark,
       passed: result.passed,
       resit_required: result.resitRequired,
+      is_resit: result.isResit,
+      attempt_number: result.attemptNumber,
+      resit_of_result_id: result.resitOfResultId ?? null,
+      prior_attempt_missing: result.priorAttemptMissing,
       taken_on: result.takenOn,
       imported_at: result.importedAt
     }));

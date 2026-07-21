@@ -8,7 +8,8 @@ import { requirePermission } from "@/lib/auth";
 import {
   normalizeInboundExamResult,
   parseExamAdapterPayload,
-  persistNormalizedExamResults
+  persistNormalizedExamResults,
+  resolveExamResultForStudent
 } from "@/lib/exam-adapters";
 import { getLmsData } from "@/lib/lms-data";
 import { presentationRubricCriteria } from "@/lib/presentation-rubric";
@@ -1184,8 +1185,17 @@ type ExamResultUpsertRow = {
   pass_mark: number;
   passed: boolean;
   resit_required: boolean;
+  is_resit: boolean;
+  attempt_number: number;
+  resit_of_result_id: string | null;
+  prior_attempt_missing: boolean;
   taken_on: string;
   imported_at: string;
+};
+
+type TheoryRecomputeIssue = {
+  status: "missing_offering" | "missing_original_offering" | "missing_physics";
+  message: string;
 };
 
 function cccuIdFromPortalResult(result: z.infer<typeof examPortalResultSchema>): string | null {
@@ -1222,8 +1232,9 @@ function latestSubmissionByStudent(rows: PortalSubmissionRow[]): Map<string, Por
   return latest;
 }
 
-async function recomputeTheoryResultsForTerm(termId: string) {
+async function recomputeTheoryResultsForTerm(termId: string): Promise<Map<string, TheoryRecomputeIssue>> {
   const supabase = await createSupabaseServerClient();
+  const data = await getLmsData();
   const { data: mappings, error: mappingsError } = await supabase
     .from("exam_portal_mappings")
     .select("id, portal_exam_id, module_id, portal_exam_kind, physics_required")
@@ -1235,8 +1246,9 @@ async function recomputeTheoryResultsForTerm(termId: string) {
 
   const moduleMappings = (mappings ?? []).filter((mapping) => mapping.portal_exam_kind === "module_theory" && mapping.module_id);
   const physicsMappings = (mappings ?? []).filter((mapping) => mapping.portal_exam_kind === "physics_equipment");
+  const issuesByMapping = new Map<string, TheoryRecomputeIssue>();
   if (moduleMappings.length === 0) {
-    return;
+    return issuesByMapping;
   }
 
   const mappingIds = (mappings ?? []).map((mapping) => String(mapping.id));
@@ -1259,18 +1271,9 @@ async function recomputeTheoryResultsForTerm(termId: string) {
 
   const rows: ExamResultUpsertRow[] = [];
   const missingPhysicsByMapping = new Map<string, number>();
+  const missingOriginalOfferingByMapping = new Map<string, number>();
   for (const mapping of moduleMappings) {
     const latestModuleByStudent = latestSubmissionByStudent(submissionsByMapping.get(String(mapping.id)) ?? []);
-    const { data: offering, error: offeringError } = await supabase
-      .from("module_offerings")
-      .select("id")
-      .eq("term_id", termId)
-      .eq("module_id", mapping.module_id)
-      .single();
-    if (offeringError) {
-      throw new Error(offeringError.message);
-    }
-
     latestModuleByStudent.forEach((moduleSubmission) => {
       if (!moduleSubmission.student_id) {
         return;
@@ -1287,18 +1290,41 @@ async function recomputeTheoryResultsForTerm(termId: string) {
       const finalPercentage = mapping.physics_required
         ? (Number(moduleSubmission.percentage) + Number(physicsSubmission?.percentage ?? 0)) / 2
         : Number(moduleSubmission.percentage);
+      const sourceAttemptId = `${mapping.portal_exam_id}:${moduleSubmission.token_id}`;
+      const resolved = resolveExamResultForStudent(
+        {
+          studentId: moduleSubmission.student_id,
+          moduleId: String(mapping.module_id),
+          sittingTermId: termId,
+          componentType: "theory",
+          sourceSystem: "theory_portal",
+          sourceAttemptId,
+          score: Number(finalPercentage.toFixed(2)),
+          passMark: 50,
+          takenOn: String(moduleSubmission.completed_at).slice(0, 10)
+        },
+        data
+      );
+      if (!resolved.ok) {
+        missingOriginalOfferingByMapping.set(String(mapping.id), (missingOriginalOfferingByMapping.get(String(mapping.id)) ?? 0) + 1);
+        return;
+      }
       rows.push({
-        student_id: moduleSubmission.student_id,
-        offering_id: offering.id,
+        student_id: resolved.result.studentId,
+        offering_id: resolved.result.offeringId,
         component_type: "theory",
         source_system: "theory_portal",
-        source_attempt_id: `${mapping.portal_exam_id}:${moduleSubmission.token_id}`,
-        score: Number(finalPercentage.toFixed(2)),
-        pass_mark: 50,
-        passed: finalPercentage >= 50,
-        resit_required: finalPercentage < 50,
-        taken_on: String(moduleSubmission.completed_at).slice(0, 10),
-        imported_at: new Date().toISOString()
+        source_attempt_id: resolved.result.sourceAttemptId,
+        score: resolved.result.score,
+        pass_mark: resolved.result.passMark,
+        passed: resolved.result.passed,
+        resit_required: resolved.result.resitRequired,
+        is_resit: resolved.result.isResit,
+        attempt_number: resolved.result.attemptNumber,
+        resit_of_result_id: resolved.result.resitOfResultId ?? null,
+        prior_attempt_missing: resolved.result.priorAttemptMissing,
+        taken_on: resolved.result.takenOn,
+        imported_at: resolved.result.importedAt
       });
     });
   }
@@ -1311,17 +1337,32 @@ async function recomputeTheoryResultsForTerm(termId: string) {
   }
 
   for (const [mappingId, count] of missingPhysicsByMapping.entries()) {
+    issuesByMapping.set(mappingId, {
+      status: "missing_physics",
+      message: `${count} module submissions are missing a physics/equipment score.`
+    });
+  }
+  for (const [mappingId, count] of missingOriginalOfferingByMapping.entries()) {
+    issuesByMapping.set(mappingId, {
+      status: "missing_original_offering",
+      message: `${count} matched submissions have no same-term enrolment or earlier enrolment for this mapped module, so exam results were not created for those submissions.`
+    });
+  }
+
+  for (const [mappingId, issue] of issuesByMapping.entries()) {
     const { error } = await supabase
       .from("exam_portal_mappings")
       .update({
-        last_sync_status: "missing_physics",
-        last_sync_message: `${count} module submissions are missing a physics/equipment score.`
+        last_sync_status: issue.status,
+        last_sync_message: issue.message
       })
       .eq("id", mappingId);
     if (error) {
       throw new Error(error.message);
     }
   }
+
+  return issuesByMapping;
 }
 
 export async function syncExamPortalMapping(formData: FormData) {
@@ -1398,16 +1439,21 @@ export async function syncExamPortalMapping(formData: FormData) {
     }
   }
 
-  await recomputeTheoryResultsForTerm(String(mapping.term_id));
+  const recomputeIssues = await recomputeTheoryResultsForTerm(String(mapping.term_id));
 
   const unmatched = submissionRows.filter((row) => row.student_id === null).length;
+  const recomputeIssue = recomputeIssues.get(mappingId);
+  const syncStatus = recomputeIssue?.status ?? (unmatched > 0 ? "imported_with_unmatched_students" : "imported");
+  const syncMessage = recomputeIssue
+    ? `${submissionRows.length} submissions imported. ${recomputeIssue.message}${unmatched > 0 ? ` ${unmatched} unmatched CCCU IDs.` : ""}`
+    : `${submissionRows.length} submissions imported. ${unmatched} unmatched CCCU IDs.`;
   const { error: updateError } = await supabase
     .from("exam_portal_mappings")
     .update({
       exam_title: portalResponse.exam_title ?? mapping.exam_title,
       last_synced_at: new Date().toISOString(),
-      last_sync_status: unmatched > 0 ? "imported_with_unmatched_students" : "imported",
-      last_sync_message: `${submissionRows.length} submissions imported. ${unmatched} unmatched CCCU IDs.`
+      last_sync_status: syncStatus,
+      last_sync_message: syncMessage
     })
     .eq("id", mappingId);
   if (updateError) {
@@ -1464,7 +1510,7 @@ export async function resolveExamPortalSubmission(formData: FormData) {
     throw new Error(updateError.message);
   }
 
-  await recomputeTheoryResultsForTerm(String(mapping.term_id));
+  const recomputeIssues = await recomputeTheoryResultsForTerm(String(mapping.term_id));
 
   const { data: submissions, error: countError } = await supabase
     .from("exam_portal_submissions")
@@ -1476,11 +1522,14 @@ export async function resolveExamPortalSubmission(formData: FormData) {
 
   const imported = submissions?.length ?? 0;
   const unmatched = (submissions ?? []).filter((row) => !row.student_id).length;
+  const recomputeIssue = recomputeIssues.get(String(mapping.id));
   const { error: mappingUpdateError } = await supabase
     .from("exam_portal_mappings")
     .update({
-      last_sync_status: unmatched > 0 ? "imported_with_unmatched_students" : "imported",
-      last_sync_message: `${imported} submissions imported. ${unmatched} unmatched CCCU IDs.`
+      last_sync_status: recomputeIssue?.status ?? (unmatched > 0 ? "imported_with_unmatched_students" : "imported"),
+      last_sync_message: recomputeIssue
+        ? `${imported} submissions imported. ${recomputeIssue.message}${unmatched > 0 ? ` ${unmatched} unmatched CCCU IDs.` : ""}`
+        : `${imported} submissions imported. ${unmatched} unmatched CCCU IDs.`
     })
     .eq("id", mapping.id);
   if (mappingUpdateError) {
