@@ -5,7 +5,13 @@ import { ExamPortalMappingForm } from "@/components/exam-portal-mapping-form";
 import { ExamResultsDirectoryTable } from "@/components/exam-results-directory-table";
 import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
-import { importExamResultsJson, resolveExamPortalSubmission, syncExamPortalMapping, updateExamPortalMapping } from "@/lib/admin-actions";
+import {
+  importExamResultsJson,
+  importPracticalExamResultsCsv,
+  resolveExamPortalSubmission,
+  syncExamPortalMapping,
+  updateExamPortalMapping
+} from "@/lib/admin-actions";
 import type { ExamPortalPickerExam } from "@/lib/exam-portal";
 import type { AppData, ExamPortalSubmission, Student } from "@/lib/types";
 
@@ -79,11 +85,16 @@ function sortedStudents(data: AppData): Student[] {
 export function ExamTools({
   data,
   portalExams,
-  portalSearch
+  portalSearch,
+  practicalImportSummary
 }: {
   data: AppData;
   portalExams: ExamPortalPickerExam[];
   portalSearch: string;
+  practicalImportSummary?: {
+    accepted: number;
+    rejected: number;
+  };
 }) {
   return (
     <>
@@ -108,6 +119,52 @@ export function ExamTools({
             The LMS stores the selected exam ID in the background. Sync imports results once Exam Portal marks the exam reviewed and available for LMS.
           </p>
         </div>
+      </section>
+
+      <section className="grid grid-2">
+        <form className="panel grid" action={importPracticalExamResultsCsv}>
+          <div className="section-header">
+            <div>
+              <h2>Practical Results CSV</h2>
+              <p>Import desktop-app practical exports into the exam results register.</p>
+            </div>
+            {practicalImportSummary ? (
+              <StatusPill
+                value={practicalImportSummary.rejected > 0 ? "watch" : "paid"}
+                label={`${practicalImportSummary.accepted} imported · ${practicalImportSummary.rejected} rejected`}
+              />
+            ) : null}
+          </div>
+          <FormGrid>
+            <Field label="Exam sitting term" htmlFor="practical-term-id">
+              <select id="practical-term-id" name="term_id" className="select" required>
+                {data.terms.map((term) => (
+                  <option key={term.id} value={term.id}>
+                    {term.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Taken on" htmlFor="practical-taken-on">
+              <input id="practical-taken-on" name="taken_on" className="input" type="date" required />
+            </Field>
+          </FormGrid>
+          <Field label="Pass mark" htmlFor="practical-pass-mark">
+            <input id="practical-pass-mark" name="pass_mark" className="input" type="number" min="0" max="100" step="0.01" defaultValue="50" required />
+          </Field>
+          <Field label="Module code mappings" htmlFor="practical-module-code-map">
+            <textarea
+              id="practical-module-code-map"
+              name="module_code_map"
+              className="textarea code-textarea"
+              placeholder={"IN=POCUS-CORE\nVA=POCUS-VASC\nLU=POCUS-LUNG\nEC=POCUS-CARD"}
+            />
+          </Field>
+          <Field label="CSV file" htmlFor="practical-csv-file">
+            <input id="practical-csv-file" name="csv_file" className="input" type="file" accept=".csv,text/csv" required />
+          </Field>
+          <button className="button primary">Import practical results</button>
+        </form>
       </section>
 
       <section className="section">

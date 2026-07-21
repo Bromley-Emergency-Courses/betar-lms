@@ -37,6 +37,13 @@ export interface ExamIngestionSummary {
   results: Array<NormalizedExamResult | FailedExamResult>;
 }
 
+interface PracticalCsvImportOptions {
+  termName: string;
+  takenOn: string;
+  passMark: number;
+  moduleCodeMap?: Map<string, string>;
+}
+
 interface ResolveExamResultInput {
   studentId: string;
   moduleId: string;
@@ -50,6 +57,94 @@ interface ResolveExamResultInput {
   importedAt?: string;
   isResit?: boolean;
   attemptNumber?: number;
+}
+
+function csvCell(row: Record<string, unknown>, key: string): string {
+  return String(row[key] ?? "").trim();
+}
+
+function normalizeModuleCode(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function sourceAttemptToken(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9._-]+/g, "-");
+}
+
+function parseScore(value: string, label: string, rowNumber: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Row ${rowNumber} has an invalid ${label}.`);
+  }
+  return parsed;
+}
+
+export function parsePracticalModuleCodeMap(input: string): Map<string, string> {
+  const mappings = new Map<string, string>();
+  input
+    .split(/\r?\n|,/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const separator = line.includes("=") ? "=" : line.includes(":") ? ":" : "";
+      if (!separator) {
+        throw new Error("Module code mappings must use OLD=NEW, one per line.");
+      }
+      const [source, target, ...extra] = line.split(separator);
+      if (extra.length > 0 || !source?.trim() || !target?.trim()) {
+        throw new Error("Module code mappings must use OLD=NEW, one per line.");
+      }
+      mappings.set(normalizeModuleCode(source), normalizeModuleCode(target));
+    });
+  return mappings;
+}
+
+export function practicalCsvRowsToInboundExamResults(
+  rows: Array<Record<string, unknown>>,
+  options: PracticalCsvImportOptions
+): InboundExamResult[] {
+  return rows
+    .map((row, index) => ({ row, rowNumber: index + 2 }))
+    .filter(({ row }) => csvCell(row, "Student ID") || csvCell(row, "Module") || csvCell(row, "Percentage"))
+    .map(({ row, rowNumber }) => {
+      const cccuStudentId = csvCell(row, "Student ID");
+      const sourceModuleCode = normalizeModuleCode(csvCell(row, "Module"));
+      const mappedModuleCode = options.moduleCodeMap?.get(sourceModuleCode) ?? sourceModuleCode;
+      if (!cccuStudentId) {
+        throw new Error(`Row ${rowNumber} is missing Student ID.`);
+      }
+      if (!sourceModuleCode) {
+        throw new Error(`Row ${rowNumber} is missing Module.`);
+      }
+
+      const percentage = csvCell(row, "Percentage");
+      const score = percentage
+        ? parseScore(percentage, "Percentage", rowNumber)
+        : (parseScore(csvCell(row, "Total Score"), "Total Score", rowNumber) /
+            parseScore(csvCell(row, "Max Score"), "Max Score", rowNumber)) *
+          100;
+      if (score < 0 || score > 100) {
+        throw new Error(`Row ${rowNumber} has a score outside 0-100.`);
+      }
+
+      return {
+        sourceSystem: "practical_osce",
+        sourceAttemptId: [
+          "practical",
+          sourceAttemptToken(options.termName),
+          sourceAttemptToken(mappedModuleCode),
+          sourceAttemptToken(cccuStudentId),
+          options.takenOn
+        ].join(":"),
+        componentType: "practical",
+        cccuStudentId,
+        moduleCode: mappedModuleCode,
+        termName: options.termName,
+        score: Number(score.toFixed(2)),
+        passMark: options.passMark,
+        takenOn: options.takenOn
+      };
+    });
 }
 
 function termStartMs(termId: string, data: AppData): number {
