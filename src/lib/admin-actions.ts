@@ -7,8 +7,10 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import {
   normalizeInboundExamResult,
+  parsePracticalModuleCodeMap,
   parseExamAdapterPayload,
   persistNormalizedExamResults,
+  practicalCsvRowsToInboundExamResults,
   resolveExamResultForStudent
 } from "@/lib/exam-adapters";
 import { getLmsData } from "@/lib/lms-data";
@@ -1020,6 +1022,63 @@ export async function importExamResultsJson(formData: FormData) {
     }
   });
   redirect("/exams?mode=edit");
+}
+
+export async function importPracticalExamResultsCsv(formData: FormData) {
+  await requirePermission("manage_course");
+  const termId = idSchema.parse(value(formData, "term_id"));
+  const takenOn = value(formData, "taken_on");
+  const passMark = Number(value(formData, "pass_mark") || "50");
+  const file = formData.get("csv_file");
+  if (!(file instanceof File) || file.size === 0) {
+    throw new Error("Choose a practical results CSV file to import.");
+  }
+  if (!takenOn) {
+    throw new Error("Choose the practical exam date.");
+  }
+  if (!Number.isFinite(passMark) || passMark < 0 || passMark > 100) {
+    throw new Error("Pass mark must be a number from 0 to 100.");
+  }
+
+  const csv = await file.text();
+  const parsedCsv = Papa.parse<Record<string, unknown>>(csv, {
+    header: true,
+    skipEmptyLines: true
+  });
+  if (parsedCsv.errors.length > 0) {
+    throw new Error(parsedCsv.errors[0]?.message ?? "CSV could not be parsed.");
+  }
+
+  const data = await getLmsData();
+  const term = data.terms.find((candidate) => candidate.id === termId);
+  if (!term) {
+    throw new Error("Selected term was not found.");
+  }
+
+  const moduleCodeMap = parsePracticalModuleCodeMap(value(formData, "module_code_map"));
+  const parsed = practicalCsvRowsToInboundExamResults(parsedCsv.data, {
+    termName: term.name,
+    takenOn,
+    passMark,
+    moduleCodeMap
+  });
+  if (parsed.length === 0) {
+    throw new Error("No practical result rows found in the CSV.");
+  }
+
+  const normalized = parsed.map((result) => normalizeInboundExamResult(result, data));
+  const supabase = await createSupabaseServerClient();
+  await persistNormalizedExamResults(supabase, normalized);
+
+  revalidatePath("/exams");
+  normalized.forEach((result) => {
+    if (result.ok) {
+      revalidatePath(`/students/${result.result.studentId}`);
+    }
+  });
+  const accepted = normalized.filter((result) => result.ok).length;
+  const rejected = normalized.length - accepted;
+  redirect(`/exams?mode=edit&practicalAccepted=${accepted}&practicalRejected=${rejected}`);
 }
 
 const examPortalMappingSchema = z.object({

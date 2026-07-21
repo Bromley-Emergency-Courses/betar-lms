@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizeInboundExamResult } from "@/lib/exam-adapters";
+import {
+  normalizeInboundExamResult,
+  parsePracticalModuleCodeMap,
+  practicalCsvRowsToInboundExamResults
+} from "@/lib/exam-adapters";
 import { getAppData } from "@/lib/seed";
 import type { AppData } from "@/lib/types";
 
@@ -146,5 +150,60 @@ describe("exam adapter normalization", () => {
     );
 
     expect(normalized).toEqual({ ok: false, sourceAttemptId: "osce-new-1", reason: "student_not_found" });
+  });
+
+  it("converts desktop practical CSV rows into practical adapter results", () => {
+    const moduleCodeMap = parsePracticalModuleCodeMap("VA=POCUS-VASC\nLU=POCUS-LUNG");
+    const results = practicalCsvRowsToInboundExamResults(
+      [
+        {
+          "Student ID": "100117592",
+          "Full Name": "Anna Lasis",
+          Module: "VA",
+          "Total Score": "63",
+          "Max Score": "80",
+          Percentage: "78.8"
+        },
+        {
+          "Student ID": "100192882",
+          "Full Name": "Charles Greenbury",
+          Module: "LU",
+          "Total Score": "64",
+          "Max Score": "82",
+          Percentage: ""
+        }
+      ],
+      {
+        termName: "April-June 2026",
+        takenOn: "2026-07-03",
+        passMark: 50,
+        moduleCodeMap
+      }
+    );
+
+    expect(results).toEqual([
+      {
+        sourceSystem: "practical_osce",
+        sourceAttemptId: "practical:APRIL-JUNE-2026:POCUS-VASC:100117592:2026-07-03",
+        componentType: "practical",
+        cccuStudentId: "100117592",
+        moduleCode: "POCUS-VASC",
+        termName: "April-June 2026",
+        score: 78.8,
+        passMark: 50,
+        takenOn: "2026-07-03"
+      },
+      {
+        sourceSystem: "practical_osce",
+        sourceAttemptId: "practical:APRIL-JUNE-2026:POCUS-LUNG:100192882:2026-07-03",
+        componentType: "practical",
+        cccuStudentId: "100192882",
+        moduleCode: "POCUS-LUNG",
+        termName: "April-June 2026",
+        score: 78.05,
+        passMark: 50,
+        takenOn: "2026-07-03"
+      }
+    ]);
   });
 });
