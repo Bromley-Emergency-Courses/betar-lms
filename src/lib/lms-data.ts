@@ -283,14 +283,18 @@ function mapManagedFile(row: DbRow): ManagedFile {
   return {
     id: String(row.id),
     studentId: optionalString(row.student_id),
+    personId: optionalString(row.person_id),
     bucket: String(row.bucket),
     objectPath: String(row.object_path),
     label: String(row.label),
     fileCategory: (row.file_category ?? "other") as ManagedFile["fileCategory"],
     originalFilename: optionalString(row.original_filename),
+    sanitizedFilename: optionalString(row.sanitized_filename),
     contentType: optionalString(row.content_type),
     sizeBytes: numberValue(row.size_bytes),
+    retentionClass: (row.retention_class ?? "student_academic_record") as ManagedFile["retentionClass"],
     uploadedByUserId: optionalString(row.uploaded_by_user_id),
+    uploadedByPersonId: optionalString(row.uploaded_by_person_id),
     createdAt: String(row.created_at)
   };
 }

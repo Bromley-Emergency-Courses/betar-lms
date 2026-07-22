@@ -35,8 +35,8 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [x] Link future applicant/student Supabase Auth users to `persons`.
 - [x] Add applicant/student auth helpers separate from staff `requirePermission`.
 - [x] Add initial route-boundary helper for public, applicant/student-authenticated, and staff-only routes.
-- [ ] Tighten storage model for identity documents, qualification documents, student photos, and generated letters.
-- [ ] Replace broad document access with signed URL generation after server-side authorization.
+- [x] Tighten storage model for identity documents, qualification documents, student photos, generated letters, and deferral evidence.
+- [ ] Add signed URL generation after server-side authorization for admissions documents.
 - [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
 - [ ] Add RLS test coverage for staff, applicant, and student access boundaries.
 - [ ] Add correspondence log schema before sending automated emails.
@@ -161,3 +161,4 @@ Add entries here when meaningful code lands.
 | 2026-07-22 | `12amathew/admissions-applications-workflows` | Created durable roadmap, developer spec, README pointer, and workspace handoff convention. | Documentation-only change. |
 | 2026-07-22 | `12amathew/persons-foundation-v1` | Added `persons` foundation migration, backfilled existing students, linked `students.person_id`, and kept legacy student fields as the active UI source during transition. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/applicant-auth-boundary` | Added `person_auth_identities`, portal identity lookup functions, route-boundary helpers, and server-only applicant/student auth helpers separate from staff auth. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-22 | `12amathew/admissions-docs-rls-hardening` | Added private admissions document buckets, tightened storage object policies so teachers no longer read mixed/sensitive document buckets, and added managed-file metadata fields for person linkage, uploader person, sanitized filenames, and retention class. | `npm run lint`; `npm run test`; `npm run build`. |
