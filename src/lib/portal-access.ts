@@ -1,7 +1,11 @@
 export type PortalActorType = "applicant" | "student";
 export type RouteAuthBoundary = "public" | "portal" | "staff";
 
-const publicPathPrefixes = ["/login", "/apply"];
+const localRedirectOrigin = "https://betar.local";
+const unsafeRedirectCharacters = /[\\\u0000-\u001f\u007f]/;
+const publicExactPaths = ["/login", "/apply", "/apply/login"];
+const publicPathPrefixes = ["/login"];
+const applicantAuthenticatedPathPrefixes = ["/apply"];
 const publicApiPaths = ["/api/exam-adapters/results", "/api/exam-adapters/contract"];
 const publicAssetPrefixes = ["/_next", "/favicon"];
 
@@ -15,12 +19,16 @@ export function routeAuthBoundaryForPath(pathname: string): RouteAuthBoundary {
   if (
     publicAssetPrefixes.some((prefix) => pathOnly.startsWith(prefix)) ||
     publicApiPaths.includes(pathOnly) ||
+    publicExactPaths.includes(pathOnly) ||
     publicPathPrefixes.some((prefix) => isPathOrChild(pathOnly, prefix))
   ) {
     return "public";
   }
 
-  if (isPathOrChild(pathOnly, "/portal")) {
+  if (
+    isPathOrChild(pathOnly, "/portal") ||
+    applicantAuthenticatedPathPrefixes.some((prefix) => isPathOrChild(pathOnly, prefix))
+  ) {
     return "portal";
   }
 
@@ -32,11 +40,23 @@ export function isPublicMiddlewarePath(pathname: string): boolean {
 }
 
 export function safePortalNextPath(value?: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+  if (!value || unsafeRedirectCharacters.test(value)) {
     return "/portal";
   }
 
-  return routeAuthBoundaryForPath(value) === "staff" ? "/portal" : value;
+  let parsed: URL;
+  try {
+    parsed = new URL(value, localRedirectOrigin);
+  } catch {
+    return "/portal";
+  }
+
+  if (parsed.origin !== localRedirectOrigin) {
+    return "/portal";
+  }
+
+  const nextPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  return routeAuthBoundaryForPath(nextPath) === "staff" ? "/portal" : nextPath;
 }
 
 export function portalSignInPath(next?: string | null): string {

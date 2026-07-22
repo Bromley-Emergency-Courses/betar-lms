@@ -9,10 +9,12 @@ describe("route auth boundaries", () => {
     expect(routeAuthBoundaryForPath("/apply/login")).toBe("public");
   });
 
-  it("keeps applicant and student portal routes on the portal boundary", () => {
+  it("keeps applicant and student authenticated routes on the portal boundary", () => {
     expect(routeAuthBoundaryForPath("/portal")).toBe("portal");
     expect(routeAuthBoundaryForPath("/portal/modules/preferences")).toBe("portal");
     expect(routeAuthBoundaryForPath("/portal?tab=registration")).toBe("portal");
+    expect(routeAuthBoundaryForPath("/apply/draft")).toBe("portal");
+    expect(routeAuthBoundaryForPath("/apply/application")).toBe("portal");
   });
 
   it("keeps existing LMS routes staff-only by default", () => {
@@ -26,10 +28,16 @@ describe("route auth boundaries", () => {
     expect(safePortalNextPath("/portal")).toBe("/portal");
     expect(safePortalNextPath("/portal/registration")).toBe("/portal/registration");
     expect(safePortalNextPath("/portal?tab=registration")).toBe("/portal?tab=registration");
+    expect(safePortalNextPath("/portal/offers#latest")).toBe("/portal/offers#latest");
     expect(safePortalNextPath("/apply/login")).toBe("/apply/login");
+    expect(safePortalNextPath("/apply/draft")).toBe("/apply/draft");
     expect(safePortalNextPath("/students")).toBe("/portal");
     expect(safePortalNextPath("//example.com")).toBe("/portal");
     expect(safePortalNextPath("https://example.com")).toBe("/portal");
+    expect(safePortalNextPath("/\\example.com")).toBe("/portal");
+    expect(safePortalNextPath("/\\/example.com")).toBe("/portal");
+    expect(safePortalNextPath("\\\\example.com")).toBe("/portal");
+    expect(safePortalNextPath("/%5C%5Cexample.com")).toBe("/portal");
   });
 
   it("builds applicant sign-in redirects away from staff routes", () => {

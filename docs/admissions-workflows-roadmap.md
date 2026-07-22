@@ -34,7 +34,7 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [x] Backfill existing `students` into `persons`.
 - [x] Link future applicant/student Supabase Auth users to `persons`.
 - [x] Add applicant/student auth helpers separate from staff `requirePermission`.
-- [x] Add route policy for public `/apply`, authenticated `/portal`, and staff-only admin routes.
+- [x] Add initial route-boundary helper for public, applicant/student-authenticated, and staff-only routes.
 - [ ] Tighten storage model for identity documents, qualification documents, student photos, and generated letters.
 - [ ] Replace broad document access with signed URL generation after server-side authorization.
 - [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
