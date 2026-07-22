@@ -37,7 +37,7 @@ describe("exam adapter normalization", () => {
         componentType: "theory",
         cccuStudentId: "CCCU240184",
         moduleCode: "POCUS-CORE",
-        termName: "April-June 2026",
+        termName: "April 2026",
         score: 72,
         passMark: 50,
         takenOn: "2026-06-29"
@@ -66,7 +66,7 @@ describe("exam adapter normalization", () => {
         componentType: "theory",
         temporaryId: "BETAR-TMP-1003",
         moduleCode: "POCUS-CARD",
-        termName: "April-June 2026",
+        termName: "April 2026",
         score: 62,
         passMark: 50,
         takenOn: "2026-06-29"
@@ -111,7 +111,7 @@ describe("exam adapter normalization", () => {
         componentType: "theory",
         temporaryId: "BETAR-TMP-1003",
         moduleCode: "POCUS-CARD",
-        termName: "April-June 2026",
+        termName: "April 2026",
         score: 64,
         passMark: 50,
         takenOn: "2026-06-29"
@@ -137,7 +137,7 @@ describe("exam adapter normalization", () => {
         componentType: "practical",
         cccuStudentId: "NOPE",
         moduleCode: "POCUS-CARD",
-        termName: "April-June 2026",
+        termName: "April 2026",
         score: 42,
         passMark: 50,
         takenOn: "2026-06-30"

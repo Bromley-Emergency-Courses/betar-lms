@@ -77,8 +77,80 @@ export const appData: AppData = {
   ],
   terms: [
     {
+      id: "term-2023-apr",
+      name: "April 2023",
+      startsOn: "2023-04-01",
+      endsOn: "2023-06-30",
+      examWindowStartsOn: "2023-06-01",
+      examWindowEndsOn: "2023-06-30",
+      status: "closed"
+    },
+    {
+      id: "term-2023-sep",
+      name: "September 2023",
+      startsOn: "2023-09-01",
+      endsOn: "2023-11-30",
+      examWindowStartsOn: "2023-11-01",
+      examWindowEndsOn: "2023-11-30",
+      status: "closed"
+    },
+    {
+      id: "term-2024-jan",
+      name: "January 2024",
+      startsOn: "2024-01-01",
+      endsOn: "2024-03-31",
+      examWindowStartsOn: "2024-03-01",
+      examWindowEndsOn: "2024-03-31",
+      status: "closed"
+    },
+    {
+      id: "term-2024-apr",
+      name: "April 2024",
+      startsOn: "2024-04-01",
+      endsOn: "2024-06-30",
+      examWindowStartsOn: "2024-06-01",
+      examWindowEndsOn: "2024-06-30",
+      status: "closed"
+    },
+    {
+      id: "term-2024-sep",
+      name: "September 2024",
+      startsOn: "2024-09-01",
+      endsOn: "2024-11-30",
+      examWindowStartsOn: "2024-11-01",
+      examWindowEndsOn: "2024-11-30",
+      status: "closed"
+    },
+    {
+      id: "term-2025-jan",
+      name: "January 2025",
+      startsOn: "2025-01-01",
+      endsOn: "2025-03-31",
+      examWindowStartsOn: "2025-03-01",
+      examWindowEndsOn: "2025-03-31",
+      status: "closed"
+    },
+    {
+      id: "term-2025-apr",
+      name: "April 2025",
+      startsOn: "2025-04-01",
+      endsOn: "2025-06-30",
+      examWindowStartsOn: "2025-06-01",
+      examWindowEndsOn: "2025-06-30",
+      status: "closed"
+    },
+    {
+      id: "term-2025-sep",
+      name: "September 2025",
+      startsOn: "2025-09-01",
+      endsOn: "2025-11-30",
+      examWindowStartsOn: "2025-11-01",
+      examWindowEndsOn: "2025-11-30",
+      status: "closed"
+    },
+    {
       id: "term-2026-jan",
-      name: "January-March 2026",
+      name: "January 2026",
       startsOn: "2026-01-05",
       endsOn: "2026-03-20",
       examWindowStartsOn: "2026-03-23",
@@ -87,7 +159,7 @@ export const appData: AppData = {
     },
     {
       id: "term-2026-apr",
-      name: "April-June 2026",
+      name: "April 2026",
       startsOn: "2026-04-13",
       endsOn: "2026-06-26",
       examWindowStartsOn: "2026-06-29",
@@ -96,7 +168,7 @@ export const appData: AppData = {
     },
     {
       id: "term-2026-sep",
-      name: "September-November 2026",
+      name: "September 2026",
       startsOn: "2026-09-07",
       endsOn: "2026-11-20",
       status: "published"
@@ -136,6 +208,96 @@ export const appData: AppData = {
       title: "Vascular Access Ultrasound",
       credits: 10,
       mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19023",
+      code: "P19023",
+      title: "Fundamental Cardiac Point of Care Ultrasound",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19024",
+      code: "P19024",
+      title: "Abdominal Point of Care Ultrasound",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19041",
+      code: "P19041",
+      title: "Extended Cardiac Point of Care Ultrasound",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19042",
+      code: "P19042",
+      title: "Lung Point of Care Ultrasound",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19043",
+      code: "P19043",
+      title: "Nerve Blockade in Acute Settings Point of Care Ultrasound",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19044",
+      code: "P19044",
+      title: "Ultrasound Image Acquisition and Optimisation",
+      credits: 10,
+      mode: "online",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-p19045",
+      code: "P19045",
+      title: "Vascular Point of Care Ultrasound",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-7aphp030",
+      code: "7APHP030",
+      title: "Point of Care Ultrasound for Haemodynamic Assessment",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-7aphp031",
+      code: "7APHP031",
+      title: "Applications of Point of Care Ultrasound of the Abdomen for Physicians",
+      credits: 10,
+      mode: "practical",
+      mandatory: false,
+      active: true
+    },
+    {
+      id: "module-7aphp036",
+      code: "7APHP036",
+      title: "Departmental Ultrasound Leadership",
+      credits: 10,
+      mode: "online",
       mandatory: false,
       active: true
     }
@@ -180,6 +342,466 @@ export const appData: AppData = {
       attendanceDaysRequiredFirstPractical: 3,
       attendanceDaysRequiredSubsequentPractical: 2,
       presentationRequired: true
+    },
+    {
+      id: "offering-p19023-2023-apr",
+      moduleId: "module-p19023",
+      termId: "term-2023-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19024-2023-apr",
+      moduleId: "module-p19024",
+      termId: "term-2023-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19023-2023-sep",
+      moduleId: "module-p19023",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19024-2023-sep",
+      moduleId: "module-p19024",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19041-2023-sep",
+      moduleId: "module-p19041",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19042-2023-sep",
+      moduleId: "module-p19042",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19043-2023-sep",
+      moduleId: "module-p19043",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2023-sep",
+      moduleId: "module-p19044",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19045-2023-sep",
+      moduleId: "module-p19045",
+      termId: "term-2023-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19023-2024-jan",
+      moduleId: "module-p19023",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19024-2024-jan",
+      moduleId: "module-p19024",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19041-2024-jan",
+      moduleId: "module-p19041",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19042-2024-jan",
+      moduleId: "module-p19042",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19043-2024-jan",
+      moduleId: "module-p19043",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2024-jan",
+      moduleId: "module-p19044",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19045-2024-jan",
+      moduleId: "module-p19045",
+      termId: "term-2024-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19023-2024-apr",
+      moduleId: "module-p19023",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19024-2024-apr",
+      moduleId: "module-p19024",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19041-2024-apr",
+      moduleId: "module-p19041",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19042-2024-apr",
+      moduleId: "module-p19042",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19043-2024-apr",
+      moduleId: "module-p19043",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2024-apr",
+      moduleId: "module-p19044",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19045-2024-apr",
+      moduleId: "module-p19045",
+      termId: "term-2024-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19023-2024-sep",
+      moduleId: "module-p19023",
+      termId: "term-2024-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19024-2024-sep",
+      moduleId: "module-p19024",
+      termId: "term-2024-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19042-2024-sep",
+      moduleId: "module-p19042",
+      termId: "term-2024-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2024-sep",
+      moduleId: "module-p19044",
+      termId: "term-2024-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19045-2024-sep",
+      moduleId: "module-p19045",
+      termId: "term-2024-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19023-2025-jan",
+      moduleId: "module-p19023",
+      termId: "term-2025-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19041-2025-jan",
+      moduleId: "module-p19041",
+      termId: "term-2025-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19042-2025-jan",
+      moduleId: "module-p19042",
+      termId: "term-2025-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19043-2025-jan",
+      moduleId: "module-p19043",
+      termId: "term-2025-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2025-jan",
+      moduleId: "module-p19044",
+      termId: "term-2025-jan",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19023-2025-apr",
+      moduleId: "module-p19023",
+      termId: "term-2025-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19024-2025-apr",
+      moduleId: "module-p19024",
+      termId: "term-2025-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19041-2025-apr",
+      moduleId: "module-p19041",
+      termId: "term-2025-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19043-2025-apr",
+      moduleId: "module-p19043",
+      termId: "term-2025-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2025-apr",
+      moduleId: "module-p19044",
+      termId: "term-2025-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19045-2025-apr",
+      moduleId: "module-p19045",
+      termId: "term-2025-apr",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19041-2025-sep",
+      moduleId: "module-p19041",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 24,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19042-2025-sep",
+      moduleId: "module-p19042",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 23,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-p19044-2025-sep",
+      moduleId: "module-p19044",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
+    },
+    {
+      id: "offering-p19045-2025-sep",
+      moduleId: "module-p19045",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-7aphp030-2025-sep",
+      moduleId: "module-7aphp030",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-7aphp031-2025-sep",
+      moduleId: "module-7aphp031",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 3,
+      attendanceDaysRequiredSubsequentPractical: 2,
+      presentationRequired: true
+    },
+    {
+      id: "offering-7aphp036-2025-sep",
+      moduleId: "module-7aphp036",
+      termId: "term-2025-sep",
+      pricePence: 90000,
+      capacity: 18,
+      attendanceDaysRequiredFirstPractical: 0,
+      attendanceDaysRequiredSubsequentPractical: 0,
+      presentationRequired: false
     }
   ],
   enrolments: [

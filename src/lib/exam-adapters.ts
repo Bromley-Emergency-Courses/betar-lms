@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AppData, ExamComponentType, ExamResult } from "@/lib/types";
-import { normalizeExamResultScore } from "@/lib/rules";
+import type { AppData, EnrolmentStatus, ExamComponentType, ExamResult } from "@/lib/types";
+import { creditsForEnrolmentStatus, normalizeExamResultScore, recommendedOngoingEnrolmentStatus } from "@/lib/rules";
 
 export const inboundExamResultSchema = z.object({
   sourceSystem: z.enum(["theory_portal", "practical_osce"]),
@@ -203,7 +203,8 @@ export function parseExamAdapterPayload(payload: unknown): InboundExamResult[] {
 export async function persistNormalizedExamResults(
   supabase: SupabaseClient,
   normalized: Array<NormalizedExamResult | FailedExamResult>
-): Promise<void> {
+): Promise<ExamResult[]> {
+  const acceptedResults = normalized.filter((item): item is NormalizedExamResult => item.ok).map(({ result }) => result);
   const rows = normalized
     .filter((item): item is NormalizedExamResult => item.ok)
     .map(({ result }) => ({
@@ -225,7 +226,7 @@ export async function persistNormalizedExamResults(
     }));
 
   if (rows.length === 0) {
-    return;
+    return [];
   }
 
   const { error } = await supabase
@@ -235,6 +236,72 @@ export async function persistNormalizedExamResults(
   if (error) {
     throw new Error(error.message);
   }
+
+  return acceptedResults;
+}
+
+export interface EnrolmentStatusUpdate {
+  enrolmentId: string;
+  studentId: string;
+  status: EnrolmentStatus;
+  creditsAwarded: number;
+}
+
+export async function syncEnrolmentStatusesForExamResults(
+  supabase: SupabaseClient,
+  data: AppData,
+  incomingResults: ExamResult[]
+): Promise<EnrolmentStatusUpdate[]> {
+  if (incomingResults.length === 0) {
+    return [];
+  }
+
+  const incomingSourceAttemptIds = new Set(incomingResults.map((result) => `${result.sourceSystem}:${result.sourceAttemptId}`));
+  const nextData: AppData = {
+    ...data,
+    examResults: [
+      ...data.examResults.filter((result) => !incomingSourceAttemptIds.has(`${result.sourceSystem}:${result.sourceAttemptId}`)),
+      ...incomingResults
+    ]
+  };
+  const affectedKeys = new Set(incomingResults.map((result) => `${result.studentId}:${result.offeringId}`));
+  const updates: EnrolmentStatusUpdate[] = [];
+
+  for (const enrolment of nextData.enrolments) {
+    if (!affectedKeys.has(`${enrolment.studentId}:${enrolment.offeringId}`)) {
+      continue;
+    }
+
+    const status = recommendedOngoingEnrolmentStatus(enrolment, nextData);
+    if (!status || status === enrolment.status) {
+      continue;
+    }
+
+    const offering = nextData.offerings.find((candidate) => candidate.id === enrolment.offeringId);
+    if (!offering) {
+      continue;
+    }
+    const creditsAwarded = creditsForEnrolmentStatus(status, offering, nextData);
+    const { error } = await supabase
+      .from("enrolments")
+      .update({
+        status,
+        credits_awarded: creditsAwarded
+      })
+      .eq("id", enrolment.id);
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    updates.push({
+      enrolmentId: enrolment.id,
+      studentId: enrolment.studentId,
+      status,
+      creditsAwarded
+    });
+  }
+
+  return updates;
 }
 
 export function summarizeExamIngestion(normalized: Array<NormalizedExamResult | FailedExamResult>): ExamIngestionSummary {

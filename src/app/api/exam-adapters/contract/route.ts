@@ -13,7 +13,7 @@ export async function GET() {
         cccuStudentId: "CCCU240184",
         temporaryId: "BETAR-TMP-1001",
         moduleCode: "POCUS-CORE",
-        termName: "April-June 2026",
+        termName: "April 2026",
         score: 68,
         passMark: 50,
         takenOn: "2026-06-29",

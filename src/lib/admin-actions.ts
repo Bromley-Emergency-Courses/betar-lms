@@ -9,7 +9,8 @@ import {
   normalizeInboundExamResult,
   parseExamAdapterPayload,
   persistNormalizedExamResults,
-  resolveExamResultForStudent
+  resolveExamResultForStudent,
+  syncEnrolmentStatusesForExamResults
 } from "@/lib/exam-adapters";
 import { getLmsData } from "@/lib/lms-data";
 import { presentationRubricCriteria } from "@/lib/presentation-rubric";
@@ -1006,9 +1007,14 @@ export async function importExamResultsJson(formData: FormData) {
   const data = await getLmsData();
   const normalized = parsed.map((result) => normalizeInboundExamResult(result, data));
   const supabase = await createSupabaseServerClient();
-  await persistNormalizedExamResults(supabase, normalized);
+  const acceptedResults = await persistNormalizedExamResults(supabase, normalized);
+  const statusUpdates = await syncEnrolmentStatusesForExamResults(supabase, data, acceptedResults);
 
   revalidatePath("/exams");
+  if (statusUpdates.length > 0) {
+    revalidatePath("/");
+    revalidatePath("/students");
+  }
   parsed.forEach((result) => {
     const student = data.students.find((candidate) => {
       const cccuMatch = result.cccuStudentId && candidate.cccuStudentId === result.cccuStudentId;
@@ -1019,6 +1025,61 @@ export async function importExamResultsJson(formData: FormData) {
       revalidatePath(`/students/${student.id}`);
     }
   });
+  statusUpdates.forEach((update) => revalidatePath(`/students/${update.studentId}`));
+  redirect("/exams?mode=edit");
+}
+
+export async function createManualOverallExamResult(formData: FormData) {
+  await requirePermission("manage_course");
+  const studentId = idSchema.parse(value(formData, "student_id"));
+  const offeringId = idSchema.parse(value(formData, "offering_id"));
+  const score = z.coerce.number().min(0).max(100).parse(value(formData, "score"));
+  const passMark = z.coerce.number().min(0).max(100).parse(value(formData, "pass_mark") || "50");
+  const takenOn = z.string().min(1).parse(value(formData, "taken_on"));
+  const attemptNumber = z.coerce.number().int().positive().parse(value(formData, "attempt_number") || "1");
+  const data = await getLmsData();
+  const student = data.students.find((candidate) => candidate.id === studentId);
+  const offering = data.offerings.find((candidate) => candidate.id === offeringId);
+  const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
+  if (!student || !offering || !courseModule) {
+    throw new Error("Student, offering, or module could not be found.");
+  }
+  if (courseModule.mode !== "online") {
+    throw new Error("Manual overall scores can only be entered for online/coursework modules.");
+  }
+  if (!data.enrolments.some((enrolment) => enrolment.studentId === studentId && enrolment.offeringId === offeringId)) {
+    throw new Error("This student is not enrolled on the selected module offering.");
+  }
+
+  const passed = score >= passMark;
+  const result = {
+    id: `exam-manual-overall-${studentId}-${offeringId}-${attemptNumber}`,
+    studentId,
+    offeringId,
+    componentType: "theory" as const,
+    sourceSystem: "manual" as const,
+    sourceAttemptId: `manual-overall:${studentId}:${offeringId}:attempt-${attemptNumber}`,
+    score,
+    passMark,
+    passed,
+    resitRequired: !passed,
+    isResit: attemptNumber > 1,
+    attemptNumber,
+    resitOfResultId: undefined,
+    priorAttemptMissing: attemptNumber > 1,
+    takenOn,
+    importedAt: new Date().toISOString()
+  };
+
+  const supabase = await createSupabaseServerClient();
+  await persistNormalizedExamResults(supabase, [{ ok: true, result }]);
+  const statusUpdates = await syncEnrolmentStatusesForExamResults(supabase, data, [result]);
+
+  revalidatePath("/exams");
+  revalidatePath("/");
+  revalidatePath("/students");
+  revalidatePath(`/students/${studentId}`);
+  statusUpdates.forEach((update) => revalidatePath(`/students/${update.studentId}`));
   redirect("/exams?mode=edit");
 }
 
@@ -1334,6 +1395,28 @@ async function recomputeTheoryResultsForTerm(termId: string): Promise<Map<string
     if (error) {
       throw new Error(error.message);
     }
+    await syncEnrolmentStatusesForExamResults(
+      supabase,
+      data,
+      rows.map((row) => ({
+        id: `exam-${row.source_attempt_id}`,
+        studentId: row.student_id,
+        offeringId: row.offering_id,
+        componentType: row.component_type,
+        sourceSystem: row.source_system,
+        sourceAttemptId: row.source_attempt_id,
+        score: row.score,
+        passMark: row.pass_mark,
+        passed: row.passed,
+        resitRequired: row.resit_required,
+        isResit: row.is_resit,
+        attemptNumber: row.attempt_number,
+        resitOfResultId: row.resit_of_result_id ?? undefined,
+        priorAttemptMissing: row.prior_attempt_missing,
+        takenOn: row.taken_on,
+        importedAt: row.imported_at
+      }))
+    );
   }
 
   for (const [mappingId, count] of missingPhysicsByMapping.entries()) {
