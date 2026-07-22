@@ -316,6 +316,58 @@ export interface ManagedFile {
   createdAt: string;
 }
 
+export type AuditActorType = "staff" | "applicant" | "student" | "service";
+
+export interface AuditEvent {
+  id: string;
+  actorType: AuditActorType;
+  actorUserId?: string;
+  actorPersonId?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  reason?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export type CorrespondenceChannel = "email" | "letter";
+export type CorrespondenceDeliveryStatus = "queued" | "sent" | "delivered" | "failed" | "bounced" | "suppressed";
+export type CorrespondenceBounceStatus = "none" | "soft_bounce" | "hard_bounce" | "complaint" | "blocked" | "unknown";
+
+export interface CorrespondenceTemplate {
+  id: string;
+  templateKey: string;
+  version: number;
+  channel: CorrespondenceChannel;
+  description?: string;
+  subjectTemplate: string;
+  bodyTemplate?: string;
+  createdByUserId?: string;
+  createdAt: string;
+}
+
+export interface CorrespondenceLog {
+  id: string;
+  personId: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  templateId?: string;
+  templateKey: string;
+  templateVersion: number;
+  channel: CorrespondenceChannel;
+  renderedSubject: string;
+  providerMessageId?: string;
+  deliveryStatus: CorrespondenceDeliveryStatus;
+  bounceStatus: CorrespondenceBounceStatus;
+  sentAt?: string;
+  statusUpdatedAt: string;
+  generatedFileId?: string;
+  metadata: Record<string, unknown>;
+  createdByUserId?: string;
+  createdAt: string;
+}
+
 export interface AppData {
   admissionLeads: AdmissionLead[];
   staffUsers: StaffUser[];
