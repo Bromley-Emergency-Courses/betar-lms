@@ -9,6 +9,7 @@ import {
   hasAttendanceGap,
   isPresentationRequiredForEnrolment,
   normalizeExamResultScore,
+  recommendedOngoingEnrolmentStatus,
   requiredAttendanceDays,
   requiredAttendanceDaysForTerm,
   studentAcademicRisk
@@ -210,7 +211,7 @@ describe("LMS domain rules", () => {
     }
   });
 
-  it("does not add a main dashboard resit blocker for a failed exam result", () => {
+  it("adds a completion blocker for a latest failed exam result", () => {
     const data = structuredClone(getAppData());
     const enrolment = data.enrolments.find((candidate) => candidate.id === "enrolment-1");
     const examResult = data.examResults.find((candidate) => candidate.id === "exam-1");
@@ -220,7 +221,53 @@ describe("LMS domain rules", () => {
     examResult!.passed = false;
     examResult!.resitRequired = true;
 
-    expect(completionBlockersForEnrolment(enrolment!, data)).toEqual([]);
+    expect(completionBlockersForEnrolment(enrolment!, data)).toEqual(["Theory failed"]);
+  });
+
+  it("requires practical modules to have latest theory and practical passes", () => {
+    const data = structuredClone(getAppData());
+    const enrolment = data.enrolments.find((candidate) => candidate.id === "enrolment-2");
+    expect(enrolment).toBeDefined();
+    enrolment!.attendanceDaysRequiredOverride = 0;
+    enrolment!.presentationRequiredOverride = false;
+    data.examResults.push({
+      id: "exam-card-theory-pass",
+      studentId: "student-1",
+      offeringId: "offering-cardiac-apr",
+      componentType: "theory",
+      sourceSystem: "theory_portal",
+      sourceAttemptId: "theory-card-pass",
+      score: 70,
+      passMark: 50,
+      passed: true,
+      resitRequired: false,
+      isResit: false,
+      attemptNumber: 1,
+      priorAttemptMissing: false,
+      takenOn: "2026-06-29",
+      importedAt: "2026-07-01T09:00:00.000Z"
+    });
+
+    expect(completionBlockersForEnrolment(enrolment!, data)).toEqual(["Attendance", "Practical result"]);
+    expect(recommendedOngoingEnrolmentStatus(enrolment!, data)).toBeUndefined();
+  });
+
+  it("recommends failed when any latest component has failed", () => {
+    const data = structuredClone(getAppData());
+    const enrolment = data.enrolments.find((candidate) => candidate.id === "enrolment-3");
+    expect(enrolment).toBeDefined();
+
+    expect(recommendedOngoingEnrolmentStatus(enrolment!, data)).toBe("failed");
+  });
+
+  it("recommends completed for a theory-only enrolment with all requirements complete", () => {
+    const data = structuredClone(getAppData());
+    const enrolment = data.enrolments.find((candidate) => candidate.id === "enrolment-1");
+    expect(enrolment).toBeDefined();
+    enrolment!.status = "in_progress";
+    enrolment!.creditsAwarded = 0;
+
+    expect(recommendedOngoingEnrolmentStatus(enrolment!, data)).toBe("completed");
   });
 
   it("carries attendance and presentation evidence from prior inactive same-module attempts", () => {

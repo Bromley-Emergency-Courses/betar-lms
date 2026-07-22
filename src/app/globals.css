@@ -332,20 +332,73 @@ textarea {
 
 .profile-enrolment-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, auto) auto;
+  gap: 16px;
   align-items: center;
-  min-height: 54px;
-  padding: 10px 12px;
+  min-height: 56px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface-soft);
 }
 
-.profile-enrolment-row > div {
+.profile-enrolment-main,
+.profile-enrolment-title {
   display: grid;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
+}
+
+.profile-enrolment-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.profile-result-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.profile-result-chip.pass {
+  border-color: #cfe8d2;
+  background: #e8f5ea;
+  color: var(--green);
+}
+
+.profile-result-chip.fail {
+  border-color: #f3c5c2;
+  background: #fee8e7;
+  color: var(--red);
+}
+
+.profile-result-chip.pending {
+  background: #eef1ee;
+  color: var(--muted);
+}
+
+.profile-result-chip .status {
+  min-height: 20px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.profile-enrolment-state {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .profile-enrolment-row strong,
@@ -1755,6 +1808,14 @@ tr:last-child td {
   .profile-attendance-edit-row,
   .profile-finance-fields {
     grid-template-columns: 1fr;
+  }
+
+  .profile-enrolment-state {
+    justify-content: flex-start;
+  }
+
+  .profile-enrolment-results {
+    justify-content: flex-start;
   }
 
   .profile-finance-notes {

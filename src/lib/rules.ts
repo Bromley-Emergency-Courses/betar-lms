@@ -30,6 +30,7 @@ const PRIOR_EVIDENCE_CARRYOVER_ENROLMENT_STATUSES: EnrolmentStatus[] = [
   "did_not_complete",
   "failed"
 ];
+const AUTO_STATUS_ENROLMENT_STATUSES: EnrolmentStatus[] = ["planned", "in_progress", "resit"];
 
 export function formatCurrency(pence: number): string {
   return new Intl.NumberFormat("en-GB", {
@@ -365,6 +366,58 @@ export function isPresentationRequiredForEnrolment(
   return offering.presentationRequired;
 }
 
+function latestExamResultForComponent(results: ExamResult[]): ExamResult | undefined {
+  return [...results].sort((a, b) => {
+    return (
+      (b.attemptNumber ?? 1) - (a.attemptNumber ?? 1) ||
+      b.takenOn.localeCompare(a.takenOn) ||
+      b.importedAt.localeCompare(a.importedAt)
+    );
+  })[0];
+}
+
+export function latestExamResultsByComponent(enrolment: Enrolment, data: AppData): Map<ExamResult["componentType"], ExamResult> {
+  const resultsByComponent = new Map<ExamResult["componentType"], ExamResult[]>();
+  data.examResults
+    .filter((result) => result.studentId === enrolment.studentId && result.offeringId === enrolment.offeringId)
+    .forEach((result) => {
+      resultsByComponent.set(result.componentType, [...(resultsByComponent.get(result.componentType) ?? []), result]);
+    });
+
+  const latest = new Map<ExamResult["componentType"], ExamResult>();
+  resultsByComponent.forEach((results, componentType) => {
+    const result = latestExamResultForComponent(results);
+    if (result) {
+      latest.set(componentType, result);
+    }
+  });
+  return latest;
+}
+
+function requiredExamComponents(courseModule: CourseModule): ExamResult["componentType"][] {
+  return courseModule.mode === "practical" ? ["theory", "practical"] : ["theory"];
+}
+
+function examComponentLabel(componentType: ExamResult["componentType"]): string {
+  return componentType === "theory" ? "Theory" : "Practical";
+}
+
+function nonExamCompletionBlockers(enrolment: Enrolment, offering: ModuleOffering, courseModule: CourseModule, data: AppData): string[] {
+  const blockers: string[] = [];
+  const presentation = data.presentationScores.find(
+    (score) => score.studentId === enrolment.studentId && score.offeringId === offering.id
+  );
+
+  if (courseModule.mode === "practical" && hasAttendanceGap(enrolment.studentId, offering, data)) {
+    blockers.push("Attendance");
+  }
+  if (isPresentationRequiredForEnrolment(enrolment, offering, data) && !presentation) {
+    blockers.push("Presentation");
+  }
+
+  return blockers;
+}
+
 export function completionBlockersForEnrolment(enrolment: Enrolment, data: AppData): string[] {
   if (
     !isEnrolmentComplianceRelevant(enrolment) ||
@@ -379,25 +432,57 @@ export function completionBlockersForEnrolment(enrolment: Enrolment, data: AppDa
     return ["Missing offering"];
   }
 
-  const blockers: string[] = [];
-  const theoryResult = data.examResults.find(
-    (result) => result.studentId === enrolment.studentId && result.offeringId === offering.id && result.componentType === "theory"
-  );
-  const presentation = data.presentationScores.find(
-    (score) => score.studentId === enrolment.studentId && score.offeringId === offering.id
-  );
+  const blockers = nonExamCompletionBlockers(enrolment, offering, courseModule, data);
+  const latestResults = latestExamResultsByComponent(enrolment, data);
 
-  if (courseModule.mode === "practical" && hasAttendanceGap(enrolment.studentId, offering, data)) {
-    blockers.push("Attendance");
-  }
-  if (!theoryResult) {
-    blockers.push("Theory result");
-  }
-  if (isPresentationRequiredForEnrolment(enrolment, offering, data) && !presentation) {
-    blockers.push("Presentation");
-  }
+  requiredExamComponents(courseModule).forEach((componentType) => {
+    const result = latestResults.get(componentType);
+    if (!result) {
+      blockers.push(`${examComponentLabel(componentType)} result`);
+      return;
+    }
+    if (!result.passed) {
+      blockers.push(`${examComponentLabel(componentType)} failed`);
+    }
+  });
 
   return blockers;
+}
+
+export function recommendedOngoingEnrolmentStatus(enrolment: Enrolment, data: AppData): EnrolmentStatus | undefined {
+  if (!AUTO_STATUS_ENROLMENT_STATUSES.includes(enrolment.status)) {
+    return undefined;
+  }
+  if (!isStudentComplianceRelevant(data.students.find((student) => student.id === enrolment.studentId))) {
+    return undefined;
+  }
+
+  const offering = data.offerings.find((candidate) => candidate.id === enrolment.offeringId);
+  const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
+  if (!offering || !courseModule) {
+    return undefined;
+  }
+
+  const latestResults = latestExamResultsByComponent(enrolment, data);
+  const latestRecordedResults = [...latestResults.values()];
+  if (latestRecordedResults.some((result) => !result.passed)) {
+    return "failed";
+  }
+
+  const requiredComponents = requiredExamComponents(courseModule);
+  const hasAllRequiredPasses = requiredComponents.every((componentType) => latestResults.get(componentType)?.passed === true);
+  if (hasAllRequiredPasses && nonExamCompletionBlockers(enrolment, offering, courseModule, data).length === 0) {
+    return "completed";
+  }
+
+  return undefined;
+}
+
+export function creditsForEnrolmentStatus(status: EnrolmentStatus, offering: ModuleOffering, data: AppData): number {
+  if (status !== "completed") {
+    return 0;
+  }
+  return data.modules.find((candidate) => candidate.id === offering.moduleId)?.credits ?? 10;
 }
 
 export function financeDiscrepancy(record: FinanceRecord): number {

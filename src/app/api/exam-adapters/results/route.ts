@@ -4,7 +4,8 @@ import {
   normalizeInboundExamResult,
   parseExamAdapterPayload,
   persistNormalizedExamResults,
-  summarizeExamIngestion
+  summarizeExamIngestion,
+  syncEnrolmentStatusesForExamResults
 } from "@/lib/exam-adapters";
 import { createSupabaseServerClient } from "@/lib/supabase";
 
@@ -27,7 +28,11 @@ export async function POST(request: NextRequest) {
   const data = await getLmsData();
   const normalized = parsed.map((result) => normalizeInboundExamResult(result, data));
   const supabase = await createSupabaseServerClient();
-  await persistNormalizedExamResults(supabase, normalized);
+  const acceptedResults = await persistNormalizedExamResults(supabase, normalized);
+  const enrolmentStatusUpdates = await syncEnrolmentStatusesForExamResults(supabase, data, acceptedResults);
 
-  return NextResponse.json(summarizeExamIngestion(normalized));
+  return NextResponse.json({
+    ...summarizeExamIngestion(normalized),
+    enrolmentStatusUpdates
+  });
 }

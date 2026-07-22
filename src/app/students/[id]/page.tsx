@@ -28,11 +28,12 @@ import {
   externalStudentIdentifier,
   financeDiscrepancy,
   formatCurrency,
+  latestExamResultsByComponent,
   requiredAttendanceDays,
   studentAcademicRisk,
   studentDisplayName
 } from "@/lib/rules";
-import type { AppData, PresentationScore } from "@/lib/types";
+import type { AppData, CourseModule, Enrolment, ExamResult, PresentationScore } from "@/lib/types";
 
 function formativeAttemptSummary(data: AppData, definitionId: string, itemIds: string[]): string {
   const definition = data.assessmentDefinitions.find((candidate) => candidate.id === definitionId);
@@ -79,6 +80,57 @@ function pounds(pence?: number): string {
   return typeof pence === "number" ? String(pence / 100) : "";
 }
 
+function formatScore(score: number): string {
+  return Number.isInteger(score) ? String(score) : score.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function examComponentLabel(courseModule: CourseModule, componentType: ExamResult["componentType"]): string {
+  if (courseModule.mode === "online" && componentType === "theory") {
+    return "Overall";
+  }
+  return componentType === "theory" ? "Theory" : "Practical";
+}
+
+function EnrolmentResultSummary({
+  enrolment,
+  courseModule,
+  data
+}: {
+  enrolment: Enrolment;
+  courseModule: CourseModule;
+  data: AppData;
+}) {
+  const latestResults = latestExamResultsByComponent(enrolment, data);
+  const expectedComponents: ExamResult["componentType"][] = courseModule.mode === "practical" ? ["theory", "practical"] : ["theory"];
+
+  return (
+    <div className="profile-enrolment-results" aria-label="Exam results">
+      {expectedComponents.map((componentType) => {
+        const result = latestResults.get(componentType);
+        const label = examComponentLabel(courseModule, componentType);
+        if (!result) {
+          return (
+            <span className="profile-result-chip pending" key={componentType}>
+              {label} pending
+            </span>
+          );
+        }
+
+        const showResit = result.isResit || result.attemptNumber > 1;
+        return (
+          <span className={`profile-result-chip ${result.passed ? "pass" : "fail"}`} key={componentType}>
+            <span>
+              {label} {formatScore(result.score)}%
+            </span>
+            {showResit ? <StatusPill value="resit" label={`resit ${result.attemptNumber}`} /> : null}
+            {!showResit && result.resitRequired ? <StatusPill value="resit" label="resit required" /> : null}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default async function StudentProfilePage({
   params,
   searchParams
@@ -100,7 +152,6 @@ export default async function StudentProfilePage({
   const encounters = data.encounters.filter((encounter) => encounter.studentId === student.id);
   const attempts = data.assessmentAttempts.filter((attempt) => attempt.studentId === student.id);
   const presentations = data.presentationScores.filter((score) => score.studentId === student.id);
-  const examResults = data.examResults.filter((result) => result.studentId === student.id);
   const enrolledTermIds = new Set<string>();
   const expectedFinanceByTerm = new Map<string, number>();
   enrolments.forEach((enrolment) => {
@@ -427,42 +478,50 @@ export default async function StudentProfilePage({
             <p>Term module offering and enrolment status</p>
           </div>
         </div>
-          {enrolments.length === 0 ? (
-            <EmptyState title="No enrolments recorded" detail="This student does not yet have module enrolments in Supabase." />
-          ) : !editMode ? (
+        {enrolments.length === 0 ? (
+          <EmptyState title="No enrolments recorded" detail="This student does not yet have module enrolments in Supabase." />
+        ) : !editMode ? (
           <div className="panel profile-enrolment-list">
-              {enrolments.map((enrolment) => {
-                const offering = data.offerings.find((candidate) => candidate.id === enrolment.offeringId);
-                const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
-                const term = offering ? data.terms.find((candidate) => candidate.id === offering.termId) : undefined;
-                return offering && courseModule && term ? (
+            {enrolments.map((enrolment) => {
+              const offering = data.offerings.find((candidate) => candidate.id === enrolment.offeringId);
+              const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
+              const term = offering ? data.terms.find((candidate) => candidate.id === offering.termId) : undefined;
+              return offering && courseModule && term ? (
                   <div className="profile-enrolment-row" key={enrolment.id}>
-                    <div>
-                      <strong>{term.name} · {courseModule.code}</strong>
-                      <span className="muted small">{courseModule.title}</span>
+                    <div className="profile-enrolment-main">
+                      <div className="profile-enrolment-title">
+                        <strong>{term.name} · {courseModule.code}</strong>
+                        <span className="muted small">{courseModule.title}</span>
+                      </div>
                     </div>
-                    <StatusPill value={enrolment.status} />
+                    <EnrolmentResultSummary enrolment={enrolment} courseModule={courseModule} data={data} />
+                    <div className="profile-enrolment-state">
+                      <StatusPill value={enrolment.status} />
+                    </div>
                   </div>
-                ) : null;
-              })}
+              ) : null;
+            })}
           </div>
-          ) : (
+        ) : (
           <div className="record-grid">
-              {enrolments.map((enrolment) => {
-                const offering = data.offerings.find((candidate) => candidate.id === enrolment.offeringId);
-                const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
-                const term = offering ? data.terms.find((candidate) => candidate.id === offering.termId) : undefined;
-                return offering && courseModule && term ? (
-	                  <div className="panel grid" key={enrolment.id}>
-	                    <div>
-	                      <strong>{term.name} · {courseModule.code}</strong>
-	                      <p className="muted small">
+            {enrolments.map((enrolment) => {
+              const offering = data.offerings.find((candidate) => candidate.id === enrolment.offeringId);
+              const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
+              const term = offering ? data.terms.find((candidate) => candidate.id === offering.termId) : undefined;
+              return offering && courseModule && term ? (
+                <div className="panel grid" key={enrolment.id}>
+                  <div className="profile-enrolment-main">
+                    <div className="profile-enrolment-title">
+                      <strong>{term.name} · {courseModule.code}</strong>
+                      <p className="muted small">
                         {courseModule.title}
                         {courseModule.mode === "practical"
                           ? ` · Practical attendance ${attendedDays(student.id, offering.id, data)} / ${requiredAttendanceDays(student.id, offering, data)}`
                           : " · Online module"}
                       </p>
-	                    </div>
+                    </div>
+                    <EnrolmentResultSummary enrolment={enrolment} courseModule={courseModule} data={data} />
+                  </div>
                     {editMode ? (
                       <>
                         <form className="grid" action={updateEnrolment}>
@@ -700,8 +759,8 @@ export default async function StudentProfilePage({
         <div className="section profile-fixed-card">
           <div className="section-header">
             <div>
-              <h2>{editMode ? "Finance" : "Finance And Exams"}</h2>
-              <p>{editMode ? "CCCU invoice and payment reconciliation" : "CCCU reconciliation and imported result components"}</p>
+              <h2>Finance</h2>
+              <p>CCCU invoice and payment reconciliation</p>
             </div>
           </div>
           {editMode ? (
@@ -803,8 +862,8 @@ export default async function StudentProfilePage({
                 </button>
               </form>
             )
-          ) : financeRecords.length === 0 && examResults.length === 0 ? (
-            <EmptyState title="No finance or exam records yet" detail="CCCU finance reconciliation and imported exam results will appear here." />
+          ) : financeRecords.length === 0 ? (
+            <EmptyState title="No finance records yet" detail="CCCU finance reconciliation will appear here." />
           ) : (
             <div className="panel timeline profile-scroll-panel profile-compact-timeline">
               {financeRecords.map((record) => {
@@ -819,29 +878,6 @@ export default async function StudentProfilePage({
                         {formatCurrency(financeDiscrepancy(record))}
                       </p>
                       <span className="muted small">Open finance reconciliation</span>
-                    </div>
-                  </Link>
-                );
-              })}
-              {examResults.map((result) => {
-                const offering = data.offerings.find((candidate) => candidate.id === result.offeringId);
-                const courseModule = offering ? data.modules.find((candidate) => candidate.id === offering.moduleId) : undefined;
-                const term = offering ? data.terms.find((candidate) => candidate.id === offering.termId) : undefined;
-                const priorResult = result.resitOfResultId ? data.examResults.find((candidate) => candidate.id === result.resitOfResultId) : undefined;
-                return (
-                  <Link className="timeline-item linked-row" href={`/exams?student=${student.id}`} key={result.id}>
-                    <span className="muted small">{result.takenOn}</span>
-                    <div>
-                      <StatusPill value={result.passed ? "passed" : "failed"} />
-                      {result.isResit ? <StatusPill value="resit" label={`resit attempt ${result.attemptNumber}`} /> : <StatusPill value="not_due" label={`attempt ${result.attemptNumber}`} />}
-                      <p>
-                        {courseModule?.code ? `${courseModule.code} · ` : ""}
-                        {term?.name ? `${term.name} · ` : ""}
-                        {result.componentType} score {result.score}% from {result.sourceSystem}
-                      </p>
-                      {priorResult ? <span className="muted small">Prior fail {priorResult.score}% on {priorResult.takenOn}</span> : null}
-                      {result.priorAttemptMissing ? <span className="muted small">Previous failed attempt missing</span> : null}
-                      <span className="muted small">Open exam results</span>
                     </div>
                   </Link>
                 );

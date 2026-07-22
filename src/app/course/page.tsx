@@ -90,7 +90,7 @@ export default async function CoursePage({
                 </div>
               </div>
               <Field label="Name" htmlFor="term-name">
-                <input id="term-name" name="name" className="input" placeholder="September-November 2026" required />
+                <input id="term-name" name="name" className="input" placeholder="September 2026" required />
               </Field>
               <FormGrid>
                 <Field label="Starts on" htmlFor="term-starts">

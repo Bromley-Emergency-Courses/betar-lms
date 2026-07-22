@@ -6,6 +6,7 @@ import { ExamResultsDirectoryTable } from "@/components/exam-results-directory-t
 import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
 import {
+  createManualOverallExamResult,
   importExamResultsJson,
   importPracticalExamResultsCsv,
   resolveExamPortalSubmission,
@@ -96,6 +97,21 @@ export function ExamTools({
     rejected: number;
   };
 }) {
+  const students = sortedStudents(data);
+  const onlineOfferings = data.offerings
+    .map((offering) => ({
+      offering,
+      term: data.terms.find((candidate) => candidate.id === offering.termId),
+      courseModule: data.modules.find((candidate) => candidate.id === offering.moduleId)
+    }))
+    .filter((row) => row.term && row.courseModule?.mode === "online")
+    .sort((a, b) => {
+      return (
+        String(a.term?.startsOn).localeCompare(String(b.term?.startsOn)) ||
+        String(a.courseModule?.code).localeCompare(String(b.courseModule?.code))
+      );
+    });
+
   return (
     <>
       <section className="grid grid-2">
@@ -165,6 +181,54 @@ export function ExamTools({
           </Field>
           <button className="button primary">Import practical results</button>
         </form>
+
+        <details className="panel" open>
+          <summary className="term-summary">
+            <span>
+              <strong>Manual Overall Score</strong>
+              <span className="muted small">Coursework and viva modules</span>
+            </span>
+          </summary>
+          <form className="grid session-form" action={createManualOverallExamResult}>
+            <FormGrid>
+              <Field label="Student" htmlFor="manual-overall-student">
+                <select id="manual-overall-student" name="student_id" className="select" required defaultValue="">
+                  <option value="">Select student</option>
+                  {students.map((student) => (
+                    <option key={student.id} value={student.id}>
+                      {student.lastName}, {student.firstName} · {student.cccuStudentId ?? student.temporaryId}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Module offering" htmlFor="manual-overall-offering">
+                <select id="manual-overall-offering" name="offering_id" className="select" required defaultValue="">
+                  <option value="">Select offering</option>
+                  {onlineOfferings.map(({ offering, term, courseModule }) => (
+                    <option key={offering.id} value={offering.id}>
+                      {term?.name} · {courseModule?.code} · {courseModule?.title}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </FormGrid>
+            <FormGrid>
+              <Field label="Overall score" htmlFor="manual-overall-score">
+                <input id="manual-overall-score" name="score" className="input" type="number" min="0" max="100" step="0.01" required />
+              </Field>
+              <Field label="Pass mark" htmlFor="manual-overall-pass-mark">
+                <input id="manual-overall-pass-mark" name="pass_mark" className="input" type="number" min="0" max="100" step="0.01" defaultValue="50" required />
+              </Field>
+              <Field label="Taken on" htmlFor="manual-overall-taken-on">
+                <input id="manual-overall-taken-on" name="taken_on" className="input" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
+              </Field>
+              <Field label="Attempt" htmlFor="manual-overall-attempt">
+                <input id="manual-overall-attempt" name="attempt_number" className="input" type="number" min="1" step="1" defaultValue="1" required />
+              </Field>
+            </FormGrid>
+            <button className="button primary">Save overall score</button>
+          </form>
+        </details>
       </section>
 
       <section className="section">
@@ -266,7 +330,6 @@ export function ExamTools({
               }
               const term = data.terms.find((candidate) => candidate.id === mapping.termId);
               const courseModule = mapping.moduleId ? data.modules.find((candidate) => candidate.id === mapping.moduleId) : undefined;
-              const students = sortedStudents(data);
               return (
                 <details className="panel" key={mapping.id} open>
                   <summary className="term-summary">
