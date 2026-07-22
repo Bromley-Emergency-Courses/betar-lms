@@ -12,6 +12,10 @@ Production-oriented MVP scaffold for BETAR's PGCert POCUS learning management sy
 
 See [docs/staff-user-guide.md](docs/staff-user-guide.md) for a non-technical how-to guide covering daily LMS workflows.
 
+## Admissions Workflow Development
+
+For admissions, application, registration, and student portal work, read and update [docs/admissions-workflows-roadmap.md](docs/admissions-workflows-roadmap.md). Keep the roadmap current before opening or merging branches so future workspaces know what has changed and what remains.
+
 ## Run Locally
 
 ```bash
