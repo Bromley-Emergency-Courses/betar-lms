@@ -8,6 +8,7 @@ import { StatusPill } from "@/components/status-pill";
 import {
   createManualOverallExamResult,
   importExamResultsJson,
+  importPracticalExamResultsCsv,
   resolveExamPortalSubmission,
   syncExamPortalMapping,
   updateExamPortalMapping
@@ -85,11 +86,16 @@ function sortedStudents(data: AppData): Student[] {
 export function ExamTools({
   data,
   portalExams,
-  portalSearch
+  portalSearch,
+  practicalImportSummary
 }: {
   data: AppData;
   portalExams: ExamPortalPickerExam[];
   portalSearch: string;
+  practicalImportSummary?: {
+    accepted: number;
+    rejected: number;
+  };
 }) {
   const students = sortedStudents(data);
   const onlineOfferings = data.offerings
@@ -131,53 +137,99 @@ export function ExamTools({
         </div>
       </section>
 
-      <details className="panel" open>
-        <summary className="term-summary">
-          <span>
-            <strong>Manual Overall Score</strong>
-            <span className="muted small">Coursework and viva modules</span>
-          </span>
-        </summary>
-        <form className="grid session-form" action={createManualOverallExamResult}>
+      <section className="grid grid-2">
+        <form className="panel grid" action={importPracticalExamResultsCsv}>
+          <div className="section-header">
+            <div>
+              <h2>Practical Results CSV</h2>
+              <p>Import desktop-app practical exports into the exam results register.</p>
+            </div>
+            {practicalImportSummary ? (
+              <StatusPill
+                value={practicalImportSummary.rejected > 0 ? "watch" : "paid"}
+                label={`${practicalImportSummary.accepted} imported · ${practicalImportSummary.rejected} rejected`}
+              />
+            ) : null}
+          </div>
           <FormGrid>
-            <Field label="Student" htmlFor="manual-overall-student">
-              <select id="manual-overall-student" name="student_id" className="select" required defaultValue="">
-                <option value="">Select student</option>
-                {students.map((student) => (
-                  <option key={student.id} value={student.id}>
-                    {student.lastName}, {student.firstName} · {student.cccuStudentId ?? student.temporaryId}
+            <Field label="Exam sitting term" htmlFor="practical-term-id">
+              <select id="practical-term-id" name="term_id" className="select" required>
+                {data.terms.map((term) => (
+                  <option key={term.id} value={term.id}>
+                    {term.name}
                   </option>
                 ))}
               </select>
             </Field>
-            <Field label="Module offering" htmlFor="manual-overall-offering">
-              <select id="manual-overall-offering" name="offering_id" className="select" required defaultValue="">
-                <option value="">Select offering</option>
-                {onlineOfferings.map(({ offering, term, courseModule }) => (
-                  <option key={offering.id} value={offering.id}>
-                    {term?.name} · {courseModule?.code} · {courseModule?.title}
-                  </option>
-                ))}
-              </select>
+            <Field label="Taken on" htmlFor="practical-taken-on">
+              <input id="practical-taken-on" name="taken_on" className="input" type="date" required />
             </Field>
           </FormGrid>
-          <FormGrid>
-            <Field label="Overall score" htmlFor="manual-overall-score">
-              <input id="manual-overall-score" name="score" className="input" type="number" min="0" max="100" step="0.01" required />
-            </Field>
-            <Field label="Pass mark" htmlFor="manual-overall-pass-mark">
-              <input id="manual-overall-pass-mark" name="pass_mark" className="input" type="number" min="0" max="100" step="0.01" defaultValue="50" required />
-            </Field>
-            <Field label="Taken on" htmlFor="manual-overall-taken-on">
-              <input id="manual-overall-taken-on" name="taken_on" className="input" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
-            </Field>
-            <Field label="Attempt" htmlFor="manual-overall-attempt">
-              <input id="manual-overall-attempt" name="attempt_number" className="input" type="number" min="1" step="1" defaultValue="1" required />
-            </Field>
-          </FormGrid>
-          <button className="button primary">Save overall score</button>
+          <Field label="Pass mark" htmlFor="practical-pass-mark">
+            <input id="practical-pass-mark" name="pass_mark" className="input" type="number" min="0" max="100" step="0.01" defaultValue="50" required />
+          </Field>
+          <Field label="Module code mappings" htmlFor="practical-module-code-map">
+            <textarea
+              id="practical-module-code-map"
+              name="module_code_map"
+              className="textarea code-textarea"
+              placeholder={"IN=POCUS-CORE\nVA=POCUS-VASC\nLU=POCUS-LUNG\nEC=POCUS-CARD"}
+            />
+          </Field>
+          <Field label="CSV file" htmlFor="practical-csv-file">
+            <input id="practical-csv-file" name="csv_file" className="input" type="file" accept=".csv,text/csv" required />
+          </Field>
+          <button className="button primary">Import practical results</button>
         </form>
-      </details>
+
+        <details className="panel" open>
+          <summary className="term-summary">
+            <span>
+              <strong>Manual Overall Score</strong>
+              <span className="muted small">Coursework and viva modules</span>
+            </span>
+          </summary>
+          <form className="grid session-form" action={createManualOverallExamResult}>
+            <FormGrid>
+              <Field label="Student" htmlFor="manual-overall-student">
+                <select id="manual-overall-student" name="student_id" className="select" required defaultValue="">
+                  <option value="">Select student</option>
+                  {students.map((student) => (
+                    <option key={student.id} value={student.id}>
+                      {student.lastName}, {student.firstName} · {student.cccuStudentId ?? student.temporaryId}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Module offering" htmlFor="manual-overall-offering">
+                <select id="manual-overall-offering" name="offering_id" className="select" required defaultValue="">
+                  <option value="">Select offering</option>
+                  {onlineOfferings.map(({ offering, term, courseModule }) => (
+                    <option key={offering.id} value={offering.id}>
+                      {term?.name} · {courseModule?.code} · {courseModule?.title}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </FormGrid>
+            <FormGrid>
+              <Field label="Overall score" htmlFor="manual-overall-score">
+                <input id="manual-overall-score" name="score" className="input" type="number" min="0" max="100" step="0.01" required />
+              </Field>
+              <Field label="Pass mark" htmlFor="manual-overall-pass-mark">
+                <input id="manual-overall-pass-mark" name="pass_mark" className="input" type="number" min="0" max="100" step="0.01" defaultValue="50" required />
+              </Field>
+              <Field label="Taken on" htmlFor="manual-overall-taken-on">
+                <input id="manual-overall-taken-on" name="taken_on" className="input" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
+              </Field>
+              <Field label="Attempt" htmlFor="manual-overall-attempt">
+                <input id="manual-overall-attempt" name="attempt_number" className="input" type="number" min="1" step="1" defaultValue="1" required />
+              </Field>
+            </FormGrid>
+            <button className="button primary">Save overall score</button>
+          </form>
+        </details>
+      </section>
 
       <section className="section">
         <div className="section-header">

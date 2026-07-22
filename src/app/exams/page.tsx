@@ -9,10 +9,16 @@ import { getLmsData } from "@/lib/lms-data";
 export default async function ExamsPage({
   searchParams
 }: {
-  searchParams: Promise<{ mode?: string; examSearch?: string; student?: string }>;
+  searchParams: Promise<{
+    mode?: string;
+    examSearch?: string;
+    student?: string;
+    practicalAccepted?: string;
+    practicalRejected?: string;
+  }>;
 }) {
   const profile = await requirePermission("view_students");
-  const { mode, examSearch = "", student } = await searchParams;
+  const { mode, examSearch = "", student, practicalAccepted, practicalRejected } = await searchParams;
   const editMode = profile.role === "admin" && mode === "edit";
   const [data, portalExams] = await Promise.all([
     getLmsData(),
@@ -54,7 +60,21 @@ export default async function ExamsPage({
         </>
       }
     >
-      {editMode ? <ExamTools data={data} portalExams={portalExams} portalSearch={examSearch} /> : null}
+      {editMode ? (
+        <ExamTools
+          data={data}
+          portalExams={portalExams}
+          portalSearch={examSearch}
+          practicalImportSummary={
+            practicalAccepted || practicalRejected
+              ? {
+                  accepted: Number(practicalAccepted ?? 0),
+                  rejected: Number(practicalRejected ?? 0)
+                }
+              : undefined
+          }
+        />
+      ) : null}
       <ExamSummary data={data} studentId={student} />
       <ExamResultsTable data={data} studentId={student} />
     </AppShell>
