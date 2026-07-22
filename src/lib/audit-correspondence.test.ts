@@ -70,6 +70,7 @@ describe("correspondence log inserts", () => {
     expect(
       buildCorrespondenceLogInsert({
         person_id: "person-1",
+        recipient_email: "applicant@example.com",
         template_key: "offer_issued",
         template_version: 1,
         channel: "email",
@@ -77,6 +78,8 @@ describe("correspondence log inserts", () => {
       })
     ).toEqual({
       person_id: "person-1",
+      recipient_email: "applicant@example.com",
+      recipient_name: null,
       related_entity_type: null,
       related_entity_id: null,
       template_id: null,

@@ -350,6 +350,8 @@ export interface CorrespondenceTemplate {
 export interface CorrespondenceLog {
   id: string;
   personId: string;
+  recipientEmail: string;
+  recipientName?: string;
   relatedEntityType?: string;
   relatedEntityId?: string;
   templateId?: string;

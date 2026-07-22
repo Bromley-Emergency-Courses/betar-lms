@@ -50,28 +50,20 @@ create index if not exists audit_events_action_idx
 
 drop policy if exists "authenticated users append audit events" on public.audit_events;
 drop policy if exists "staff and portal users append own audit events" on public.audit_events;
+drop policy if exists "active staff append own audit events" on public.audit_events;
 
-create policy "staff and portal users append own audit events"
+create policy "active staff append own audit events"
   on public.audit_events for insert
   with check (
     auth.uid() is not null
     and actor_user_id = auth.uid()
-    and (
-      (
-        actor_type = 'staff'
-        and actor_person_id is null
-        and exists (
-          select 1
-          from public.staff_profiles
-          where staff_profiles.id = auth.uid()
-            and staff_profiles.active = true
-        )
-      )
-      or (
-        actor_type in ('applicant', 'student')
-        and actor_person_id = public.current_person_id()
-        and actor_type::text = public.current_portal_actor_type()::text
-      )
+    and actor_type = 'staff'
+    and actor_person_id is null
+    and exists (
+      select 1
+      from public.staff_profiles
+      where staff_profiles.id = auth.uid()
+        and staff_profiles.active = true
     )
   );
 
@@ -91,6 +83,8 @@ create table public.correspondence_templates (
 create table public.correspondence_logs (
   id uuid primary key default gen_random_uuid(),
   person_id uuid not null references public.persons(id) on delete restrict,
+  recipient_email text not null,
+  recipient_name text,
   related_entity_type text,
   related_entity_id uuid,
   template_id uuid references public.correspondence_templates(id) on delete restrict,
@@ -107,6 +101,7 @@ create table public.correspondence_logs (
   metadata jsonb not null default '{}'::jsonb,
   created_by_user_id uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
+  check (length(trim(recipient_email)) > 3),
   check (
     (related_entity_type is null and related_entity_id is null)
     or (related_entity_type is not null and related_entity_id is not null)
@@ -137,6 +132,9 @@ create index correspondence_templates_key_version_idx
 
 create index correspondence_logs_person_id_created_at_idx
   on public.correspondence_logs(person_id, created_at desc);
+
+create index correspondence_logs_recipient_email_idx
+  on public.correspondence_logs(lower(recipient_email));
 
 create index correspondence_logs_related_entity_idx
   on public.correspondence_logs(related_entity_type, related_entity_id, created_at desc);

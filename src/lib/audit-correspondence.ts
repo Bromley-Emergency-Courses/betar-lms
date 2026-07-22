@@ -20,6 +20,8 @@ export interface AuditEventInsert {
 
 export interface CorrespondenceLogInsert {
   person_id: string;
+  recipient_email: string;
+  recipient_name?: string | null;
   related_entity_type?: string | null;
   related_entity_id?: string | null;
   template_id?: string | null;
@@ -105,6 +107,7 @@ export function buildCorrespondenceLogInsert(
 ): CorrespondenceLogInsert {
   return {
     ...input,
+    recipient_name: input.recipient_name ?? null,
     related_entity_type: input.related_entity_type ?? null,
     related_entity_id: input.related_entity_id ?? null,
     template_id: input.template_id ?? null,
