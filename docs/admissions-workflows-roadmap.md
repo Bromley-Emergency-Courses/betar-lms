@@ -36,10 +36,11 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [x] Add applicant/student auth helpers separate from staff `requirePermission`.
 - [x] Add initial route-boundary helper for public, applicant/student-authenticated, and staff-only routes.
 - [x] Tighten storage model for identity documents, qualification documents, student photos, generated letters, and deferral evidence.
+- [x] Add audit event schema foundations for staff, applicant, student, and service actors.
+- [x] Add correspondence template and log schema before sending automated emails.
 - [ ] Add signed URL generation after server-side authorization for admissions documents.
 - [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
 - [ ] Add RLS test coverage for staff, applicant, and student access boundaries.
-- [ ] Add correspondence log schema before sending automated emails.
 - [ ] Design conversion as a transactional database function/RPC rather than separate client-side writes.
 - [ ] Define orphaned `persons` retention/anonymisation behavior for deleted student records.
 
@@ -141,6 +142,8 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 | 2026-07-22 | Keep a committed developer spec separate from this roadmap. | Future workspaces need build rules as well as status tracking. |
 | 2026-07-22 | Do not enforce unique `persons.email` in the persons foundation migration. | A person may change email, and applicants may reuse an email across intakes; lookup indexes are enough until duplicate-handling rules are defined. |
 | 2026-07-22 | Retain linked `persons` rows when student records are deleted during Phase 0. | Person deletion/anonymisation needs a policy covering applications, auth identities, audit logs, correspondence, finance, and documents rather than a narrow student-delete side effect. |
+| 2026-07-22 | Extend the original `audit_events` table rather than adding a parallel admissions audit log. | One append-only event stream keeps future admissions, documents, conversion, finance, and retention evidence queryable in the same place. |
+| 2026-07-22 | Store correspondence template key/version snapshots on each log row. | Delivery history must remain understandable even if a later template version changes or a template row is retired. |
 
 ## Open Decisions
 
@@ -162,3 +165,4 @@ Add entries here when meaningful code lands.
 | 2026-07-22 | `12amathew/persons-foundation-v1` | Added `persons` foundation migration, backfilled existing students, linked `students.person_id`, and kept legacy student fields as the active UI source during transition. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/applicant-auth-boundary` | Added `person_auth_identities`, portal identity lookup functions, route-boundary helpers, and server-only applicant/student auth helpers separate from staff auth. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/admissions-docs-rls-hardening` | Added private admissions document buckets, tightened storage object policies so teachers no longer read mixed/sensitive document buckets, and added managed-file metadata fields for person linkage, uploader person, sanitized filenames, and retention class. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-22 | `12amathew/audit-correspondence-log-foundations` | Expanded audit events with actor/person/reason fields and staff-only direct append policy, added correspondence template/log foundations with recipient snapshots, and added metadata-redaction helpers for future workflow writes. | `npm run lint`; `npm run test`; `npm run build`. |
