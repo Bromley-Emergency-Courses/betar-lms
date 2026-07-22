@@ -32,9 +32,9 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 
 - [x] Decide final `persons` model and migration strategy.
 - [x] Backfill existing `students` into `persons`.
-- [ ] Link future applicant/student Supabase Auth users to `persons`.
-- [ ] Add applicant/student auth helpers separate from staff `requirePermission`.
-- [ ] Add route policy for public `/apply`, authenticated `/portal`, and staff-only admin routes.
+- [x] Link future applicant/student Supabase Auth users to `persons`.
+- [x] Add applicant/student auth helpers separate from staff `requirePermission`.
+- [x] Add route policy for public `/apply`, authenticated `/portal`, and staff-only admin routes.
 - [ ] Tighten storage model for identity documents, qualification documents, student photos, and generated letters.
 - [ ] Replace broad document access with signed URL generation after server-side authorization.
 - [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
@@ -160,3 +160,4 @@ Add entries here when meaningful code lands.
 | --- | --- | --- | --- |
 | 2026-07-22 | `12amathew/admissions-applications-workflows` | Created durable roadmap, developer spec, README pointer, and workspace handoff convention. | Documentation-only change. |
 | 2026-07-22 | `12amathew/persons-foundation-v1` | Added `persons` foundation migration, backfilled existing students, linked `students.person_id`, and kept legacy student fields as the active UI source during transition. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-22 | `12amathew/applicant-auth-boundary` | Added `person_auth_identities`, portal identity lookup functions, route-boundary helpers, and server-only applicant/student auth helpers separate from staff auth. | `npm run lint`; `npm run test`; `npm run build`. |
