@@ -26,12 +26,12 @@ The workspace-local companion file is `.context/admissions-workflows-handoff.md`
 
 ## Phase 0: Foundations
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: make the data, auth, storage, and audit foundations safe before exposing public applicant/student workflows.
 
-- [ ] Decide final `persons` model and migration strategy.
-- [ ] Backfill existing `students` into `persons`.
+- [x] Decide final `persons` model and migration strategy.
+- [x] Backfill existing `students` into `persons`.
 - [ ] Link future applicant/student Supabase Auth users to `persons`.
 - [ ] Add applicant/student auth helpers separate from staff `requirePermission`.
 - [ ] Add route policy for public `/apply`, authenticated `/portal`, and staff-only admin routes.
@@ -41,6 +41,7 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [ ] Add RLS test coverage for staff, applicant, and student access boundaries.
 - [ ] Add correspondence log schema before sending automated emails.
 - [ ] Design conversion as a transactional database function/RPC rather than separate client-side writes.
+- [ ] Define orphaned `persons` retention/anonymisation behavior for deleted student records.
 
 ## Phase 1: Enquiry, Application, Review, Offer
 
@@ -124,6 +125,7 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 - [ ] Draft appropriate policy document for special category data.
 - [ ] Draft breach runbook.
 - [ ] Add retention rules schema.
+- [ ] Add person deletion/anonymisation workflow for retention expiry and erasure requests.
 - [ ] Add deletion/anonymisation job logging.
 - [ ] Add DSAR export action.
 - [ ] Add generic university export CSV.
@@ -137,6 +139,8 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 | 2026-07-22 | Defer expanded finance until after admissions, registration, and module preferences. | Finance is valuable but not required for the first usable admissions workflow. |
 | 2026-07-22 | Use a committed roadmap plus `.context` handoff notes. | `.context` is workspace-local, while committed docs survive branch creation and merges. |
 | 2026-07-22 | Keep a committed developer spec separate from this roadmap. | Future workspaces need build rules as well as status tracking. |
+| 2026-07-22 | Do not enforce unique `persons.email` in the persons foundation migration. | A person may change email, and applicants may reuse an email across intakes; lookup indexes are enough until duplicate-handling rules are defined. |
+| 2026-07-22 | Retain linked `persons` rows when student records are deleted during Phase 0. | Person deletion/anonymisation needs a policy covering applications, auth identities, audit logs, correspondence, finance, and documents rather than a narrow student-delete side effect. |
 
 ## Open Decisions
 
@@ -155,3 +159,4 @@ Add entries here when meaningful code lands.
 | Date | Branch or PR | Summary | Verification |
 | --- | --- | --- | --- |
 | 2026-07-22 | `12amathew/admissions-applications-workflows` | Created durable roadmap, developer spec, README pointer, and workspace handoff convention. | Documentation-only change. |
+| 2026-07-22 | `12amathew/persons-foundation-v1` | Added `persons` foundation migration, backfilled existing students, linked `students.person_id`, and kept legacy student fields as the active UI source during transition. | `npm run lint`; `npm run test`; `npm run build`. |
