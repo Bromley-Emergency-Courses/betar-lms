@@ -288,18 +288,31 @@ export interface ExamPortalSubmission {
 }
 
 export type ManagedFileCategory = "cv" | "identity" | "certificate" | "correspondence" | "other";
+export type ManagedFileRetentionClass =
+  | "application_document"
+  | "identity_document"
+  | "qualification_document"
+  | "student_photo"
+  | "generated_letter"
+  | "deferral_evidence"
+  | "student_academic_record"
+  | "other";
 
 export interface ManagedFile {
   id: string;
   studentId?: string;
+  personId?: string;
   bucket: string;
   objectPath: string;
   label: string;
   fileCategory: ManagedFileCategory;
   originalFilename?: string;
+  sanitizedFilename?: string;
   contentType?: string;
   sizeBytes?: number;
+  retentionClass: ManagedFileRetentionClass;
   uploadedByUserId?: string;
+  uploadedByPersonId?: string;
   createdAt: string;
 }
 
