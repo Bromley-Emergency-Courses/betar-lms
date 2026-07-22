@@ -1,7 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-const publicRoutes = ["/login"];
+import { isPublicMiddlewarePath } from "@/lib/portal-access";
 
 export async function middleware(request: NextRequest) {
   const hasSupabaseEnv = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -11,11 +10,7 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   if (
-    publicRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`)) ||
-    pathname === "/api/exam-adapters/results" ||
-    pathname === "/api/exam-adapters/contract" ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon")
+    isPublicMiddlewarePath(pathname)
   ) {
     return NextResponse.next();
   }
