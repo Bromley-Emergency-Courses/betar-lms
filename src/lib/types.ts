@@ -52,8 +52,26 @@ export interface StaffUser {
   active: boolean;
 }
 
+export interface Person {
+  id: string;
+  firstName: string;
+  lastName: string;
+  preferredName?: string;
+  dateOfBirth?: string;
+  email: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  postcode?: string;
+  country?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Student {
   id: string;
+  personId?: string;
   cccuStudentId?: string;
   temporaryId: string;
   firstName: string;

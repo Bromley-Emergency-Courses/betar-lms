@@ -41,6 +41,7 @@ function booleanValue(value: unknown): boolean | undefined {
 function mapStudent(row: DbRow): Student {
   return {
     id: String(row.id),
+    personId: optionalString(row.person_id),
     cccuStudentId: optionalString(row.cccu_student_id),
     temporaryId: String(row.temporary_id),
     firstName: String(row.first_name),
