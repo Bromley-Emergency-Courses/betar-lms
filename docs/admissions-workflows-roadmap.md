@@ -4,6 +4,8 @@ Last updated: 2026-07-22
 
 This document is the durable handoff record for the admissions, application, registration, and student portal work. Keep it updated when branches are merged so new Conductor workspaces created from `origin/main` can pick up the current state without needing prior chat context.
 
+Use `docs/admissions-workflows-spec.md` as the developer-facing implementation spec. This roadmap tracks status, decisions, and implementation history.
+
 The workspace-local companion file is `.context/admissions-workflows-handoff.md`. Use that for branch-specific notes, partial work, and immediate next steps.
 
 ## Current Direction
@@ -134,6 +136,7 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 | 2026-07-22 | Extend BETAR LMS rather than build a separate admissions service. | Avoid duplicate records, sync failures, and split staff workflows. |
 | 2026-07-22 | Defer expanded finance until after admissions, registration, and module preferences. | Finance is valuable but not required for the first usable admissions workflow. |
 | 2026-07-22 | Use a committed roadmap plus `.context` handoff notes. | `.context` is workspace-local, while committed docs survive branch creation and merges. |
+| 2026-07-22 | Keep a committed developer spec separate from this roadmap. | Future workspaces need build rules as well as status tracking. |
 
 ## Open Decisions
 
@@ -151,5 +154,4 @@ Add entries here when meaningful code lands.
 
 | Date | Branch or PR | Summary | Verification |
 | --- | --- | --- | --- |
-| 2026-07-22 | `12amathew/admissions-applications-workflows` | Created durable roadmap and workspace handoff convention. | Documentation-only change. |
-
+| 2026-07-22 | `12amathew/admissions-applications-workflows` | Created durable roadmap, developer spec, README pointer, and workspace handoff convention. | Documentation-only change. |
