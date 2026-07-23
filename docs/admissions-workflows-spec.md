@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Spec
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 This is the developer-facing build spec for the admissions, application, registration, and student portal work. It is derived from the original PGCert admissions system plan and adjusted for the current BETAR LMS codebase.
 
@@ -65,6 +65,10 @@ Until then, registration and preference confirmation should use the existing `fi
 The current schema stores person fields directly on `students`, including names, email, phone, programme, status, and admission stage.
 
 The current admissions table is `admission_leads`, which is lightweight lead tracking. It is not enough for full applications, document verification, offer history, registration, or applicant portal access.
+
+The current `applications` table is an early draft-save slice. It stores programme, broad module interests, professional details, one qualification summary, work experience, and a supporting statement. The expanded application work should extend or migrate this slice rather than creating a second unrelated application model.
+
+The current public enquiry flow accepts broad `course_modules` interests through `admission_leads.module_interest_ids`. Keep that meaning for `/apply`; do not treat enquiry interests as intended first-term module choices.
 
 The current lead conversion action creates a student and then updates the lead in separate writes. The new registration conversion must not use that pattern for public flows.
 
@@ -324,6 +328,13 @@ Bot protection should be added before go-live.
 
 Staff must still be able to manually log enquiries that arrive by email or phone.
 
+Product rules:
+
+- `/apply` is an enquiry form only.
+- Module choices on `/apply` are broad interests, stored as module IDs against `course_modules`.
+- Do not ask public enquiry users to choose a specific intake or module offering.
+- Do not create applications, selected offerings, enrolments, finance records, or seat reservations from the enquiry form.
+
 ### Application
 
 Application form should support draft save and later submission.
@@ -331,14 +342,122 @@ Application form should support draft save and later submission.
 Minimum sections:
 
 - personal details.
-- programme choice: PGCert or microcredential.
-- intake/start term preference.
-- module interests.
+- contact details.
+- professional/employment details.
 - qualifications.
-- work experience.
-- personal statement or supporting statement.
-- document uploads.
-- declaration.
+- intended programme, start term, and first-term module offerings.
+- light nationality, visa, and funding fields.
+- optional disability/support-needs information.
+- POCUS free-text questions.
+- document uploads/evidence.
+- preview.
+- submission declaration.
+
+Recommended section structure:
+
+- checklist/status.
+- personal details.
+- contact details.
+- professional/employment details.
+- qualifications.
+- intended study plan.
+- nationality/visa.
+- funding.
+- disability/support needs.
+- POCUS questions.
+- evidence/document uploads.
+- preview and submission.
+
+The applicant UI should be inspired by the university application pattern in the reference screenshots: sectional navigation, mandatory-field status per section, clear field-level validation, uploaded-evidence summary, preview before submit, and a declaration checkbox. It does not need to copy the university visual design exactly.
+
+Personal details should capture, at minimum:
+
+- title.
+- first name.
+- middle/other forenames where provided.
+- last name/family name.
+- preferred name/known as.
+- previous surname/family name where provided.
+- date of birth.
+- previous application or previous study with BETAR/university if known.
+- partner/university student ID if known.
+
+Contact details should capture, at minimum:
+
+- email.
+- phone.
+- address line 1.
+- address line 2.
+- city/town.
+- postcode.
+- country.
+- optional emergency or alternative contact only if the business confirms it is needed before registration.
+
+Professional/employment details should capture, at minimum:
+
+- current clinical role.
+- employer/organisation.
+- department/specialty.
+- professional registration body.
+- professional registration number.
+- years or summary of relevant clinical experience.
+
+Qualifications should be structured so that multiple qualifications can be captured. Use a child table rather than only widening `applications` if multiple rows are needed. Minimum qualification fields:
+
+- qualification title/level.
+- awarding body.
+- award year.
+- result/classification where provided.
+- country where awarded if needed for university reporting.
+- related evidence document status.
+
+Study-plan rules:
+
+- Applicants must choose programme before selecting module offerings.
+- Applicants must choose intended start term before selecting module offerings.
+- `/apply/application` module choices are intended first-term `module_offerings`, not broad interests.
+- Selectable offerings must be loaded dynamically from `module_offerings` for the selected term.
+- An offering is selectable only when the joined `course_modules.active = true`, the joined `terms.status` is `published` or `active`, and the term is in the future/upcoming intake set. Use `terms.starts_on >= current_date` unless the business explicitly decides that currently active terms should remain selectable until `terms.ends_on`.
+- Applicants may select one or two module offerings.
+- Selected offerings must all belong to the chosen intended start term.
+- These choices do not reserve capacity, do not create enrolments, and do not generate finance records.
+- Capacity can be displayed as informational context if already available, but application submission must not decrement capacity or block on projected seat availability unless a later admissions policy says otherwise.
+- Existing `applications.module_interest_ids` can remain for backwards compatibility or enquiry-copy context, but the applicant application UI and submission validation should use selected offering IDs.
+
+Recommended schema additions for intended study plan:
+
+- `applications.intended_start_term_id uuid references terms(id)`.
+- `application_module_offering_choices` with `application_id`, `offering_id`, `choice_order`/`position`, `created_at`, and `updated_at`.
+- Constraints or RPC validation to enforce one or two selected offerings, matching `term_id`, active module, selectable term status, and no duplicate offering.
+- RLS allowing applicants to read only their own choices and admins to review them. If a dedicated admissions role is added later, extend the policy deliberately rather than relying on teacher/reception access. Prefer writes through draft/submit RPCs so validation is centralized.
+
+Light nationality/visa/funding fields should capture enough to support university-style application review without building a full international-student compliance workflow yet:
+
+- nationality.
+- country of birth or country of ordinary residence if required for university reporting.
+- whether the applicant needs a visa/right-to-study check.
+- visa/right-to-study notes where provided.
+- expected funding source: self-funded, employer/sponsor, NHS/trust, other/unknown.
+- sponsor/employer funding organisation and contact only if provided.
+
+Disability/support-needs rules:
+
+- This section is optional.
+- Wording must explain that disclosure is used to arrange reasonable adjustments/support and does not negatively affect academic consideration.
+- Store disability, long-term condition, learning difficulty, health, and support-needs details separately from the general `applications` row.
+- Use a restricted table such as `application_support_needs` and a restricted evidence bucket/retention class if evidence is uploaded.
+- Do not include these fields in generic admissions exports, broad staff lists, or teacher-facing screens.
+- Staff access must be limited to admins until a dedicated admissions/support role exists, and must write audit events for view/update/download actions.
+- Audit metadata must not contain the free-text support detail itself.
+
+POCUS free-text questions:
+
+1. Your previous experience in POCUS.
+2. Your motivation to enrol in this course.
+3. Briefly discuss a case where POCUS significantly improved your clinical management.
+4. Discuss a case where you recognised the limitations of POCUS.
+
+Store these as named fields, not as one generic statement blob, so staff review and future exports can address each answer separately.
 
 Rules:
 
@@ -347,6 +466,13 @@ Rules:
 - Submission timestamp is stored.
 - Submitted application enters staff review queue.
 - Validation should prevent submission until required fields and required document slots are present.
+- Draft save may allow incomplete sections, but final submit must run the full required-field and selected-offering validation server-side.
+- Final submit must be a dedicated RPC/server action separate from draft save.
+- Final submit must set application status to `submitted`, set `submitted_at`, update the related admissions lead stage to `submitted`, and write an `application.submitted` audit event in one transaction.
+- Final submit must capture declaration acceptance metadata: declaration text/version or hash, applicant auth user, person, timestamp, IP address where available, and user agent where available.
+- The declaration must state that the information submitted is truthful, complete, and accurate; that requested/material information has not been omitted; that the applicant understands the application cannot be changed after submission except by staff reopening; and that personal data will be handled under the relevant privacy notice.
+- Submitted application records should preserve an application-time snapshot of the supplied personal/contact/study-plan data even if the person record changes later.
+- If draft save updates `persons`, do so through audited server-side logic. Otherwise keep `persons` as the identity/contact source and use application snapshots for review/conversion.
 
 ### Documents
 
@@ -378,12 +504,15 @@ Each document record should include:
 Review screen must support:
 
 - viewing submitted application data.
+- viewing selected intended start term and selected module offerings with module, term, mode, credits, and price/capacity context where useful.
+- viewing the four POCUS free-text answers as separate review fields.
 - viewing documents through authorized signed URLs.
 - marking documents verified/rejected.
 - recording decision.
 - recording decision reason.
 - issuing offer.
 - rejecting application.
+- showing disability/support-needs information only in a restricted admissions/admin view, separated from the general application review summary.
 
 One reviewer may decide, but reviewer identity and decision reason are mandatory.
 
@@ -395,7 +524,7 @@ Offer records should include:
 - offer reference.
 - programme.
 - intended start term.
-- offered modules if applicable.
+- offered module offerings if applicable.
 - letter template version.
 - issued timestamp.
 - deadline timestamp.
@@ -406,6 +535,12 @@ Offer records should include:
 Default offer deadline is open until the business confirms it. Proposed default: 14 days.
 
 Offer emails must not be the only source of truth. The portal must show the current offer state.
+
+Offer module rules:
+
+- The offer may copy the submitted intended module offerings or staff may adjust them before issue.
+- Issuing an offer still must not create enrolments or reserve places.
+- The accepted offer and subsequent registration are the source used by conversion to create initial enrolments.
 
 ### Emails and Letters
 
@@ -429,16 +564,18 @@ Registration starts after offer acceptance.
 Wizard steps:
 
 1. Confirm course of study.
-2. Check and update personal details.
-3. Upload identity and qualification documents.
-4. Upload student ID photo if required.
-5. Agree to T&Cs.
+2. Confirm intended first-term module offerings from the accepted offer/application.
+3. Check and update personal details.
+4. Upload identity and qualification documents.
+5. Upload student ID photo if required.
+6. Agree to T&Cs.
 
 Rules:
 
 - Registration should prefill from application/person data.
 - Changes to personal details must be versioned or audited.
 - Required document slots must be filled before completion.
+- First-term module confirmation must continue to validate that selected offerings are active for the accepted term before conversion creates enrolments.
 - Staff verification can happen before or after registration submission, depending on business policy, but raw ID retention rules still apply.
 - T&Cs must be versioned.
 - Acceptance must record version/hash, person, auth user, timestamp, and IP address.
@@ -631,6 +768,12 @@ At minimum, tests or testable policies must prove:
 - Applicant can read and update only their own draft application.
 - Applicant cannot read another applicant.
 - Applicant cannot edit after submission unless reopened.
+- Applicant cannot select module offerings before choosing programme and intended start term.
+- Applicant cannot submit fewer than one or more than two intended first-term module offerings.
+- Applicant cannot select offerings outside their intended start term.
+- Applicant cannot select offerings whose module is inactive or whose term is not selectable.
+- Application module choices do not create enrolments, finance rows, or reservations.
+- Support-needs/special category rows and evidence are not readable by teachers, reception, other applicants, or generic staff views.
 - Student can read only their own portal data.
 - Teacher cannot read applications, identity documents, finance, or special category data.
 - Reception cannot read admissions or portal data.
@@ -675,6 +818,9 @@ Phase 0 is complete when:
 Phase 1 is complete when:
 
 - An applicant can submit an application.
+- The submitted application contains personal, contact, professional/employment, qualification, study-plan, nationality/visa/funding, POCUS answers, declaration, and optional support-needs sections.
+- Intended module selections are one or two valid future `module_offerings` for the selected start term and programme flow.
+- Submitting the application does not create enrolments, finance rows, or seat reservations.
 - Staff can review it.
 - Staff can issue an offer or rejection.
 - Applicant can accept, decline, or let offer lapse.
@@ -714,4 +860,3 @@ For any new admissions-related workspace:
 4. Implement one small roadmap slice.
 5. Run the narrowest relevant checks.
 6. Update the roadmap implementation log and task status before finishing.
-
