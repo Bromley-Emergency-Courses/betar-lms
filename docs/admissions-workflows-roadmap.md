@@ -41,7 +41,7 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [ ] Add signed URL generation after server-side authorization for admissions documents.
 - [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
 - [ ] Add RLS test coverage for staff, applicant, and student access boundaries.
-- [ ] Design conversion as a transactional database function/RPC rather than separate client-side writes.
+- [x] Design conversion as a transactional database function/RPC rather than separate client-side writes.
 - [ ] Define orphaned `persons` retention/anonymisation behavior for deleted student records.
 
 ## Phase 1: Enquiry, Application, Review, Offer
@@ -144,6 +144,7 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 | 2026-07-22 | Retain linked `persons` rows when student records are deleted during Phase 0. | Person deletion/anonymisation needs a policy covering applications, auth identities, audit logs, correspondence, finance, and documents rather than a narrow student-delete side effect. |
 | 2026-07-22 | Extend the original `audit_events` table rather than adding a parallel admissions audit log. | One append-only event stream keeps future admissions, documents, conversion, finance, and retention evidence queryable in the same place. |
 | 2026-07-22 | Store correspondence template key/version snapshots on each log row. | Delivery history must remain understandable even if a later template version changes or a template row is retired. |
+| 2026-07-22 | Stage public registration conversion through `admissions_conversion_requests` before calling a database RPC. | Offer, registration, T&C, document, module, student, finance, portal identity, and audit updates must happen in one database transaction without coupling Phase 0 to application forms or registration UI. |
 
 ## Open Decisions
 
@@ -166,3 +167,4 @@ Add entries here when meaningful code lands.
 | 2026-07-22 | `12amathew/applicant-auth-boundary` | Added `person_auth_identities`, portal identity lookup functions, route-boundary helpers, and server-only applicant/student auth helpers separate from staff auth. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/admissions-docs-rls-hardening` | Added private admissions document buckets, tightened storage object policies so teachers no longer read mixed/sensitive document buckets, and added managed-file metadata fields for person linkage, uploader person, sanitized filenames, and retention class. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/audit-correspondence-log-foundations` | Expanded audit events with actor/person/reason fields and staff-only direct append policy, added correspondence template/log foundations with recipient snapshots, and added metadata-redaction helpers for future workflow writes. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-22 | `12amathew/conversion-transaction-foundation` | Added admissions conversion staging tables and `convert_admissions_registration(...)`, a security-definer RPC that locks the conversion request and transactionally updates person, student, enrolments, expected finance rows, document ownership, portal identity, lifecycle state, and audit events. | `npm run lint`; `npm run test`; `npm run build`. |
