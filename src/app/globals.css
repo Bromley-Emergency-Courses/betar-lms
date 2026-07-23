@@ -264,6 +264,61 @@ textarea {
   min-height: 132px;
 }
 
+.application-section {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.application-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.application-section-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.application-section-heading span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.application-offering-list .check-option {
+  align-items: flex-start;
+}
+
+.application-offering-list .check-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.application-offering-list small {
+  color: var(--muted);
+}
+
+.inline-check {
+  justify-self: start;
+}
+
+.application-preview-box {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.application-preview-box p {
+  margin: 0;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
