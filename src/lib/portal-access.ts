@@ -6,6 +6,7 @@ const unsafeRedirectCharacters = /[\\\u0000-\u001f\u007f]/;
 const publicExactPaths = ["/login", "/apply", "/apply/login"];
 const publicPathPrefixes = ["/login"];
 const applicantAuthenticatedPathPrefixes = ["/apply"];
+const portalApiPathPrefixes = ["/api/portal"];
 const publicApiPaths = ["/api/exam-adapters/results", "/api/exam-adapters/contract"];
 const publicAssetPrefixes = ["/_next", "/favicon"];
 
@@ -27,6 +28,7 @@ export function routeAuthBoundaryForPath(pathname: string): RouteAuthBoundary {
 
   if (
     isPathOrChild(pathOnly, "/portal") ||
+    portalApiPathPrefixes.some((prefix) => isPathOrChild(pathOnly, prefix)) ||
     applicantAuthenticatedPathPrefixes.some((prefix) => isPathOrChild(pathOnly, prefix))
   ) {
     return "portal";
