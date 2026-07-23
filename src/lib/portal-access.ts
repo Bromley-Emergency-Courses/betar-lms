@@ -3,7 +3,7 @@ export type RouteAuthBoundary = "public" | "portal" | "staff";
 
 const localRedirectOrigin = "https://betar.local";
 const unsafeRedirectCharacters = /[\\\u0000-\u001f\u007f]/;
-const publicExactPaths = ["/login", "/apply", "/apply/login"];
+const publicExactPaths = ["/login", "/apply", "/apply/login", "/auth/callback"];
 const publicPathPrefixes = ["/login"];
 const applicantAuthenticatedPathPrefixes = ["/apply"];
 const portalApiPathPrefixes = ["/api/portal"];

@@ -88,6 +88,7 @@ export interface Student {
 
 export interface AdmissionLead {
   id: string;
+  personId?: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -98,6 +99,8 @@ export interface AdmissionLead {
   source?: string;
   lastContactedOn?: string;
   nextActionOn?: string;
+  applicationInvitedAt?: string;
+  applicationInvitationExpiresAt?: string;
   notes?: string;
   convertedStudentId?: string;
   archived: boolean;

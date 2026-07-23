@@ -9,6 +9,8 @@ describe("route auth boundaries", () => {
     expect(routeAuthBoundaryForPath("/apply/")).toBe("public");
     expect(routeAuthBoundaryForPath("/apply?submitted=1")).toBe("public");
     expect(routeAuthBoundaryForPath("/apply/login")).toBe("public");
+    expect(routeAuthBoundaryForPath("/auth/callback")).toBe("public");
+    expect(routeAuthBoundaryForPath("/auth/callback?code=abc")).toBe("public");
   });
 
   it("keeps applicant and student authenticated routes on the portal boundary", () => {

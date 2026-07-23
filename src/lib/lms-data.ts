@@ -64,6 +64,7 @@ function stringArray(value: unknown): string[] {
 function mapAdmissionLead(row: DbRow): AdmissionLead {
   return {
     id: String(row.id),
+    personId: optionalString(row.person_id),
     firstName: String(row.first_name),
     lastName: String(row.last_name),
     email: String(row.email),
@@ -74,6 +75,8 @@ function mapAdmissionLead(row: DbRow): AdmissionLead {
     source: optionalString(row.source),
     lastContactedOn: optionalString(row.last_contacted_on),
     nextActionOn: optionalString(row.next_action_on),
+    applicationInvitedAt: optionalString(row.application_invited_at),
+    applicationInvitationExpiresAt: optionalString(row.application_invitation_expires_at),
     notes: optionalString(row.notes),
     convertedStudentId: optionalString(row.converted_student_id),
     archived: Boolean(row.archived)
