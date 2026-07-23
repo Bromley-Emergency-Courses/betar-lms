@@ -147,6 +147,9 @@ declare
   v_missing_offering_count integer;
   v_wrong_term_count integer;
   v_cross_person_file_count integer;
+  v_cross_student_file_count integer;
+  v_blocked_finance_count integer;
+  v_finance_changes jsonb := '[]'::jsonb;
   v_initial_offering_ids uuid[];
 begin
   select *
@@ -263,6 +266,11 @@ begin
     from public.students
     where students.id = v_request.student_id
     for update;
+
+    if v_student_id is null then
+      raise exception 'Requested target student % was not found', v_request.student_id
+        using errcode = 'P0002';
+    end if;
   else
     select students.id
     into v_student_id
@@ -332,10 +340,87 @@ begin
     where students.id = v_student_id;
   end if;
 
+  select count(*)
+  into v_cross_student_file_count
+  from public.admissions_conversion_documents conversion_document
+  join public.managed_files managed_file on managed_file.id = conversion_document.managed_file_id
+  where conversion_document.conversion_request_id = v_request.id
+    and managed_file.student_id is not null
+    and managed_file.student_id <> v_student_id;
+
+  if v_cross_student_file_count > 0 then
+    raise exception 'Conversion document list contains files linked to a different student';
+  end if;
+
   insert into public.enrolments (student_id, offering_id, status)
   select v_student_id, requested.offering_id, 'planned'
   from unnest(v_initial_offering_ids) as requested(offering_id)
   on conflict (student_id, offering_id) do nothing;
+
+  perform 1
+  from public.finance_records finance_record
+  where finance_record.student_id = v_student_id
+    and finance_record.term_id in (
+      select offering.term_id
+      from public.module_offerings offering
+      where offering.id = any(v_initial_offering_ids)
+    )
+  for update;
+
+  with expected_finance as (
+    select
+      offering.term_id,
+      sum(offering.price_pence)::integer as expected_amount_pence
+    from public.module_offerings offering
+    where offering.id = any(v_initial_offering_ids)
+    group by offering.term_id
+  )
+  select count(*)
+  into v_blocked_finance_count
+  from expected_finance expected
+  join public.finance_records finance_record
+    on finance_record.student_id = v_student_id
+    and finance_record.term_id = expected.term_id
+  where finance_record.invoice_status <> 'not_requested'
+    or finance_record.payment_status <> 'not_due'
+    or finance_record.invoice_amount_pence is not null
+    or finance_record.paid_amount_pence is not null
+    or finance_record.purchase_order_reference is not null;
+
+  if v_blocked_finance_count > 0 then
+    raise exception 'Existing finance rows with invoice or payment activity cannot be overwritten by admissions conversion';
+  end if;
+
+  with expected_finance as (
+    select
+      offering.term_id,
+      sum(offering.price_pence)::integer as expected_amount_pence
+    from public.module_offerings offering
+    where offering.id = any(v_initial_offering_ids)
+    group by offering.term_id
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'finance_record_id', finance_record.id,
+        'term_id', expected.term_id,
+        'previous_expected_amount_pence', finance_record.expected_amount_pence,
+        'next_expected_amount_pence', expected.expected_amount_pence,
+        'change_type', case
+          when finance_record.id is null then 'created'
+          when finance_record.expected_amount_pence is distinct from expected.expected_amount_pence then 'updated'
+          else 'unchanged'
+        end
+      )
+      order by expected.term_id
+    ),
+    '[]'::jsonb
+  )
+  into v_finance_changes
+  from expected_finance expected
+  left join public.finance_records finance_record
+    on finance_record.student_id = v_student_id
+    and finance_record.term_id = expected.term_id;
 
   insert into public.finance_records (student_id, term_id, expected_amount_pence)
   select
@@ -349,6 +434,41 @@ begin
   set
     expected_amount_pence = excluded.expected_amount_pence,
     updated_at = now();
+
+  insert into public.audit_events (
+    actor_type,
+    actor_user_id,
+    actor_person_id,
+    action,
+    entity_type,
+    entity_id,
+    reason,
+    metadata
+  )
+  select
+    v_actor_type,
+    auth.uid(),
+    case when v_actor_type in ('applicant', 'student') then v_request.person_id else null end,
+    case
+      when finance_change.value->>'change_type' = 'created' then 'finance.expected_amount_created_by_conversion'
+      else 'finance.expected_amount_updated_by_conversion'
+    end,
+    'finance_record',
+    finance_record.id,
+    null,
+    jsonb_build_object(
+      'conversion_request_id', v_request.id,
+      'person_id', v_request.person_id,
+      'student_id', v_student_id,
+      'term_id', finance_change.value->>'term_id',
+      'previous_expected_amount_pence', (finance_change.value->>'previous_expected_amount_pence')::integer,
+      'next_expected_amount_pence', (finance_change.value->>'next_expected_amount_pence')::integer
+    )
+  from jsonb_array_elements(v_finance_changes) as finance_change(value)
+  join public.finance_records finance_record
+    on finance_record.student_id = v_student_id
+    and finance_record.term_id = (finance_change.value->>'term_id')::uuid
+  where finance_change.value->>'change_type' in ('created', 'updated');
 
   update public.managed_files
   set
@@ -401,7 +521,8 @@ begin
       'registration_entity_type', v_request.registration_entity_type,
       'registration_entity_id', v_request.registration_entity_id,
       'start_term_id', v_request.start_term_id,
-      'initial_module_offering_ids', to_jsonb(v_initial_offering_ids)
+      'initial_module_offering_ids', to_jsonb(v_initial_offering_ids),
+      'finance_changes', v_finance_changes
     )
   );
 
