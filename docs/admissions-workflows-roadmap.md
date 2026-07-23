@@ -19,18 +19,18 @@ The workspace-local companion file is `.context/admissions-workflows-handoff.md`
 
 ## Current Application Form Adjustment
 
-The first application draft-save slice is implemented, but it is intentionally basic. The next Phase 1 slice should expand it before staff review/offers are built.
+The expanded application draft-save slice is implemented. The remaining application-form work should add repeatable qualification rows if needed, document upload slots, and the transactional final submit/declaration action before staff review/offers are built.
 
 Required changes:
 
 - Keep `/apply` as enquiry-only. Broad module interests should remain `course_modules` interests and must not become start-term module selections.
 - Expand `/apply/application` into a university-style sectional application with personal details, contact details, professional/employment details, qualifications, intended study plan, light nationality/visa/funding fields, optional support-needs disclosure, POCUS free-text questions, evidence summary, preview, and declaration.
-- Add intended start term to the application model before concrete module selection.
-- Replace application module-interest selection in the authenticated application UI with one or two selected `module_offerings`.
-- Load selectable offerings dynamically for the chosen term from `module_offerings` joined to active `course_modules` and `published`/`active` future `terms`.
-- Validate offering selection server-side in draft-save and submit flows.
-- Ensure selected offerings do not reserve places, create enrolments, or create finance records.
-- Store optional disability/support-needs information separately from general application fields with restricted access and redacted audit metadata.
+- Intended start term is now on the application model before concrete module selection.
+- Authenticated application drafts now store one or two selected `module_offerings`, while old `module_interest_ids` remain only for backwards/enquiry-copy context.
+- Selectable offerings are loaded dynamically for the chosen term from `module_offerings` joined to active `course_modules` and `published`/`active` future `terms`.
+- Draft-save validates offering selection server-side; final submit still needs the same validation in the submit RPC when that slice is built.
+- Selected offerings do not reserve places, create enrolments, or create finance records.
+- Optional disability/support-needs information is stored separately from general application fields with restricted access and redacted audit metadata.
 - Add a real final submit action separate from draft save. Submission must lock the application, update the lead stage, store declaration acceptance metadata, and write an audit event transactionally.
 
 ## Status Legend
@@ -79,19 +79,19 @@ Goal: run a complete intake up to offer acceptance without depending on email th
 - [x] Basic programme choice: PGCert or microcredential.
 - [x] Basic broad module interest capture in the existing draft slice.
 - [x] Basic work experience, qualification, and statement capture in the existing draft slice.
-- [ ] Expand application schema for personal and contact detail snapshots.
+- [x] Expand application schema for personal and contact detail snapshots.
 - [ ] Add repeatable qualifications or a clear structured qualification model.
-- [ ] Add professional/employment detail fields needed for review.
-- [ ] Add intended start term to application drafts.
-- [ ] Add application selected-offering model using `module_offerings`.
-- [ ] Update `/apply/application` so programme and intended start term are chosen before module offerings.
-- [ ] Filter selectable offerings to active modules in published/active future terms.
-- [ ] Enforce one or two selected module offerings server-side.
-- [ ] Ensure application module choices do not reserve places, create enrolments, or create finance rows.
-- [ ] Add light nationality, visa, and funding fields.
-- [ ] Add optional support-needs/disability capture with restricted/sensitive handling.
-- [ ] Add the four required POCUS free-text questions as named fields.
-- [ ] Add application section checklist/status and preview-style review before submit.
+- [x] Add professional/employment detail fields needed for review.
+- [x] Add intended start term to application drafts.
+- [x] Add application selected-offering model using `module_offerings`.
+- [x] Update `/apply/application` so programme and intended start term are chosen before module offerings.
+- [x] Filter selectable offerings to active modules in published/active future terms.
+- [x] Enforce one or two selected module offerings server-side.
+- [x] Ensure application module choices do not reserve places, create enrolments, or create finance rows.
+- [x] Add light nationality, visa, and funding fields.
+- [x] Add optional support-needs/disability capture with restricted/sensitive handling.
+- [x] Add the four required POCUS free-text questions as named fields.
+- [x] Add application section checklist/status and preview-style review before submit.
 - [ ] Add final submission declaration and transactional submit action.
 - [ ] Document upload slots with file validation.
 - [ ] Staff review screen with verification states and decision reasons.
@@ -217,3 +217,4 @@ Add entries here when meaningful code lands.
 | 2026-07-23 | `12amathew/application-invitations-magic-link` | Added Phase 1 application invitations without building the full application form: staff can invite an existing lead, invitations create/link a `person`, Supabase magic links route through `/auth/callback`, applicants claim access into `person_auth_identities`, and `/apply/application` shows invitation/access status only. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `12amathew/application-draft-save-form` | Added the authenticated application draft slice: applicant-owned `applications` draft model, active-module read policy for applicant forms, `save_application_draft(...)` RPC with draft-save audit events, and `/apply/application` draft save form for programme, module interests, professional details, qualifications, work experience, and statement fields. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `bangalore` docs update | Consolidated the expanded university-style application plan: enquiry interests stay broad, authenticated applications choose one or two future term `module_offerings`, the application model needs personal/contact/professional/qualification/nationality/visa/funding/POCUS/declaration sections, and support-needs data needs restricted handling. | Documentation-only change. |
+| 2026-07-23 | `12amathew/expand-application-form` | Expanded `/apply/application` into a university-style draft form with personal/contact/employment/qualification/study-plan/nationality/visa/funding/support-needs/POCUS/evidence-preview sections, added intended start term and selected `module_offerings`, validated selectable offerings server-side against active modules in published/active future terms, and stored support-needs data separately with restricted RLS and redacted audit metadata. Final submit/declaration remains a separate slice. | `npm run lint`; `npm run test`; `npm run build`. |
