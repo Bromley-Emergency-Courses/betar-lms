@@ -43,6 +43,7 @@ export type AdmissionLeadStage =
   | "rejected"
   | "accepted"
   | "archived";
+export type ApplicationStatus = "draft" | "submitted";
 
 export interface StaffUser {
   id: string;
@@ -104,6 +105,27 @@ export interface AdmissionLead {
   notes?: string;
   convertedStudentId?: string;
   archived: boolean;
+}
+
+export interface Application {
+  id: string;
+  admissionLeadId: string;
+  personId: string;
+  status: ApplicationStatus;
+  programme: "pgcert" | "microcredential";
+  moduleInterestIds: string[];
+  clinicalRole?: string;
+  employer?: string;
+  professionalRegistration?: string;
+  highestQualification?: string;
+  qualificationAwardingBody?: string;
+  qualificationYear?: number;
+  workExperience?: string;
+  personalStatement?: string;
+  submittedAt?: string;
+  lastSavedAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Term {
