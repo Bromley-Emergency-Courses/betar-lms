@@ -1,8 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { parseApplicationDraftForm } from "@/lib/application-drafts";
+import {
+  findUnsavedApplicationDraftChanges,
+  getClientIpAddress,
+  parseSubmitApplicationForm,
+  type ApplicationSubmitSavedDraftSnapshot
+} from "@/lib/application-submit";
 import { requireApplicantProfile } from "@/lib/portal-auth";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -71,4 +78,171 @@ export async function saveApplicationDraft(formData: FormData) {
 
   revalidatePath("/apply/application");
   redirect("/apply/application?saved=1");
+}
+
+export async function submitApplication(formData: FormData) {
+  await requireApplicantProfile("/apply/application");
+  const parsed = parseSubmitApplicationForm(formData);
+  const currentDraft = parseApplicationDraftForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?submitted=demo");
+  }
+
+  const headerStore = await headers();
+  const supabase = await createSupabaseServerClient();
+
+  const [applicationResult, choiceResult, supportNeedsResult] = await Promise.all([
+    supabase
+      .from("applications")
+      .select(
+        `
+          admission_lead_id,
+          programme,
+          intended_start_term_id,
+          title,
+          first_name,
+          middle_names,
+          last_name,
+          preferred_name,
+          previous_surname,
+          date_of_birth,
+          previous_study_detail,
+          partner_student_id,
+          email,
+          phone,
+          address_line_1,
+          address_line_2,
+          city,
+          postcode,
+          country,
+          clinical_role,
+          employer,
+          department_specialty,
+          professional_registration_body,
+          professional_registration_number,
+          highest_qualification,
+          qualification_awarding_body,
+          qualification_year,
+          qualification_result,
+          qualification_country,
+          work_experience,
+          nationality,
+          country_of_birth,
+          country_of_residence,
+          needs_visa_check,
+          visa_notes,
+          funding_source,
+          funding_organisation,
+          funding_contact,
+          pocus_previous_experience,
+          pocus_motivation,
+          pocus_case_improved_management,
+          pocus_limitations_case,
+          evidence_summary
+        `
+      )
+      .eq("id", parsed.application_id)
+      .maybeSingle(),
+    supabase
+      .from("application_module_offering_choices")
+      .select("offering_id")
+      .eq("application_id", parsed.application_id)
+      .order("choice_order"),
+    supabase
+      .from("application_support_needs")
+      .select("disclosed, support_detail, requested_adjustments")
+      .eq("application_id", parsed.application_id)
+      .maybeSingle()
+  ]);
+
+  if (applicationResult.error) {
+    throw new Error(applicationResult.error.message);
+  }
+  if (choiceResult.error) {
+    throw new Error(choiceResult.error.message);
+  }
+  if (supportNeedsResult.error) {
+    throw new Error(supportNeedsResult.error.message);
+  }
+  if (!applicationResult.data) {
+    throw new Error("Application was not found for this applicant.");
+  }
+
+  const application = applicationResult.data;
+  const supportNeeds = supportNeedsResult.data;
+  const savedDraft: ApplicationSubmitSavedDraftSnapshot = {
+    admission_lead_id: String(application.admission_lead_id),
+    programme: application.programme === "microcredential" ? "microcredential" : "pgcert",
+    intended_start_term_id: application.intended_start_term_id ? String(application.intended_start_term_id) : null,
+    selected_module_offering_ids: (choiceResult.data ?? []).map((row) => String(row.offering_id)),
+    title: application.title,
+    first_name: application.first_name,
+    middle_names: application.middle_names,
+    last_name: application.last_name,
+    preferred_name: application.preferred_name,
+    previous_surname: application.previous_surname,
+    date_of_birth: application.date_of_birth,
+    previous_study_detail: application.previous_study_detail,
+    partner_student_id: application.partner_student_id,
+    email: application.email,
+    phone: application.phone,
+    address_line_1: application.address_line_1,
+    address_line_2: application.address_line_2,
+    city: application.city,
+    postcode: application.postcode,
+    country: application.country,
+    clinical_role: application.clinical_role,
+    employer: application.employer,
+    department_specialty: application.department_specialty,
+    professional_registration_body: application.professional_registration_body,
+    professional_registration_number: application.professional_registration_number,
+    highest_qualification: application.highest_qualification,
+    qualification_awarding_body: application.qualification_awarding_body,
+    qualification_year: application.qualification_year,
+    qualification_result: application.qualification_result,
+    qualification_country: application.qualification_country,
+    work_experience: application.work_experience,
+    nationality: application.nationality,
+    country_of_birth: application.country_of_birth,
+    country_of_residence: application.country_of_residence,
+    needs_visa_check: Boolean(application.needs_visa_check),
+    visa_notes: application.visa_notes,
+    funding_source:
+      application.funding_source === "self_funded" ||
+      application.funding_source === "employer_sponsor" ||
+      application.funding_source === "nhs_trust" ||
+      application.funding_source === "other"
+        ? application.funding_source
+        : "unknown",
+    funding_organisation: application.funding_organisation,
+    funding_contact: application.funding_contact,
+    support_needs_disclosed: Boolean(supportNeeds?.disclosed),
+    support_needs_detail: supportNeeds?.support_detail ?? null,
+    support_needs_adjustments: supportNeeds?.requested_adjustments ?? null,
+    pocus_previous_experience: application.pocus_previous_experience,
+    pocus_motivation: application.pocus_motivation,
+    pocus_case_improved_management: application.pocus_case_improved_management,
+    pocus_limitations_case: application.pocus_limitations_case,
+    evidence_summary: application.evidence_summary
+  };
+
+  const changedFields = findUnsavedApplicationDraftChanges(currentDraft, savedDraft);
+  if (changedFields.length > 0) {
+    throw new Error("Save your latest changes before submitting your application.");
+  }
+
+  const { error } = await supabase.rpc("submit_application", {
+    p_application_id: parsed.application_id,
+    p_declaration_accepted: parsed.declaration_accepted,
+    p_ip_address: getClientIpAddress(headerStore),
+    p_user_agent: headerStore.get("user-agent")
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/apply/application");
+  redirect("/apply/application?submitted=1");
 }

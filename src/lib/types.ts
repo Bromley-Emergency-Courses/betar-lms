@@ -123,6 +123,13 @@ export interface Application {
   workExperience?: string;
   personalStatement?: string;
   submittedAt?: string;
+  declarationAcceptedAt?: string;
+  declarationVersion?: string;
+  declarationTextHash?: string;
+  declarationActorUserId?: string;
+  declarationPersonId?: string;
+  declarationIpAddress?: string;
+  declarationUserAgent?: string;
   lastSavedAt: string;
   createdAt: string;
   updatedAt: string;

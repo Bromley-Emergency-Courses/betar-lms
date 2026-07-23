@@ -1,11 +1,13 @@
-import { CheckCircle2, FileText, LockKeyhole, Save } from "lucide-react";
+import { CheckCircle2, FileText, LockKeyhole, ShieldCheck } from "lucide-react";
 import { Field, FormGrid } from "@/components/forms";
 import { saveApplicationDraft } from "@/app/apply/application/actions";
+import { ApplicationSubmitControls } from "@/app/apply/application/application-submit-controls";
 import {
   StudyPlanFields,
   type ApplicationOfferingOption,
   type ApplicationTermOption
 } from "@/app/apply/application/study-plan-fields";
+import { applicationDeclarationText } from "@/lib/application-submit";
 import { requireApplicantProfile, type PortalProfile } from "@/lib/portal-auth";
 import { getAppData } from "@/lib/seed";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
@@ -24,6 +26,7 @@ interface ApplicantInvitationSummary {
 interface ApplicationDraftSummary {
   id: string;
   admissionLeadId: string;
+  status: "draft" | "submitted";
   programme: "pgcert" | "microcredential";
   intendedStartTermId: string | null;
   selectedOfferingIds: string[];
@@ -70,12 +73,15 @@ interface ApplicationDraftSummary {
   pocusCaseImprovedManagement?: string;
   pocusLimitationsCase?: string;
   evidenceSummary?: string;
+  submittedAt?: string;
+  declarationAcceptedAt?: string;
   lastSavedAt: string;
 }
 
 type ApplicationDraftRow = {
   id: string;
   admission_lead_id: string;
+  status: "draft" | "submitted";
   programme: "pgcert" | "microcredential";
   intended_start_term_id: string | null;
   title: string | null;
@@ -118,6 +124,8 @@ type ApplicationDraftRow = {
   pocus_case_improved_management: string | null;
   pocus_limitations_case: string | null;
   evidence_summary: string | null;
+  submitted_at: string | null;
+  declaration_accepted_at: string | null;
   last_saved_at: string;
 };
 
@@ -146,6 +154,7 @@ function mapApplicationDraft(
   return {
     id: row.id,
     admissionLeadId: row.admission_lead_id,
+    status: row.status,
     programme: row.programme,
     intendedStartTermId: row.intended_start_term_id,
     selectedOfferingIds,
@@ -192,6 +201,8 @@ function mapApplicationDraft(
     pocusCaseImprovedManagement: optionalString(row.pocus_case_improved_management),
     pocusLimitationsCase: optionalString(row.pocus_limitations_case),
     evidenceSummary: optionalString(row.evidence_summary),
+    submittedAt: optionalString(row.submitted_at),
+    declarationAcceptedAt: optionalString(row.declaration_accepted_at),
     lastSavedAt: row.last_saved_at
   };
 }
@@ -254,6 +265,7 @@ async function getApplicantApplicationContext(personId: string): Promise<{
         `
           id,
           admission_lead_id,
+          status,
           programme,
           intended_start_term_id,
           title,
@@ -296,6 +308,8 @@ async function getApplicantApplicationContext(personId: string): Promise<{
           pocus_case_improved_management,
           pocus_limitations_case,
           evidence_summary,
+          submitted_at,
+          declaration_accepted_at,
           last_saved_at
         `
       )
@@ -420,6 +434,31 @@ function ApplicationSection({
         <span>{status}</span>
       </div>
       {children}
+    </div>
+  );
+}
+
+function ApplicationSubmittedPanel({ draft }: { draft: ApplicationDraftSummary }) {
+  return (
+    <div className="apply-form-panel application-draft-form">
+      <div className="section-header">
+        <div>
+          <h2>Application submitted</h2>
+          <p>
+            Submitted {draft.submittedAt ? new Date(draft.submittedAt).toLocaleString("en-GB") : "for admissions review"}.
+          </p>
+        </div>
+        <div className="icon-box">
+          <ShieldCheck size={18} />
+        </div>
+      </div>
+      <div className="application-preview-box">
+        <strong>Locked for admissions review</strong>
+        <p className="muted small">
+          Programme: {draft.programme === "pgcert" ? "PGCert" : "Microcredential"} · selected first-term offerings:{" "}
+          {draft.selectedOfferingIds.length}
+        </p>
+      </div>
     </div>
   );
 }
@@ -685,18 +724,8 @@ function ApplicationDraftForm({
             maxLength={2000}
           />
         </Field>
-        <div className="application-preview-box">
-          <strong>Preview before submission</strong>
-          <p className="muted small">
-            Final declaration and submit will be added in the next submission slice. Saving here does not reserve capacity, enrol you, or create finance records.
-          </p>
-        </div>
+        <ApplicationSubmitControls applicationId={draft?.id} declarationText={applicationDeclarationText} />
       </ApplicationSection>
-
-      <button className="button primary apply-submit">
-        <Save size={16} />
-        Save draft
-      </button>
     </form>
   );
 }
@@ -704,10 +733,10 @@ function ApplicationDraftForm({
 export default async function ApplicationAccessPage({
   searchParams
 }: {
-  searchParams: Promise<{ saved?: string }>;
+  searchParams: Promise<{ saved?: string; submitted?: string }>;
 }) {
   const profile = await requireApplicantProfile("/apply/application");
-  const { saved } = await searchParams;
+  const { saved, submitted } = await searchParams;
   const { invitations, draft, terms, offerings } = await getApplicantApplicationContext(profile.personId);
   const latestInvitation = invitations[0];
   const claimedInvitation =
@@ -738,6 +767,20 @@ export default async function ApplicationAccessPage({
           </div>
         ) : null}
 
+        {submitted ? (
+          <div className="apply-success" role="status">
+            <CheckCircle2 size={22} />
+            <div>
+              <h2>Application submitted</h2>
+              <p>
+                {submitted === "demo"
+                  ? "Demo mode is running without a Supabase database, so no live application was submitted."
+                  : "Your application has been locked and sent to admissions review."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="apply-form-panel">
           <div className="section-header">
             <div>
@@ -764,7 +807,9 @@ export default async function ApplicationAccessPage({
           )}
         </div>
 
-        {claimedInvitation ? (
+        {draft?.status === "submitted" ? (
+          <ApplicationSubmittedPanel draft={draft} />
+        ) : claimedInvitation ? (
           <ApplicationDraftForm
             admissionLeadId={claimedInvitation.admissionLeadId}
             draft={draft}

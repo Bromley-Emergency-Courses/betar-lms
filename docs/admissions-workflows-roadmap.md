@@ -14,12 +14,13 @@ The workspace-local companion file is `.context/admissions-workflows-handoff.md`
 - Keep one Supabase/Postgres system of record so accepted applicants can become students without sync jobs or re-keying.
 - Build the first release around the core admissions journey: enquiry/application, review, offer, acceptance, registration, and conversion to student.
 - Treat the public `/apply` enquiry form and authenticated `/apply/application` form as different product surfaces: enquiry captures broad module interests; application captures intended first-term module offerings after programme and start term are selected.
+- Treat production email delivery as a Phase 1 go-live dependency, not a blocker for ordinary feature development. Application invitations currently use Supabase Auth magic links, but Supabase's default email sender is rate-limited and not suitable for cohorts. Continue building the admissions workflow with configurable email delivery, but configure Supabase Auth custom SMTP through the organisation's Microsoft 365/Outlook sender before sending real applicant invitations at scale.
 - Defer expanded finance work until after the admissions and registration flow is reliable. Existing term finance records can continue to be used in the interim.
 - Treat security, RLS, private storage, audit logging, and retention decisions as foundation work, not later polish.
 
 ## Current Application Form Adjustment
 
-The expanded application draft-save slice is implemented. The remaining application-form work should add repeatable qualification rows if needed, document upload slots, and the transactional final submit/declaration action before staff review/offers are built.
+The expanded application draft-save slice and transactional final submit/declaration slice are implemented. The remaining application-form work should add repeatable qualification rows if needed and document upload slots before staff review/offers are built.
 
 Required changes:
 
@@ -28,10 +29,10 @@ Required changes:
 - Intended start term is now on the application model before concrete module selection.
 - Authenticated application drafts now store one or two selected `module_offerings`, while old `module_interest_ids` remain only for backwards/enquiry-copy context.
 - Selectable offerings are loaded dynamically for the chosen term from `module_offerings` joined to active `course_modules` and `published`/`active` future `terms`.
-- Draft-save validates offering selection server-side; final submit still needs the same validation in the submit RPC when that slice is built.
+- Draft-save validates offering selection server-side; final submit repeats required-field and offering validation in its dedicated submit RPC.
 - Selected offerings do not reserve places, create enrolments, or create finance records.
 - Optional disability/support-needs information is stored separately from general application fields with restricted access and redacted audit metadata.
-- Add a real final submit action separate from draft save. Submission must lock the application, update the lead stage, store declaration acceptance metadata, and write an audit event transactionally.
+- Final submit is separate from draft save. It validates the saved application snapshot and selected offerings, locks the application by setting `submitted`, updates the lead stage, stores declaration acceptance metadata, and writes `application.submitted` transactionally.
 
 ## Status Legend
 
@@ -74,6 +75,9 @@ Goal: run a complete intake up to offer acceptance without depending on email th
 - [x] Staff can issue application invitations from existing leads.
 - [x] Applicant magic-link login.
 - [x] Applicant can claim an invitation into the separate portal identity boundary.
+- [ ] Configure production email delivery for Supabase Auth magic links using organisation-approved Microsoft 365/Outlook SMTP rather than Supabase's default sender.
+- [ ] Test application invitation deliverability across internal Outlook, Gmail, and likely applicant workplace domains before applicant go-live.
+- [ ] Keep production applicant sends disabled or clearly marked unverified until the Microsoft 365/Outlook sender mailbox, SMTP credentials, and domain authentication are confirmed.
 - [ ] Staff can manually log enquiries that still arrive by email.
 - [x] Basic application form with draft save.
 - [x] Basic programme choice: PGCert or microcredential.
@@ -92,10 +96,11 @@ Goal: run a complete intake up to offer acceptance without depending on email th
 - [x] Add optional support-needs/disability capture with restricted/sensitive handling.
 - [x] Add the four required POCUS free-text questions as named fields.
 - [x] Add application section checklist/status and preview-style review before submit.
-- [ ] Add final submission declaration and transactional submit action.
+- [x] Add final submission declaration and transactional submit action.
 - [ ] Document upload slots with file validation.
 - [ ] Staff review screen with verification states and decision reasons.
 - [ ] Offer, rejection, and reminder email templates.
+- [ ] Confirm offer/rejection/reminder emails use the same production email delivery configuration and do not depend on Supabase's default sender.
 - [ ] Offer deadline and lapsed-offer cron.
 - [ ] Offer accept/decline page in applicant portal.
 - [ ] Correspondence log records template version and provider message IDs.
@@ -185,12 +190,15 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 | 2026-07-23 | Keep `/apply` module selections as broad `course_modules` interests and use `module_offerings` only inside authenticated application/registration flows. | Enquiry should stay lightweight, while application and conversion need concrete term-specific choices. |
 | 2026-07-23 | Application module choices are intended choices only. | They support admissions review and offer generation but must not reserve capacity, create enrolments, or create finance records before registration conversion. |
 | 2026-07-23 | Support-needs/disability information must be separated from general application data. | It can include special category data and needs restricted access, redacted audit metadata, and exclusion from generic exports. |
+| 2026-07-23 | Production applicant email must use organisation-controlled Microsoft 365/Outlook SMTP, not the default Supabase email sender. | Supabase's default sender is rate-limited and best-effort; admissions may need hundreds of application invitations and later offer/reminder emails. An `@gmail.com` company mailbox is not preferred for production because it looks less official and is less controlled than the organisation domain. |
 
 ## Open Decisions
 
 - Confirm default offer deadline.
 - Confirm default registration deadline.
 - Confirm whether applicant/student auth should be magic link only.
+- Confirm the Microsoft 365/Outlook sender mailbox for production application emails, for example `admissions@...` or `no-reply@...`, and who can provide SMTP credentials/admin setup.
+- Confirm SPF, DKIM, and DMARC are correctly configured for the organisation domain before high-volume applicant sends.
 - Confirm exact mandatory/optional field list for nationality, visa, funding, gender, previous study, and emergency/alternative contact.
 - Confirm whether currently active terms remain selectable for applications until `terms.ends_on`, or whether only terms with `starts_on >= current_date` are selectable.
 - Confirm whether staff can adjust intended module offerings while issuing an offer and how those changes should be shown to applicants.
@@ -218,3 +226,4 @@ Add entries here when meaningful code lands.
 | 2026-07-23 | `12amathew/application-draft-save-form` | Added the authenticated application draft slice: applicant-owned `applications` draft model, active-module read policy for applicant forms, `save_application_draft(...)` RPC with draft-save audit events, and `/apply/application` draft save form for programme, module interests, professional details, qualifications, work experience, and statement fields. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `bangalore` docs update | Consolidated the expanded university-style application plan: enquiry interests stay broad, authenticated applications choose one or two future term `module_offerings`, the application model needs personal/contact/professional/qualification/nationality/visa/funding/POCUS/declaration sections, and support-needs data needs restricted handling. | Documentation-only change. |
 | 2026-07-23 | `12amathew/expand-application-form` | Expanded `/apply/application` into a university-style draft form with personal/contact/employment/qualification/study-plan/nationality/visa/funding/support-needs/POCUS/evidence-preview sections, added intended start term and selected `module_offerings`, validated selectable offerings server-side against active modules in published/active future terms, and stored support-needs data separately with restricted RLS and redacted audit metadata. Final submit/declaration remains a separate slice. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-23 | `12amathew/final-submit-declaration` | Added the Phase 1 final application submit slice: `submit_application(...)` validates required saved fields, selected future start term, and one/two selected `module_offerings`; derives declaration version/hash inside the RPC; captures applicant auth user, person, timestamp, IP, and user agent; guards against stale unsaved form edits before locking applicant editing; updates the related lead stage to `submitted`; and writes `application.submitted` transactionally. | `npm run lint`; `npm run test`; `npm run build`. |
