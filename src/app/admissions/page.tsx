@@ -9,10 +9,10 @@ import { getLmsData } from "@/lib/lms-data";
 export default async function AdmissionsPage({
   searchParams
 }: {
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{ mode?: string; invited?: string }>;
 }) {
   await requirePermission("manage_admissions");
-  const { mode } = await searchParams;
+  const { mode, invited } = await searchParams;
   const editMode = mode === "edit";
   const data = await getLmsData();
 
@@ -36,6 +36,11 @@ export default async function AdmissionsPage({
     >
       {editMode ? (
         <>
+          {invited ? (
+            <div className="apply-success" role="status">
+              Application invitation {invited === "demo" ? "simulated in demo mode" : "sent"}.
+            </div>
+          ) : null}
           <AdmissionsTools data={data} />
           {data.admissionLeads.length === 0 ? (
             <EmptyState title="No admission leads yet" detail="Create a lead or import later-stage student records." />

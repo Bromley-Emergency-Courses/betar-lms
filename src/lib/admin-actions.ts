@@ -2,8 +2,14 @@
 
 import Papa from "papaparse";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import {
+  applicationMagicLinkRedirectUrl,
+  isIssuedApplicationInvitation,
+  parseStaffInvitationForm
+} from "@/lib/application-invitations";
 import { requirePermission } from "@/lib/auth";
 import {
   normalizeInboundExamResult,
@@ -16,7 +22,7 @@ import {
 } from "@/lib/exam-adapters";
 import { getLmsData } from "@/lib/lms-data";
 import { presentationRubricCriteria } from "@/lib/presentation-rubric";
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseAuthEmailClient, createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -67,6 +73,13 @@ function requireDeleteConfirmation(formData: FormData): void {
 function revalidateCourseConfig() {
   revalidatePath("/course");
   revalidatePath("/exams");
+}
+
+async function requestOrigin(): Promise<string> {
+  const headerStore = await headers();
+  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host") ?? "localhost:3000";
+  const protocol = headerStore.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${protocol}://${host}`;
 }
 
 const idSchema = z.string().uuid();
@@ -554,6 +567,44 @@ export async function updateAdmissionLead(formData: FormData) {
 
   revalidatePath("/admissions");
   redirect("/admissions?mode=edit");
+}
+
+export async function inviteAdmissionLeadToApply(formData: FormData) {
+  await requirePermission("manage_admissions");
+
+  if (!isSupabaseConfigured()) {
+    redirect("/admissions?mode=edit&invited=demo");
+  }
+
+  const parsed = parseStaffInvitationForm(formData);
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc("issue_application_invitation", {
+    p_lead_id: parsed.lead_id
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!isIssuedApplicationInvitation(data)) {
+    throw new Error("Application invitation response was not valid.");
+  }
+
+  const authClient = createSupabaseAuthEmailClient();
+  const { error: magicLinkError } = await authClient.auth.signInWithOtp({
+    email: data.email,
+    options: {
+      emailRedirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application", data),
+      shouldCreateUser: true
+    }
+  });
+
+  if (magicLinkError) {
+    throw new Error(magicLinkError.message);
+  }
+
+  revalidatePath("/admissions");
+  redirect("/admissions?mode=edit&invited=1");
 }
 
 export async function convertAdmissionLeadToStudent(formData: FormData) {

@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
+import { canIssueApplicationInvitationForLead } from "@/lib/application-invitations";
 import {
   convertAdmissionLeadToStudent,
   createAdmissionLead,
+  inviteAdmissionLeadToApply,
   importAdmissionsCsv,
   updateAdmissionLead
 } from "@/lib/admin-actions";
@@ -223,6 +225,31 @@ function ConvertLeadForm({ data, lead }: { data: AppData; lead: AdmissionLead })
   );
 }
 
+function ApplicationInvitationForm({ lead }: { lead: AdmissionLead }) {
+  if (!canIssueApplicationInvitationForLead(lead)) {
+    return null;
+  }
+
+  return (
+    <details className="expected-details">
+      <summary>
+        Application access
+        <span className="muted small">
+          {lead.applicationInvitedAt ? `Invited ${new Date(lead.applicationInvitedAt).toLocaleDateString("en-GB")}` : "Not invited yet"}
+        </span>
+      </summary>
+      <form className="grid session-form" action={inviteAdmissionLeadToApply}>
+        <input type="hidden" name="lead_id" value={lead.id} />
+        <p className="muted small">
+          Sends a Supabase magic link to {lead.email} and opens only the applicant access area. The full application form is still a later Phase 1 slice.
+          {lead.applicationInvitationExpiresAt ? ` Current link expires ${new Date(lead.applicationInvitationExpiresAt).toLocaleDateString("en-GB")}.` : ""}
+        </p>
+        <button className="button primary">Send application invitation</button>
+      </form>
+    </details>
+  );
+}
+
 export function AdmissionsRecords({ data }: { data: AppData }) {
   const orderedLeads = [...data.admissionLeads].sort((a, b) => {
     const archivedDiff = Number(a.archived || Boolean(a.convertedStudentId)) - Number(b.archived || Boolean(b.convertedStudentId));
@@ -256,6 +283,7 @@ export function AdmissionsRecords({ data }: { data: AppData }) {
               <LeadFields data={data} lead={lead} />
               <button className="button primary">Save lead</button>
             </form>
+            <ApplicationInvitationForm lead={lead} />
             {!lead.convertedStudentId && lead.stage === "accepted" ? <ConvertLeadForm data={data} lead={lead} /> : null}
           </div>
         ))}
