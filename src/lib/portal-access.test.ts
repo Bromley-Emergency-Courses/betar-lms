@@ -15,12 +15,14 @@ describe("route auth boundaries", () => {
     expect(routeAuthBoundaryForPath("/portal?tab=registration")).toBe("portal");
     expect(routeAuthBoundaryForPath("/apply/draft")).toBe("portal");
     expect(routeAuthBoundaryForPath("/apply/application")).toBe("portal");
+    expect(routeAuthBoundaryForPath("/api/portal/documents/file-id/signed-url")).toBe("portal");
   });
 
   it("keeps existing LMS routes staff-only by default", () => {
     expect(routeAuthBoundaryForPath("/")).toBe("staff");
     expect(routeAuthBoundaryForPath("/students")).toBe("staff");
     expect(routeAuthBoundaryForPath("/admissions")).toBe("staff");
+    expect(routeAuthBoundaryForPath("/api/admin/documents/file-id/signed-url")).toBe("staff");
     expect(routeAuthBoundaryForPath("/api/students/student-id/photo")).toBe("staff");
   });
 

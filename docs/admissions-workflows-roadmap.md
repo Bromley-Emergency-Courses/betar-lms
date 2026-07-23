@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Roadmap
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 This document is the durable handoff record for the admissions, application, registration, and student portal work. Keep it updated when branches are merged so new Conductor workspaces created from `origin/main` can pick up the current state without needing prior chat context.
 
@@ -38,7 +38,7 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [x] Tighten storage model for identity documents, qualification documents, student photos, generated letters, and deferral evidence.
 - [x] Add audit event schema foundations for staff, applicant, student, and service actors.
 - [x] Add correspondence template and log schema before sending automated emails.
-- [ ] Add signed URL generation after server-side authorization for admissions documents.
+- [x] Add signed URL generation after server-side authorization for admissions documents.
 - [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
 - [ ] Add RLS test coverage for staff, applicant, and student access boundaries.
 - [x] Design conversion as a transactional database function/RPC rather than separate client-side writes.
@@ -168,3 +168,4 @@ Add entries here when meaningful code lands.
 | 2026-07-22 | `12amathew/admissions-docs-rls-hardening` | Added private admissions document buckets, tightened storage object policies so teachers no longer read mixed/sensitive document buckets, and added managed-file metadata fields for person linkage, uploader person, sanitized filenames, and retention class. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/audit-correspondence-log-foundations` | Expanded audit events with actor/person/reason fields and staff-only direct append policy, added correspondence template/log foundations with recipient snapshots, and added metadata-redaction helpers for future workflow writes. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/conversion-transaction-foundation` | Added admissions conversion staging tables and `convert_admissions_registration(...)`, a security-definer RPC that locks the conversion request and transactionally updates person, student, enrolments, expected finance rows, document ownership, portal identity, lifecycle state, and audit events. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-23 | `12amathew/signed-document-url-access` | Added server-authorized signed URL endpoints for staff and portal document access, backed by managed-file authorization rules, service-role object signing, sensitive staff document access audit events, and staff/applicant/student authorization tests. | `npm run lint`; `npm run test`; `npm run build`. |
