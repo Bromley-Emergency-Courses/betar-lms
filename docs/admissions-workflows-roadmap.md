@@ -58,10 +58,10 @@ Goal: run a complete intake up to offer acceptance without depending on email th
 - [x] Applicant magic-link login.
 - [x] Applicant can claim an invitation into the separate portal identity boundary.
 - [ ] Staff can manually log enquiries that still arrive by email.
-- [ ] Application form with draft save.
-- [ ] Programme choice: PGCert or microcredential.
-- [ ] Module interest capture.
-- [ ] Work experience, qualification, and statement capture.
+- [x] Application form with draft save.
+- [x] Programme choice: PGCert or microcredential.
+- [x] Module interest capture.
+- [x] Work experience, qualification, and statement capture.
 - [ ] Document upload slots with file validation.
 - [ ] Staff review screen with verification states and decision reasons.
 - [ ] Offer, rejection, and reminder email templates.
@@ -177,3 +177,4 @@ Add entries here when meaningful code lands.
 | 2026-07-23 | `12amathew/signed-document-url-access` | Added server-authorized signed URL endpoints for staff and portal document access, backed by managed-file authorization rules, service-role object signing, sensitive staff document access audit events, and staff/applicant/student authorization tests. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `12amathew/public-enquiry-intake` | Started Phase 1 with public `/apply` enquiry intake, a narrow anonymous RPC that creates `admission_leads`, an `enquiry.submitted` audit event, route/access tests, and roadmap clarification that Phase 0 infrastructure is complete while workflow-specific coverage continues inside later phases. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `12amathew/application-invitations-magic-link` | Added Phase 1 application invitations without building the full application form: staff can invite an existing lead, invitations create/link a `person`, Supabase magic links route through `/auth/callback`, applicants claim access into `person_auth_identities`, and `/apply/application` shows invitation/access status only. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-23 | `12amathew/application-draft-save-form` | Added the authenticated application draft slice: applicant-owned `applications` draft model, active-module read policy for applicant forms, `save_application_draft(...)` RPC with draft-save audit events, and `/apply/application` draft save form for programme, module interests, professional details, qualifications, work experience, and statement fields. | `npm run lint`; `npm run test`; `npm run build`. |

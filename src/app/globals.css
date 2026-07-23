@@ -256,6 +256,14 @@ textarea {
   justify-self: start;
 }
 
+.application-draft-form {
+  width: min(100%, 860px);
+}
+
+.application-draft-form .textarea {
+  min-height: 132px;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
