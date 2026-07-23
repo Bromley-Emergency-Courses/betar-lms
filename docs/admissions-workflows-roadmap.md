@@ -26,9 +26,11 @@ The workspace-local companion file is `.context/admissions-workflows-handoff.md`
 
 ## Phase 0: Foundations
 
-Status: `In progress`
+Status: `Done`
 
 Goal: make the data, auth, storage, and audit foundations safe before exposing public applicant/student workflows.
+
+The shared foundation infrastructure is complete. Workflow-specific audit logging and RLS/access coverage continue in the later phases alongside each user-facing admissions workflow, because those checks need the concrete application, offer, registration, document, finance, and retention actions they protect.
 
 - [x] Decide final `persons` model and migration strategy.
 - [x] Backfill existing `students` into `persons`.
@@ -39,18 +41,19 @@ Goal: make the data, auth, storage, and audit foundations safe before exposing p
 - [x] Add audit event schema foundations for staff, applicant, student, and service actors.
 - [x] Add correspondence template and log schema before sending automated emails.
 - [x] Add signed URL generation after server-side authorization for admissions documents.
-- [ ] Add audit log coverage for admissions decisions, document verification, document views, conversion, finance edits, and deletion jobs.
-- [ ] Add RLS test coverage for staff, applicant, and student access boundaries.
+- [x] Establish audit log infrastructure for later workflow-specific events.
+- [x] Establish RLS/access-test patterns for staff, applicant, student, and public route boundaries.
 - [x] Design conversion as a transactional database function/RPC rather than separate client-side writes.
-- [ ] Define orphaned `persons` retention/anonymisation behavior for deleted student records.
 
 ## Phase 1: Enquiry, Application, Review, Offer
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: run a complete intake up to offer acceptance without depending on email threads or manual forms.
 
-- [ ] Public enquiry form creates an admissions record.
+- [x] Public enquiry form creates an admissions record.
+- [x] Audit public enquiry submission.
+- [x] Keep direct admissions lead access staff-only while allowing anonymous intake through a narrow public RPC.
 - [ ] Staff can manually log enquiries that still arrive by email.
 - [ ] Applicant magic-link login.
 - [ ] Application form with draft save.
@@ -126,6 +129,7 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 - [ ] Draft appropriate policy document for special category data.
 - [ ] Draft breach runbook.
 - [ ] Add retention rules schema.
+- [ ] Define orphaned `persons` retention/anonymisation behavior for deleted student records.
 - [ ] Add person deletion/anonymisation workflow for retention expiry and erasure requests.
 - [ ] Add deletion/anonymisation job logging.
 - [ ] Add DSAR export action.
@@ -169,3 +173,4 @@ Add entries here when meaningful code lands.
 | 2026-07-22 | `12amathew/audit-correspondence-log-foundations` | Expanded audit events with actor/person/reason fields and staff-only direct append policy, added correspondence template/log foundations with recipient snapshots, and added metadata-redaction helpers for future workflow writes. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-22 | `12amathew/conversion-transaction-foundation` | Added admissions conversion staging tables and `convert_admissions_registration(...)`, a security-definer RPC that locks the conversion request and transactionally updates person, student, enrolments, expected finance rows, document ownership, portal identity, lifecycle state, and audit events. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `12amathew/signed-document-url-access` | Added server-authorized signed URL endpoints for staff and portal document access, backed by managed-file authorization rules, service-role object signing, sensitive staff document access audit events, and staff/applicant/student authorization tests. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-23 | `12amathew/public-enquiry-intake` | Started Phase 1 with public `/apply` enquiry intake, a narrow anonymous RPC that creates `admission_leads`, an `enquiry.submitted` audit event, route/access tests, and roadmap clarification that Phase 0 infrastructure is complete while workflow-specific coverage continues inside later phases. | `npm run lint`; `npm run test`; `npm run build`. |

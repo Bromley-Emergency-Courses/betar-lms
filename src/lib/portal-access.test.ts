@@ -6,6 +6,8 @@ describe("route auth boundaries", () => {
     expect(routeAuthBoundaryForPath("/login")).toBe("public");
     expect(routeAuthBoundaryForPath("/login/reset")).toBe("public");
     expect(routeAuthBoundaryForPath("/apply")).toBe("public");
+    expect(routeAuthBoundaryForPath("/apply/")).toBe("public");
+    expect(routeAuthBoundaryForPath("/apply?submitted=1")).toBe("public");
     expect(routeAuthBoundaryForPath("/apply/login")).toBe("public");
   });
 

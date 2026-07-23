@@ -15,7 +15,8 @@ function isPathOrChild(pathname: string, prefix: string): boolean {
 }
 
 export function routeAuthBoundaryForPath(pathname: string): RouteAuthBoundary {
-  const pathOnly = pathname.split(/[?#]/, 1)[0] || "/";
+  const rawPathOnly = pathname.split(/[?#]/, 1)[0] || "/";
+  const pathOnly = rawPathOnly.length > 1 ? rawPathOnly.replace(/\/+$/, "") : rawPathOnly;
 
   if (
     publicAssetPrefixes.some((prefix) => pathOnly.startsWith(prefix)) ||
