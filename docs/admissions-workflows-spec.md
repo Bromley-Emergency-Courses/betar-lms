@@ -24,6 +24,7 @@ Core decisions:
 - Do not sync between two systems.
 - Accepted applicants become BETAR students through a database transaction.
 - Public applicant/student routes must have a separate auth and RLS boundary from staff routes.
+- Production applicant emails must not use Supabase's default email sender. Use Supabase Auth custom SMTP with the organisation-approved Microsoft 365/Outlook sender before real applicant invitation or offer email sends at scale. Missing SMTP access blocks go-live and live cohort sends, but it should not block ordinary feature development.
 - Expanded finance is deferred until the core admissions and registration flow is stable.
 
 ## Scope
@@ -165,6 +166,16 @@ Recommended future tables:
 
 Use Supabase magic links for applicants and students unless explicitly changed later.
 
+Production email delivery requirement:
+
+- Supabase Auth magic links may remain the auth mechanism, but their delivery must use custom SMTP in production.
+- Preferred production sender is an organisation-controlled Microsoft 365/Outlook mailbox such as `admissions@...`, `applications@...`, or `no-reply@...`.
+- Do not rely on Supabase's default email sender for applicant invitations, offer emails, reminders, or registration access. It is suitable only for development/demo testing because of rate limits and best-effort delivery.
+- Do not use an `@gmail.com` mailbox as the preferred production sender. It can unblock temporary testing, but it is less official and less controlled than an organisation-domain Microsoft 365 sender.
+- Before go-live, confirm the sender mailbox, SMTP host/port/security, credentials handling, SPF/DKIM/DMARC status, and a deliverability test plan with the person who manages the organisation email/domain.
+- Store SMTP credentials only in the Supabase dashboard or production secret store. Never commit mailbox passwords or app passwords to the repository.
+- Agents should continue building invitation, review, offer, reminder, correspondence-log, and portal flows while SMTP access is pending. Keep production sends behind configuration/readiness checks so the system cannot be mistaken for production-email-ready.
+
 Rules:
 
 - Staff auth remains based on `staff_profiles`.
@@ -240,6 +251,14 @@ Audit records should include:
 ### Correspondence Log
 
 Add correspondence logging before sending automated emails.
+
+Email-provider rules:
+
+- Application invitations currently use Supabase Auth magic-link email. Future email work should preserve the secure invitation claim flow while switching delivery to configured custom SMTP.
+- The configured provider should be Microsoft 365/Outlook unless a later durable decision replaces it with a transactional provider.
+- For production readiness, record enough provider metadata to trace sends. Where the provider exposes a message ID, persist it in `correspondence_logs.provider_message_id`.
+- Staff-facing send actions should report provider errors clearly instead of silently treating failed email sends as successful invitations.
+- Bulk/cohort sends must include batching/rate-limit behavior appropriate to the configured provider.
 
 Log:
 
@@ -474,6 +493,16 @@ Rules:
 - Submitted application records should preserve an application-time snapshot of the supplied personal/contact/study-plan data even if the person record changes later.
 - If draft save updates `persons`, do so through audited server-side logic. Otherwise keep `persons` as the identity/contact source and use application snapshots for review/conversion.
 
+Current Phase 1 submit implementation:
+
+- `submit_application(...)` is the dedicated applicant RPC for final submission and is separate from `save_application_draft(...)`.
+- Submission validates the saved application snapshot, the selected intended future start term, and one or two selected `module_offerings`.
+- Submission derives and stores the current declaration version/hash inside the RPC, and captures applicant auth user, person, timestamp, IP address where available, and user agent where available.
+- Submission sets `applications.status = 'submitted'`, sets `submitted_at`, updates the related `admission_leads.stage` to `submitted`, and writes `application.submitted` in the same database transaction.
+- Submitted applications are locked from applicant editing because draft save only allows draft applications on leads still in `application_invited`.
+- The applicant UI disables final submit after draft-field edits until the draft is saved, and the submit server action rejects requests where submitted form fields differ from the saved application snapshot.
+- This slice deliberately does not require or process document upload slots yet; document uploads and verification remain a separate Phase 1 slice.
+
 ### Documents
 
 Application documents need verification states:
@@ -556,6 +585,14 @@ Phase 1 template set:
 - offer declined confirmation.
 
 University sample letters are required before final wording is locked.
+
+Delivery requirements:
+
+- Do not build production email templates assuming Supabase's default email sender.
+- Before enabling real applicant sends, configure Supabase Auth custom SMTP against the organisation-approved Microsoft 365/Outlook sender.
+- Test deliverability to internal Outlook recipients, Gmail recipients, and likely applicant workplace domains before admissions go-live.
+- Keep portal state as the source of truth. Email is a notification/access mechanism, not the authoritative offer/application state.
+- SMTP setup can be delayed while building templates and workflows, provided live applicant sends remain disabled or visibly unverified.
 
 ## Phase 2: Registration and Conversion
 
@@ -824,6 +861,8 @@ Phase 1 is complete when:
 - Staff can review it.
 - Staff can issue an offer or rejection.
 - Applicant can accept, decline, or let offer lapse.
+- Production application invitation and offer/reminder email delivery is configured through organisation-approved SMTP/provider, not Supabase's default sender.
+- Application invitation deliverability has been tested across representative recipient domains before go-live.
 - Emails/correspondence are logged.
 
 Phase 2 is complete when:

@@ -319,6 +319,17 @@ textarea {
   margin: 0;
 }
 
+.application-submit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.application-actions {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
