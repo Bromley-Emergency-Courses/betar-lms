@@ -1,4 +1,4 @@
-import { Eye, Pencil } from "lucide-react";
+import { ClipboardCheck, Eye, Pencil } from "lucide-react";
 import Link from "next/link";
 import { AdmissionsBoard, AdmissionsRecords, AdmissionsTools } from "@/components/admissions-records";
 import { AppShell } from "@/components/app-shell";
@@ -21,16 +21,24 @@ export default async function AdmissionsPage({
       title="Admissions Pipeline"
       subtitle="Interest through CCCU registration"
       actions={
-        editMode ? (
-          <Link className="button" href="/admissions">
-            <Eye size={16} />
-            View mode
-          </Link>
-        ) : (
-          <Link className="button primary" href="/admissions?mode=edit">
-            <Pencil size={16} />
-            Edit mode
-          </Link>
+        (
+          <div className="toolbar">
+            <Link className="button" href="/admissions/reviews">
+              <ClipboardCheck size={16} />
+              Review applications
+            </Link>
+            {editMode ? (
+              <Link className="button" href="/admissions">
+                <Eye size={16} />
+                View mode
+              </Link>
+            ) : (
+              <Link className="button primary" href="/admissions?mode=edit">
+                <Pencil size={16} />
+                Edit mode
+              </Link>
+            )}
+          </div>
         )
       }
     >

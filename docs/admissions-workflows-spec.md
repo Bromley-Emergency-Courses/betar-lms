@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Spec
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 This is the developer-facing build spec for the admissions, application, registration, and student portal work. It is derived from the original PGCert admissions system plan and adjusted for the current BETAR LMS codebase.
 
@@ -544,7 +544,8 @@ Current Phase 1 application document implementation:
 - `record_application_document_upload(...)` validates applicant ownership, draft status, lead stage, slot metadata, extension allow-list, file metadata, object path, and backing `storage.objects` existence before creating the managed-file row and slot linkage.
 - Each successful upload writes a `document.uploaded` audit event without storing document contents or sensitive free-text metadata.
 - Final application submission blocks when required slots are missing, rejected, or no longer linked to a real private storage object, but it does not require staff verification at this stage.
-- Staff review UI, document verification actions, rejection notes, and offer decisions remain separate Phase 1 slices.
+- Staff review UI and document verification actions are implemented as a later Phase 1 slice.
+- Offer/rejection decisions, offer issue, registration, and production email configuration remain separate Phase 1/2 slices.
 
 ### Staff Review
 
@@ -555,13 +556,24 @@ Review screen must support:
 - viewing the four POCUS free-text answers as separate review fields.
 - viewing documents through authorized signed URLs.
 - marking documents verified/rejected.
-- recording decision.
-- recording decision reason.
-- issuing offer.
-- rejecting application.
+- resetting document verification back to unverified where staff need to re-check replacement or ambiguous evidence.
+- recording review notes.
+- recording decision readiness.
+- recording decision reason notes for later offer/rejection workflows.
 - showing disability/support-needs information only in a restricted admissions/admin view, separated from the general application review summary.
 
-One reviewer may decide, but reviewer identity and decision reason are mandatory.
+Staff review must remain separate from offer/rejection email templates, offer issue, offer acceptance, registration, enrolment creation, finance generation, and production email configuration.
+
+Current Phase 1 staff review implementation:
+
+- `/admissions/reviews` is a staff-only admissions/admin screen for submitted applications whose lead is still in `submitted` or `reviewed`.
+- The screen shows applicant details, intended start term, selected `module_offerings`, POCUS answers, uploaded evidence status, and a separated restricted support-needs panel.
+- Reading disclosed support-needs detail in the staff review screen writes `application_support_needs.viewed` audit events with redacted metadata before rendering the restricted text.
+- Application documents continue to use `application_document_slots` linked to `managed_files`; staff can open files through the existing server-authorized signed URL endpoint.
+- `verify_application_document_slot(...)` records `unverified`, `verified`, or `rejected` states with verifier, timestamp, note, and audit events: `document.verified`, `document.rejected`, or `document.verification_reset`.
+- `application_reviews` stores one review row per application with reviewer, readiness status, review notes, decision reason notes, and last reviewed timestamp.
+- `record_staff_application_review(...)` writes `application.review_recorded`, redacts free-text note content from audit metadata, and moves the related lead from `submitted` to `reviewed` only when readiness is `ready_for_decision`.
+- The review slice deliberately does not create offer records, send offer/rejection/reminder emails, create enrolments, create finance rows, accept offers, register applicants, or configure production email.
 
 ### Offers
 
