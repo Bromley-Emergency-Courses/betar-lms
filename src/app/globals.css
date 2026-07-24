@@ -370,6 +370,141 @@ textarea {
   }
 }
 
+.review-application-list,
+.review-application-body,
+.review-offering-list {
+  display: grid;
+  gap: 14px;
+}
+
+.review-application-record {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(31 36 33 / 5%);
+}
+
+.review-application-record > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.review-application-record > summary > span:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.review-application-record > summary strong,
+.review-application-record > summary small {
+  overflow-wrap: anywhere;
+}
+
+.review-application-record > summary small {
+  color: var(--muted);
+}
+
+.review-application-body {
+  padding: 0 16px 16px;
+}
+
+.review-application-summary {
+  box-shadow: none;
+}
+
+.review-data-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.review-data-item,
+.review-text-answer,
+.review-offering-row {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.review-data-item span,
+.review-text-answer span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.review-data-item strong,
+.review-text-answer p,
+.review-offering-row strong,
+.review-offering-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-text-answer p {
+  color: var(--ink);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.restricted-panel {
+  border-color: #d8c7fb;
+  background: #fbf8ff;
+}
+
+.review-document-slot {
+  background: #fff;
+}
+
+.review-document-main,
+.review-document-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.review-document-status,
+.document-open-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.review-document-form {
+  grid-template-columns: minmax(160px, 220px) minmax(220px, 1fr) auto;
+  align-items: end;
+}
+
+@media (max-width: 760px) {
+  .review-application-record > summary,
+  .review-document-main,
+  .review-document-form {
+    grid-template-columns: 1fr;
+  }
+
+  .review-application-record > summary {
+    display: grid;
+  }
+
+  .review-document-status {
+    justify-content: flex-start;
+  }
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
