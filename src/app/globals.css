@@ -330,6 +330,46 @@ textarea {
   justify-items: start;
 }
 
+.application-document-list {
+  display: grid;
+  gap: 12px;
+}
+
+.application-document-slot {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.application-document-slot-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.application-document-slot-heading span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.application-document-upload-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .application-document-upload-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;

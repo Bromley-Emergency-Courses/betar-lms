@@ -497,11 +497,12 @@ Current Phase 1 submit implementation:
 
 - `submit_application(...)` is the dedicated applicant RPC for final submission and is separate from `save_application_draft(...)`.
 - Submission validates the saved application snapshot, the selected intended future start term, and one or two selected `module_offerings`.
+- Submission now also requires the Phase 1 application evidence slots marked required to contain a current uploaded document that has not been rejected.
 - Submission derives and stores the current declaration version/hash inside the RPC, and captures applicant auth user, person, timestamp, IP address where available, and user agent where available.
 - Submission sets `applications.status = 'submitted'`, sets `submitted_at`, updates the related `admission_leads.stage` to `submitted`, and writes `application.submitted` in the same database transaction.
 - Submitted applications are locked from applicant editing because draft save only allows draft applications on leads still in `application_invited`.
 - The applicant UI disables final submit after draft-field edits until the draft is saved, and the submit server action rejects requests where submitted form fields differ from the saved application snapshot.
-- This slice deliberately does not require or process document upload slots yet; document uploads and verification remain a separate Phase 1 slice.
+- This slice deliberately does not perform staff review, staff document verification, offer issue, registration, or production email configuration.
 
 ### Documents
 
@@ -527,6 +528,23 @@ Each document record should include:
 - verification timestamp.
 - verification note.
 - retention class.
+
+Current Phase 1 application document implementation:
+
+- Applicants upload evidence from `/apply/application` after a draft application exists and before final submission.
+- Uploads use fixed applicant-owned slots:
+  - required: qualification certificate or transcript.
+  - required: professional registration evidence.
+  - optional: CV or supporting evidence.
+  - optional: funding or sponsor evidence.
+- Uploads are handled through a server action using private Supabase storage and service-role storage upload. Applicants do not get broad storage write policy access.
+- File validation checks MIME type, extension, size, non-empty content, and sanitized filename before storage upload.
+- `application_document_slots` links the application/person/slot to the current `managed_files` row and carries verification status.
+- `managed_files` remains the storage metadata source, with application uploads using `application-docs` or `qualification-documents` and the matching retention class.
+- `record_application_document_upload(...)` validates applicant ownership, draft status, lead stage, slot metadata, extension allow-list, file metadata, object path, and backing `storage.objects` existence before creating the managed-file row and slot linkage.
+- Each successful upload writes a `document.uploaded` audit event without storing document contents or sensitive free-text metadata.
+- Final application submission blocks when required slots are missing, rejected, or no longer linked to a real private storage object, but it does not require staff verification at this stage.
+- Staff review UI, document verification actions, rejection notes, and offer decisions remain separate Phase 1 slices.
 
 ### Staff Review
 

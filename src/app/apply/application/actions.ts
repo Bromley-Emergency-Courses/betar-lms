@@ -1,8 +1,15 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import {
+  buildApplicationDocumentObjectPath,
+  getApplicationDocumentSlotDefinition,
+  parseApplicationDocumentUploadForm,
+  validateApplicationDocumentUpload
+} from "@/lib/application-documents";
 import { parseApplicationDraftForm } from "@/lib/application-drafts";
 import {
   findUnsavedApplicationDraftChanges,
@@ -12,6 +19,7 @@ import {
 } from "@/lib/application-submit";
 import { requireApplicantProfile } from "@/lib/portal-auth";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
+import { createSupabaseServiceRoleClient, isSupabaseServiceRoleConfigured } from "@/lib/supabase-admin";
 
 export async function saveApplicationDraft(formData: FormData) {
   await requireApplicantProfile("/apply/application");
@@ -78,6 +86,68 @@ export async function saveApplicationDraft(formData: FormData) {
 
   revalidatePath("/apply/application");
   redirect("/apply/application?saved=1");
+}
+
+export async function uploadApplicationDocument(formData: FormData) {
+  const profile = await requireApplicantProfile("/apply/application");
+  const parsed = parseApplicationDocumentUploadForm(formData);
+  const file = formData.get("document");
+
+  if (!(file instanceof File)) {
+    throw new Error("Choose a file to upload.");
+  }
+
+  const definition = getApplicationDocumentSlotDefinition(parsed.slot_key);
+  const validation = validateApplicationDocumentUpload({ file, slotKey: parsed.slot_key });
+  if (!validation.valid) {
+    throw new Error(validation.errors.join(" "));
+  }
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?document=demo");
+  }
+
+  if (!isSupabaseServiceRoleConfigured()) {
+    throw new Error("Supabase service role storage is required for application document uploads.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const supabaseAdmin = createSupabaseServiceRoleClient();
+  const objectPath = buildApplicationDocumentObjectPath(
+    profile.personId,
+    parsed.application_id,
+    parsed.slot_key,
+    validation.sanitizedFilename,
+    randomUUID()
+  );
+
+  const { error: uploadError } = await supabaseAdmin.storage.from(definition.bucket).upload(objectPath, file, {
+    contentType: validation.contentType,
+    upsert: false
+  });
+
+  if (uploadError) {
+    throw new Error(uploadError.message);
+  }
+
+  const { error: recordError } = await supabase.rpc("record_application_document_upload", {
+    p_application_id: parsed.application_id,
+    p_slot_key: parsed.slot_key,
+    p_bucket: definition.bucket,
+    p_object_path: objectPath,
+    p_original_filename: file.name,
+    p_sanitized_filename: validation.sanitizedFilename,
+    p_content_type: validation.contentType,
+    p_size_bytes: file.size
+  });
+
+  if (recordError) {
+    await supabaseAdmin.storage.from(definition.bucket).remove([objectPath]);
+    throw new Error(recordError.message);
+  }
+
+  revalidatePath("/apply/application");
+  redirect("/apply/application?document=uploaded");
 }
 
 export async function submitApplication(formData: FormData) {
