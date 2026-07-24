@@ -33,6 +33,7 @@ Required changes:
 - Selected offerings do not reserve places, create enrolments, or create finance records.
 - Optional disability/support-needs information is stored separately from general application fields with restricted access and redacted audit metadata.
 - Final submit is separate from draft save. It validates the saved application snapshot and selected offerings, locks the application by setting `submitted`, updates the lead stage, stores declaration acceptance metadata, and writes `application.submitted` transactionally.
+- Application evidence uploads are implemented as applicant-owned slots linked to `managed_files`. Required qualification and professional-registration evidence block final submission when missing or rejected; staff verification remains a later Phase 1 slice.
 
 ## Status Legend
 
@@ -97,7 +98,7 @@ Goal: run a complete intake up to offer acceptance without depending on email th
 - [x] Add the four required POCUS free-text questions as named fields.
 - [x] Add application section checklist/status and preview-style review before submit.
 - [x] Add final submission declaration and transactional submit action.
-- [ ] Document upload slots with file validation.
+- [x] Document upload slots with file validation.
 - [ ] Staff review screen with verification states and decision reasons.
 - [ ] Offer, rejection, and reminder email templates.
 - [ ] Confirm offer/rejection/reminder emails use the same production email delivery configuration and do not depend on Supabase's default sender.
@@ -227,3 +228,4 @@ Add entries here when meaningful code lands.
 | 2026-07-23 | `bangalore` docs update | Consolidated the expanded university-style application plan: enquiry interests stay broad, authenticated applications choose one or two future term `module_offerings`, the application model needs personal/contact/professional/qualification/nationality/visa/funding/POCUS/declaration sections, and support-needs data needs restricted handling. | Documentation-only change. |
 | 2026-07-23 | `12amathew/expand-application-form` | Expanded `/apply/application` into a university-style draft form with personal/contact/employment/qualification/study-plan/nationality/visa/funding/support-needs/POCUS/evidence-preview sections, added intended start term and selected `module_offerings`, validated selectable offerings server-side against active modules in published/active future terms, and stored support-needs data separately with restricted RLS and redacted audit metadata. Final submit/declaration remains a separate slice. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-07-23 | `12amathew/final-submit-declaration` | Added the Phase 1 final application submit slice: `submit_application(...)` validates required saved fields, selected future start term, and one/two selected `module_offerings`; derives declaration version/hash inside the RPC; captures applicant auth user, person, timestamp, IP, and user agent; guards against stale unsaved form edits before locking applicant editing; updates the related lead stage to `submitted`; and writes `application.submitted` transactionally. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-07-23 | `12amathew/application-doc-upload-slots` | Added Phase 1 applicant-owned application evidence slots: required qualification and professional-registration uploads plus optional CV/supporting and funding evidence; validated MIME type, extension, size, and sanitized filenames; uploaded through server actions into private storage; linked slot rows to `managed_files`; wrote `document.uploaded` audit events; and updated final submit to block missing or rejected required slots without adding staff review, offers, registration, or production email configuration. | `npm run lint`; `npm run test`; `npm run build`. |

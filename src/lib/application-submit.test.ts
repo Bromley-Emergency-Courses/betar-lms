@@ -136,7 +136,8 @@ describe("application final submit", () => {
         pocusPreviousExperience: "I use POCUS weekly.",
         pocusMotivation: "I want structured supervision.",
         pocusCaseImprovedManagement: "POCUS changed management.",
-        pocusLimitationsCase: "I escalated when views were limited."
+        pocusLimitationsCase: "I escalated when views were limited.",
+        missingRequiredDocumentSlotKeys: []
       })
     ).toEqual([]);
 
@@ -167,9 +168,42 @@ describe("application final submit", () => {
         pocusPreviousExperience: null,
         pocusMotivation: null,
         pocusCaseImprovedManagement: null,
-        pocusLimitationsCase: null
+        pocusLimitationsCase: null,
+        missingRequiredDocumentSlotKeys: ["qualification_evidence", "professional_registration_evidence"]
       })
     ).toContain("selected_module_offerings");
+
+    expect(
+      validateApplicationSubmitRequiredFields({
+        firstName: "Priya",
+        lastName: "Shah",
+        dateOfBirth: "1988-04-12",
+        email: "priya@example.nhs.uk",
+        phone: "07123 456789",
+        addressLine1: "1 Clinical Road",
+        city: "London",
+        postcode: "SE1 1AA",
+        country: "United Kingdom",
+        clinicalRole: "Consultant",
+        employer: "Example NHS Trust",
+        departmentSpecialty: "Acute medicine",
+        professionalRegistrationBody: "GMC",
+        professionalRegistrationNumber: "1234567",
+        workExperience: "Ten years of relevant experience.",
+        highestQualification: "MBBS",
+        qualificationAwardingBody: "Example University",
+        qualificationYear: 2016,
+        intendedStartTermId: startTermId,
+        selectedModuleOfferingIds: [offeringId],
+        nationality: "British",
+        countryOfResidence: "United Kingdom",
+        pocusPreviousExperience: "I use POCUS weekly.",
+        pocusMotivation: "I want structured supervision.",
+        pocusCaseImprovedManagement: "POCUS changed management.",
+        pocusLimitationsCase: "I escalated when views were limited.",
+        missingRequiredDocumentSlotKeys: ["qualification_evidence"]
+      })
+    ).toContain("document:qualification_evidence");
   });
 
   it("captures client IP from forwarded headers without accepting a whole comma-separated chain", () => {
@@ -195,13 +229,15 @@ describe("application final submit", () => {
         admissionLeadId: leadId,
         programme: "pgcert",
         intendedStartTermId: startTermId,
-        selectedModuleOfferingCount: 2
+        selectedModuleOfferingCount: 2,
+        requiredDocumentSlotCount: 2
       })
     ).toEqual({
       admission_lead_id: leadId,
       programme: "pgcert",
       intended_start_term_id: startTermId,
       selected_module_offering_count: 2,
+      required_document_slot_count: 2,
       declaration_version: applicationDeclarationVersion,
       declaration_text_hash: applicationDeclarationTextHash
     });

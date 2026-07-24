@@ -55,6 +55,7 @@ export interface ApplicationSubmitRequiredFieldsInput {
   pocusMotivation: string | null;
   pocusCaseImprovedManagement: string | null;
   pocusLimitationsCase: string | null;
+  missingRequiredDocumentSlotKeys: string[];
 }
 
 export interface ApplicationSubmittedAuditInput {
@@ -63,6 +64,7 @@ export interface ApplicationSubmittedAuditInput {
   programme: "pgcert" | "microcredential";
   intendedStartTermId: string;
   selectedModuleOfferingCount: number;
+  requiredDocumentSlotCount: number;
 }
 
 export type ApplicationSubmitSavedDraftSnapshot = ApplicationDraftPayload;
@@ -132,6 +134,10 @@ export function validateApplicationSubmitRequiredFields(input: ApplicationSubmit
 
   if (input.email !== null && !z.string().email().safeParse(input.email).success) {
     missingFields.push("email");
+  }
+
+  for (const slotKey of input.missingRequiredDocumentSlotKeys) {
+    missingFields.push(`document:${slotKey}`);
   }
 
   return [...new Set(missingFields)];
@@ -218,6 +224,7 @@ export function buildApplicationSubmittedAuditMetadata(input: ApplicationSubmitt
       programme: input.programme,
       intended_start_term_id: input.intendedStartTermId,
       selected_module_offering_count: input.selectedModuleOfferingCount,
+      required_document_slot_count: input.requiredDocumentSlotCount,
       declaration_version: applicationDeclarationVersion,
       declaration_text_hash: applicationDeclarationTextHash
     }

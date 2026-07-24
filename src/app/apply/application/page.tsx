@@ -1,12 +1,17 @@
-import { CheckCircle2, FileText, LockKeyhole, ShieldCheck } from "lucide-react";
+import { CheckCircle2, FileText, LockKeyhole, ShieldCheck, Upload } from "lucide-react";
 import { Field, FormGrid } from "@/components/forms";
-import { saveApplicationDraft } from "@/app/apply/application/actions";
+import { saveApplicationDraft, uploadApplicationDocument } from "@/app/apply/application/actions";
 import { ApplicationSubmitControls } from "@/app/apply/application/application-submit-controls";
 import {
   StudyPlanFields,
   type ApplicationOfferingOption,
   type ApplicationTermOption
 } from "@/app/apply/application/study-plan-fields";
+import {
+  applicationDocumentSlotDefinitions,
+  type ApplicationDocumentSlotKey,
+  type ApplicationDocumentVerificationStatus
+} from "@/lib/application-documents";
 import { applicationDeclarationText } from "@/lib/application-submit";
 import { requireApplicantProfile, type PortalProfile } from "@/lib/portal-auth";
 import { getAppData } from "@/lib/seed";
@@ -78,6 +83,19 @@ interface ApplicationDraftSummary {
   lastSavedAt: string;
 }
 
+interface ApplicationDocumentSlotSummary {
+  slotKey: ApplicationDocumentSlotKey;
+  label: string;
+  required: boolean;
+  managedFileId?: string;
+  originalFilename?: string;
+  sanitizedFilename?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  uploadedAt?: string;
+  verificationStatus: ApplicationDocumentVerificationStatus;
+}
+
 type ApplicationDraftRow = {
   id: string;
   admission_lead_id: string;
@@ -133,6 +151,19 @@ type SupportNeedsRow = {
   disclosed: boolean | null;
   support_detail: string | null;
   requested_adjustments: string | null;
+};
+
+type ApplicationDocumentSlotRow = {
+  slot_key: ApplicationDocumentSlotKey;
+  label: string;
+  required: boolean;
+  managed_file_id: string | null;
+  original_filename: string | null;
+  sanitized_filename: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_at: string | null;
+  verification_status: ApplicationDocumentVerificationStatus;
 };
 
 function optionalString(value: string | null | undefined): string | undefined {
@@ -210,6 +241,7 @@ function mapApplicationDraft(
 async function getApplicantApplicationContext(personId: string): Promise<{
   invitations: ApplicantInvitationSummary[];
   draft?: ApplicationDraftSummary;
+  documentSlots: ApplicationDocumentSlotSummary[];
   terms: ApplicationTermOption[];
   offerings: ApplicationOfferingOption[];
 }> {
@@ -235,6 +267,7 @@ async function getApplicantApplicationContext(personId: string): Promise<{
         }
       ],
       draft: undefined,
+      documentSlots: [],
       terms,
       offerings: data.offerings
         .map((offering) => ({ offering, courseModule: activeModulesById.get(offering.moduleId) }))
@@ -367,8 +400,9 @@ async function getApplicantApplicationContext(personId: string): Promise<{
   const selectedDraftRow = draftRows[0];
 
   let draft: ApplicationDraftSummary | undefined;
+  let documentSlots: ApplicationDocumentSlotSummary[] = [];
   if (selectedDraftRow) {
-    const [choiceResult, supportNeedsResult] = await Promise.all([
+    const [choiceResult, supportNeedsResult, documentSlotResult] = await Promise.all([
       supabase
         .from("application_module_offering_choices")
         .select("offering_id")
@@ -378,7 +412,14 @@ async function getApplicantApplicationContext(personId: string): Promise<{
         .from("application_support_needs")
         .select("disclosed, support_detail, requested_adjustments")
         .eq("application_id", selectedDraftRow.id)
-        .maybeSingle<SupportNeedsRow>()
+        .maybeSingle<SupportNeedsRow>(),
+      supabase
+        .from("application_document_slots")
+        .select(
+          "slot_key, label, required, managed_file_id, original_filename, sanitized_filename, content_type, size_bytes, uploaded_at, verification_status"
+        )
+        .eq("application_id", selectedDraftRow.id)
+        .order("required", { ascending: false })
     ]);
 
     if (choiceResult.error) {
@@ -387,17 +428,33 @@ async function getApplicantApplicationContext(personId: string): Promise<{
     if (supportNeedsResult.error) {
       throw new Error(supportNeedsResult.error.message);
     }
+    if (documentSlotResult.error) {
+      throw new Error(documentSlotResult.error.message);
+    }
 
     draft = mapApplicationDraft(
       selectedDraftRow,
       (choiceResult.data ?? []).map((row) => String(row.offering_id)),
       supportNeedsResult.data ?? undefined
     );
+    documentSlots = ((documentSlotResult.data ?? []) as ApplicationDocumentSlotRow[]).map((row) => ({
+      slotKey: row.slot_key,
+      label: row.label,
+      required: row.required,
+      managedFileId: optionalString(row.managed_file_id),
+      originalFilename: optionalString(row.original_filename),
+      sanitizedFilename: optionalString(row.sanitized_filename),
+      contentType: optionalString(row.content_type),
+      sizeBytes: row.size_bytes ?? undefined,
+      uploadedAt: optionalString(row.uploaded_at),
+      verificationStatus: row.verification_status
+    }));
   }
 
   return {
     invitations,
     draft,
+    documentSlots,
     terms: (termResult.data ?? []).map((row) => ({
       id: String(row.id),
       name: String(row.name),
@@ -458,6 +515,88 @@ function ApplicationSubmittedPanel({ draft }: { draft: ApplicationDraftSummary }
           Programme: {draft.programme === "pgcert" ? "PGCert" : "Microcredential"} · selected first-term offerings:{" "}
           {draft.selectedOfferingIds.length}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function formatFileSize(sizeBytes?: number): string {
+  if (!sizeBytes || sizeBytes <= 0) {
+    return "Unknown size";
+  }
+
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  return `${Math.ceil(sizeBytes / 1024)} KB`;
+}
+
+function ApplicationDocumentSlotsPanel({
+  applicationId,
+  documentSlots,
+  editable
+}: {
+  applicationId: string;
+  documentSlots: ApplicationDocumentSlotSummary[];
+  editable: boolean;
+}) {
+  const slotByKey = new Map(documentSlots.map((slot) => [slot.slotKey, slot]));
+
+  return (
+    <div className="apply-form-panel application-draft-form">
+      <div className="section-header">
+        <div>
+          <h2>Application evidence</h2>
+          <p>Upload the required evidence before final submission. Optional evidence can be added where it supports the application.</p>
+        </div>
+        <div className="icon-box">
+          <Upload size={18} />
+        </div>
+      </div>
+
+      <div className="application-document-list">
+        {applicationDocumentSlotDefinitions.map((definition) => {
+          const uploadedSlot = slotByKey.get(definition.key);
+          const uploadedAt = uploadedSlot?.uploadedAt ? new Date(uploadedSlot.uploadedAt).toLocaleString("en-GB") : null;
+
+          return (
+            <div className="application-document-slot" key={definition.key}>
+              <div>
+                <div className="application-document-slot-heading">
+                  <strong>{uploadedSlot?.label ?? definition.label}</strong>
+                  <span>{definition.required ? "Required" : "Optional"}</span>
+                </div>
+                {uploadedSlot?.managedFileId ? (
+                  <p className="muted small">
+                    {uploadedSlot.sanitizedFilename ?? uploadedSlot.originalFilename ?? "Uploaded file"} · {formatFileSize(uploadedSlot.sizeBytes)}
+                    {uploadedAt ? ` · Uploaded ${uploadedAt}` : ""} · {uploadedSlot.verificationStatus.replaceAll("_", " ")}
+                  </p>
+                ) : (
+                  <p className="muted small">No file uploaded.</p>
+                )}
+              </div>
+
+              {editable ? (
+                <form className="application-document-upload-form" action={uploadApplicationDocument}>
+                  <input type="hidden" name="application_id" value={applicationId} />
+                  <input type="hidden" name="slot_key" value={definition.key} />
+                  <input
+                    className="input"
+                    name="document"
+                    type="file"
+                    accept={definition.acceptedExtensions.join(",")}
+                    required
+                  />
+                  <button className="button secondary" type="submit">
+                    <Upload size={16} />
+                    Upload
+                  </button>
+                </form>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -733,11 +872,11 @@ function ApplicationDraftForm({
 export default async function ApplicationAccessPage({
   searchParams
 }: {
-  searchParams: Promise<{ saved?: string; submitted?: string }>;
+  searchParams: Promise<{ saved?: string; submitted?: string; document?: string }>;
 }) {
   const profile = await requireApplicantProfile("/apply/application");
-  const { saved, submitted } = await searchParams;
-  const { invitations, draft, terms, offerings } = await getApplicantApplicationContext(profile.personId);
+  const { saved, submitted, document } = await searchParams;
+  const { invitations, draft, documentSlots, terms, offerings } = await getApplicantApplicationContext(profile.personId);
   const latestInvitation = invitations[0];
   const claimedInvitation =
     invitations.find((invitation) => invitation.status === "claimed" && invitation.admissionLeadId === draft?.admissionLeadId) ??
@@ -781,6 +920,16 @@ export default async function ApplicationAccessPage({
           </div>
         ) : null}
 
+        {document ? (
+          <div className="apply-success" role="status">
+            <CheckCircle2 size={22} />
+            <div>
+              <h2>Document uploaded</h2>
+              <p>{document === "demo" ? "Demo mode is running without Supabase storage, so no live document was uploaded." : "Your application evidence has been saved."}</p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="apply-form-panel">
           <div className="section-header">
             <div>
@@ -808,15 +957,35 @@ export default async function ApplicationAccessPage({
         </div>
 
         {draft?.status === "submitted" ? (
-          <ApplicationSubmittedPanel draft={draft} />
+          <>
+            <ApplicationSubmittedPanel draft={draft} />
+            <ApplicationDocumentSlotsPanel applicationId={draft.id} documentSlots={documentSlots} editable={false} />
+          </>
         ) : claimedInvitation ? (
-          <ApplicationDraftForm
-            admissionLeadId={claimedInvitation.admissionLeadId}
-            draft={draft}
-            profile={profile}
-            terms={terms}
-            offerings={offerings}
-          />
+          <>
+            <ApplicationDraftForm
+              admissionLeadId={claimedInvitation.admissionLeadId}
+              draft={draft}
+              profile={profile}
+              terms={terms}
+              offerings={offerings}
+            />
+            {draft ? (
+              <ApplicationDocumentSlotsPanel applicationId={draft.id} documentSlots={documentSlots} editable />
+            ) : (
+              <div className="apply-form-panel application-draft-form">
+                <div className="section-header">
+                  <div>
+                    <h2>Application evidence</h2>
+                    <p>Save a draft before uploading evidence documents.</p>
+                  </div>
+                  <div className="icon-box">
+                    <Upload size={18} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         ) : null}
       </section>
     </main>
