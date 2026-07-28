@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { parseRecordApplicationDecisionForm } from "@/lib/application-decisions";
 import {
   parseRecordStaffApplicationReviewForm,
   parseVerifyApplicationDocumentForm
@@ -60,4 +61,29 @@ export async function recordStaffApplicationReview(formData: FormData) {
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   reviewRedirect(parsed.application_id, "review_saved");
+}
+
+export async function recordApplicationDecision(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseRecordApplicationDecisionForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "decision_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("record_application_decision", {
+    p_application_id: parsed.application_id,
+    p_decision_outcome: parsed.decision_outcome,
+    p_decision_reason: parsed.decision_reason,
+    p_offer_deadline_at: parsed.offer_deadline_at
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  reviewRedirect(parsed.application_id, "decision_recorded");
 }

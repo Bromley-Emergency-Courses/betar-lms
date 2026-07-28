@@ -1,11 +1,15 @@
-import { ClipboardCheck, FileCheck2, LockKeyhole, ShieldAlert } from "lucide-react";
+import { BadgeCheck, ClipboardCheck, FileCheck2, LockKeyhole, ShieldAlert, XCircle } from "lucide-react";
 import Link from "next/link";
-import { recordStaffApplicationReview, verifyApplicationDocument } from "@/app/admissions/reviews/actions";
+import { recordApplicationDecision, recordStaffApplicationReview, verifyApplicationDocument } from "@/app/admissions/reviews/actions";
 import { DocumentOpenButton } from "@/app/admissions/reviews/document-open-button";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
+import {
+  canRecordApplicationDecision,
+  type ApplicationDecisionOutcome
+} from "@/lib/application-decisions";
 import {
   applicationSupportNeedsViewedAction,
   buildApplicationSupportNeedsViewedAuditMetadata,
@@ -80,6 +84,7 @@ interface StaffReviewApplication {
   selectedOfferings: SelectedOfferingSummary[];
   documentSlots: ApplicationDocumentSlotSummary[];
   review?: ApplicationReviewSummary;
+  decision?: ApplicationDecisionSummary;
 }
 
 interface SelectedOfferingSummary {
@@ -119,6 +124,13 @@ interface ApplicationReviewSummary {
   reviewNotes?: string;
   decisionReasonNotes?: string;
   lastReviewedAt?: string;
+}
+
+interface ApplicationDecisionSummary {
+  outcome: ApplicationDecisionOutcome;
+  decidedAt?: string;
+  decisionReason?: string;
+  correspondenceLogId?: string;
 }
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -213,6 +225,14 @@ type ReviewRow = {
   last_reviewed_at: string | null;
 };
 
+type DecisionRow = {
+  application_id: string;
+  outcome: ApplicationDecisionOutcome;
+  decision_reason: string | null;
+  decided_at: string | null;
+  correspondence_log_id: string | null;
+};
+
 type LeadJoin = {
   stage?: string;
   archived?: boolean;
@@ -288,7 +308,15 @@ function selectedOfferingsForApplication(data: AppData, choices: ChoiceRow[], ap
     });
 }
 
-function mapApplication(row: ApplicationRow, data: AppData, choices: ChoiceRow[], support?: SupportNeedsRow, slots: DocumentSlotRow[] = [], review?: ReviewRow): StaffReviewApplication {
+function mapApplication(
+  row: ApplicationRow,
+  data: AppData,
+  choices: ChoiceRow[],
+  support?: SupportNeedsRow,
+  slots: DocumentSlotRow[] = [],
+  review?: ReviewRow,
+  decision?: DecisionRow
+): StaffReviewApplication {
   const lead = joinedObject(row.admission_leads);
   return {
     id: row.id,
@@ -372,6 +400,14 @@ function mapApplication(row: ApplicationRow, data: AppData, choices: ChoiceRow[]
           reviewNotes: optionalString(review.review_notes),
           decisionReasonNotes: optionalString(review.decision_reason_notes),
           lastReviewedAt: optionalString(review.last_reviewed_at)
+        }
+      : undefined,
+    decision: decision
+      ? {
+          outcome: decision.outcome,
+          decisionReason: optionalString(decision.decision_reason),
+          decidedAt: optionalString(decision.decided_at),
+          correspondenceLogId: optionalString(decision.correspondence_log_id)
         }
       : undefined
   };
@@ -502,7 +538,9 @@ function demoApplications(): StaffReviewApplication[] {
         }
       ],
       review: {
-        readinessStatus: "not_ready"
+        readinessStatus: "ready_for_decision",
+        decisionReasonNotes: "Meets entry criteria once both required documents are verified.",
+        lastReviewedAt: new Date().toISOString()
       }
     }
   ];
@@ -590,7 +628,7 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     return [];
   }
 
-  const [choiceResult, supportNeedsResult, documentSlotResult, reviewResult] = await Promise.all([
+  const [choiceResult, supportNeedsResult, documentSlotResult, reviewResult, decisionResult] = await Promise.all([
     supabase
       .from("application_module_offering_choices")
       .select("application_id, offering_id, choice_order")
@@ -610,6 +648,10 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     supabase
       .from("application_reviews")
       .select("application_id, readiness_status, review_notes, decision_reason_notes, last_reviewed_at")
+      .in("application_id", applicationIds),
+    supabase
+      .from("application_decisions")
+      .select("application_id, outcome, decision_reason, decided_at, correspondence_log_id")
       .in("application_id", applicationIds)
   ]);
 
@@ -625,6 +667,9 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
   if (reviewResult.error) {
     throw new Error(reviewResult.error.message);
   }
+  if (decisionResult.error) {
+    throw new Error(decisionResult.error.message);
+  }
 
   const choices = (choiceResult.data ?? []) as ChoiceRow[];
   const supportNeedsRows = (supportNeedsResult.data ?? []) as SupportNeedsRow[];
@@ -632,9 +677,18 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
   const supportByApplicationId = new Map(supportNeedsRows.map((row) => [row.application_id, row]));
   const slots = (documentSlotResult.data ?? []) as DocumentSlotRow[];
   const reviewByApplicationId = new Map(((reviewResult.data ?? []) as ReviewRow[]).map((row) => [row.application_id, row]));
+  const decisionByApplicationId = new Map(((decisionResult.data ?? []) as DecisionRow[]).map((row) => [row.application_id, row]));
 
   return applicationRows.map((row) =>
-    mapApplication(row, data, choices, supportByApplicationId.get(row.id), slots, reviewByApplicationId.get(row.id))
+    mapApplication(
+      row,
+      data,
+      choices,
+      supportByApplicationId.get(row.id),
+      slots,
+      reviewByApplicationId.get(row.id),
+      decisionByApplicationId.get(row.id)
+    )
   );
 }
 
@@ -939,6 +993,111 @@ function ReviewDecisionPanel({ application }: { application: StaffReviewApplicat
   );
 }
 
+function RecordDecisionPanel({ application }: { application: StaffReviewApplication }) {
+  const readiness = application.review?.readinessStatus ?? "not_ready";
+  const decisionAccess = canRecordApplicationDecision({
+    applicationStatus: application.status,
+    leadStage: application.leadStage,
+    archived: false,
+    convertedStudentId: null,
+    readinessStatus: readiness,
+    existingDecisionOutcome: application.decision?.outcome
+  });
+  const disabled = !decisionAccess.allowed;
+  const disabledReason =
+    decisionAccess.reason === "review_not_ready"
+      ? "Review must be ready for decision first."
+      : decisionAccess.reason === "decision_already_recorded"
+        ? "A decision has already been recorded."
+        : decisionAccess.reason === "lead_not_decisionable"
+          ? "This admissions stage is not open for a new decision."
+          : "Decision recording is unavailable for this application.";
+
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Offer Or Rejection</h2>
+          <p>Record the staff decision and log placeholder correspondence. Applicant email sending remains suppressed.</p>
+        </div>
+        <div className="toolbar">
+          <div className="icon-box">
+            <BadgeCheck size={18} />
+          </div>
+          <div className="icon-box">
+            <XCircle size={18} />
+          </div>
+        </div>
+      </div>
+
+      {application.decision ? (
+        <div className="apply-success" role="status">
+          <ShieldAlert size={18} />
+          <div>
+            <h2>{application.decision.outcome === "offer" ? "Offer recorded" : "Rejection recorded"}</h2>
+            <p>
+              Decided {formatDateTime(application.decision.decidedAt)}. Correspondence log{" "}
+              {application.decision.correspondenceLogId ? "created" : "not recorded"}.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {!decisionAccess.allowed ? <p className="muted small">{disabledReason}</p> : null}
+
+      <div className="grid grid-2">
+        <form className="grid" action={recordApplicationDecision}>
+          <input type="hidden" name="application_id" value={application.id} />
+          <input type="hidden" name="decision_outcome" value="offer" />
+          <Field label="Offer deadline" htmlFor={`offer-deadline-${application.id}`}>
+            <input
+              id={`offer-deadline-${application.id}`}
+              name="offer_deadline_at"
+              className="input"
+              type="date"
+              disabled={disabled}
+            />
+          </Field>
+          <Field label="Offer decision reason" htmlFor={`offer-reason-${application.id}`}>
+            <textarea
+              id={`offer-reason-${application.id}`}
+              name="decision_reason"
+              className="textarea"
+              defaultValue={application.review?.decisionReasonNotes ?? ""}
+              maxLength={4000}
+              required
+              disabled={disabled}
+            />
+          </Field>
+          <button className="button primary" disabled={disabled}>
+            Record offer
+          </button>
+        </form>
+
+        <form className="grid" action={recordApplicationDecision}>
+          <input type="hidden" name="application_id" value={application.id} />
+          <input type="hidden" name="decision_outcome" value="rejection" />
+          <input type="hidden" name="offer_deadline_at" value="" />
+          <Field label="Rejection decision reason" htmlFor={`rejection-reason-${application.id}`}>
+            <textarea
+              id={`rejection-reason-${application.id}`}
+              name="decision_reason"
+              className="textarea"
+              defaultValue={application.review?.decisionReasonNotes ?? ""}
+              maxLength={4000}
+              required
+              disabled={disabled}
+            />
+          </Field>
+          <button className="button danger" disabled={disabled}>
+            Record rejection
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 function ReviewApplicationRecord({ application, open }: { application: StaffReviewApplication; open: boolean }) {
   return (
     <details className="review-application-record" id={`application-${application.id}`} open={open}>
@@ -968,6 +1127,7 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
         </div>
         <EvidencePanel application={application} />
         <ReviewDecisionPanel application={application} />
+        <RecordDecisionPanel application={application} />
       </div>
     </details>
   );
@@ -976,7 +1136,15 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
 export default async function AdmissionsReviewsPage({
   searchParams
 }: {
-  searchParams: Promise<{ application?: string; document_verified?: string; review_saved?: string; document_demo?: string; review_demo?: string }>;
+  searchParams: Promise<{
+    application?: string;
+    document_verified?: string;
+    review_saved?: string;
+    decision_recorded?: string;
+    document_demo?: string;
+    review_demo?: string;
+    decision_demo?: string;
+  }>;
 }) {
   const staffProfile = await requirePermission("manage_admissions");
   const params = await searchParams;
@@ -992,18 +1160,30 @@ export default async function AdmissionsReviewsPage({
         </Link>
       }
     >
-      {params.document_verified || params.review_saved || params.document_demo || params.review_demo ? (
+      {params.document_verified || params.review_saved || params.decision_recorded || params.document_demo || params.review_demo || params.decision_demo ? (
         <div className="apply-success" role="status">
           <ShieldAlert size={18} />
           <div>
-            <h2>{params.review_saved || params.review_demo ? "Review saved" : "Document verification saved"}</h2>
-            <p>{params.document_demo || params.review_demo ? "Demo mode simulated the action." : "Audit events were recorded for the staff action."}</p>
+            <h2>
+              {params.decision_recorded || params.decision_demo
+                ? "Decision recorded"
+                : params.review_saved || params.review_demo
+                  ? "Review saved"
+                  : "Document verification saved"}
+            </h2>
+            <p>
+              {params.document_demo || params.review_demo || params.decision_demo
+                ? "Demo mode simulated the action."
+                : params.decision_recorded
+                  ? "The lead moved to offered or rejected, a suppressed correspondence log was recorded, and no applicant email was sent."
+                  : "Audit events were recorded for the staff action."}
+            </p>
           </div>
         </div>
       ) : null}
 
       {applications.length === 0 ? (
-        <EmptyState title="No submitted applications" detail="Submitted applicant records will appear here before offer or rejection work begins." />
+        <EmptyState title="No submitted applications" detail="Submitted applicant records appear here until an offer or rejection decision is recorded." />
       ) : (
         <section className="section">
           <div className="section-header">

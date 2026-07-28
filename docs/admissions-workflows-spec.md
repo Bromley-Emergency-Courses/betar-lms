@@ -601,6 +601,18 @@ Offer module rules:
 - Issuing an offer still must not create enrolments or reserve places.
 - The accepted offer and subsequent registration are the source used by conversion to create initial enrolments.
 
+Current Phase 1 decision-foundation implementation:
+
+- Staff can record an offer or rejection from `/admissions/reviews` after the application review is marked `ready_for_decision`.
+- `record_application_decision(...)` is admin-only, requires a submitted application whose lead is still in `submitted` or `reviewed`, requires a non-empty decision reason, prevents a second decision on the same application, updates the related lead to `offered` or `rejected`, and writes `offer.issued` or `application.rejected` audit events.
+- `application_decisions` stores the staff decision, reason, actor, timestamp, related application, lead, person, and correspondence-log link.
+- `application_offers` stores offer reference, programme, intended start term, optional deadline, issued timestamp, offer status foundation, letter template snapshot, correspondence-log link, and future acceptance/decline/lapse timestamp columns.
+- `application_offer_module_offerings` snapshots one or two application-selected intended module offerings onto the offer without reserving capacity, creating enrolments, or creating finance rows.
+- `application_rejections` stores rejection-specific records with reason, actor, timestamp, template snapshot, and correspondence-log link.
+- Raw `application_decisions` and `application_rejections` rows are admin-only for now because they contain internal staff decision reasons. A later applicant-facing portal slice should expose only deliberately sanitized offer/rejection content.
+- Offer and rejection correspondence template placeholders exist, and each recorded decision creates a `correspondence_logs` row with `delivery_status = suppressed`, placeholder metadata, and `production_email_send_enabled = false`.
+- This slice deliberately does not mark `last_contacted_on`, send real applicant emails, configure production SMTP, implement offer accept/decline, registration, reminder/lapse cron, enrolment creation, or finance generation.
+
 ### Emails and Letters
 
 Phase 1 template set:
