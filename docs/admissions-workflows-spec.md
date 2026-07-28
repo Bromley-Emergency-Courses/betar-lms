@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Spec
 
-Last updated: 2026-07-24
+Last updated: 2026-07-28
 
 This is the developer-facing build spec for the admissions, application, registration, and student portal work. It is derived from the original PGCert admissions system plan and adjusted for the current BETAR LMS codebase.
 
@@ -612,6 +612,18 @@ Current Phase 1 decision-foundation implementation:
 - Raw `application_decisions` and `application_rejections` rows are admin-only for now because they contain internal staff decision reasons. A later applicant-facing portal slice should expose only deliberately sanitized offer/rejection content.
 - Offer and rejection correspondence template placeholders exist, and each recorded decision creates a `correspondence_logs` row with `delivery_status = suppressed`, placeholder metadata, and `production_email_send_enabled = false`.
 - This slice deliberately does not mark `last_contacted_on`, send real applicant emails, configure production SMTP, implement offer accept/decline, registration, reminder/lapse cron, enrolment creation, or finance generation.
+
+Current Phase 1 applicant offer response implementation:
+
+- `/portal` is the applicant/student portal landing page and shows the current applicant offer after magic-link login.
+- The portal shows the offer reference, programme, intended start term, offered module offering snapshot, issued date, deadline, and current offer status.
+- Applicants can accept or decline only their own `issued` offer before `deadline_at`. Expired offers are blocked in the portal and by the database RPC, but this slice does not implement the reminder/lapse cron or automatically mark expired offers as lapsed.
+- `respond_to_application_offer(...)` is the applicant-only RPC for offer responses. It validates the portal actor, person ownership, offer status, deadline, submitted application, non-archived/non-converted lead, and lead stage `offered` in one transaction.
+- Accepting an offer sets `application_offers.status = 'accepted'`, stores `accepted_at`, `accepted_by_auth_user_id`, `accepted_by_person_id`, `accepted_ip_address`, and `accepted_user_agent`, moves the related lead to `accepted`, and clears `next_action_on`.
+- Declining an offer sets `application_offers.status = 'declined'`, stores `declined_at`, `declined_by_auth_user_id`, `declined_by_person_id`, `declined_ip_address`, and `declined_user_agent`, moves the related lead to `offer_declined`, and clears `next_action_on`.
+- Both responses write applicant audit events: `offer.accepted` or `offer.declined`.
+- Both responses create suppressed correspondence-log records using `offer_accepted_confirmation` or `offer_declined_confirmation` template placeholders with `template_version = 1`, `delivery_status = suppressed`, `production_email_send_enabled = false`, and `provider_message_id = null`. No real emails are sent.
+- Accepted offers show a clear portal state that registration is the next step. The registration wizard, conversion, enrolments, finance rows, reminder/lapse cron, and production SMTP configuration remain separate future tasks.
 
 ### Emails and Letters
 
