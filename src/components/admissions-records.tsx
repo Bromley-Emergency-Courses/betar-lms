@@ -20,6 +20,7 @@ export const leadStages: AdmissionLeadStage[] = [
   "rejected",
   "accepted",
   "offer_declined",
+  "offer_lapsed",
   "archived"
 ];
 

@@ -1,6 +1,11 @@
-import { BadgeCheck, ClipboardCheck, FileCheck2, LockKeyhole, ShieldAlert, XCircle } from "lucide-react";
+import { BadgeCheck, ClipboardCheck, Clock, FileCheck2, LockKeyhole, MailWarning, ShieldAlert, XCircle } from "lucide-react";
 import Link from "next/link";
-import { recordApplicationDecision, recordStaffApplicationReview, verifyApplicationDocument } from "@/app/admissions/reviews/actions";
+import {
+  processApplicationOfferDeadlineWorkflow,
+  recordApplicationDecision,
+  recordStaffApplicationReview,
+  verifyApplicationDocument
+} from "@/app/admissions/reviews/actions";
 import { DocumentOpenButton } from "@/app/admissions/reviews/document-open-button";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
@@ -10,6 +15,7 @@ import {
   canRecordApplicationDecision,
   type ApplicationDecisionOutcome
 } from "@/lib/application-decisions";
+import type { ApplicationOfferStatus } from "@/lib/application-offers";
 import {
   applicationSupportNeedsViewedAction,
   buildApplicationSupportNeedsViewedAuditMetadata,
@@ -85,6 +91,7 @@ interface StaffReviewApplication {
   documentSlots: ApplicationDocumentSlotSummary[];
   review?: ApplicationReviewSummary;
   decision?: ApplicationDecisionSummary;
+  offer?: ApplicationOfferSummary;
 }
 
 interface SelectedOfferingSummary {
@@ -130,6 +137,22 @@ interface ApplicationDecisionSummary {
   outcome: ApplicationDecisionOutcome;
   decidedAt?: string;
   decisionReason?: string;
+  correspondenceLogId?: string;
+}
+
+interface ApplicationOfferSummary {
+  id: string;
+  offerReference: string;
+  status: ApplicationOfferStatus;
+  issuedAt?: string;
+  deadlineAt?: string;
+  acceptedAt?: string;
+  declinedAt?: string;
+  lapsedAt?: string;
+  deadlinePassed: boolean;
+  reminderCount: number;
+  lastDeadlineReminderAt?: string;
+  lastDeadlineReminderCorrespondenceLogId?: string;
   correspondenceLogId?: string;
 }
 
@@ -233,6 +256,22 @@ type DecisionRow = {
   correspondence_log_id: string | null;
 };
 
+type OfferRow = {
+  application_id: string;
+  id: string;
+  offer_reference: string;
+  status: ApplicationOfferStatus;
+  issued_at: string | null;
+  deadline_at: string | null;
+  accepted_at: string | null;
+  declined_at: string | null;
+  lapsed_at: string | null;
+  deadline_reminder_count: number | null;
+  last_deadline_reminder_at: string | null;
+  last_deadline_reminder_correspondence_log_id: string | null;
+  correspondence_log_id: string | null;
+};
+
 type LeadJoin = {
   stage?: string;
   archived?: boolean;
@@ -278,13 +317,13 @@ function labelForFunding(status: FundingSource): string {
   return status.replaceAll("_", " ");
 }
 
-function leadIsReviewable(lead: LeadJoin | undefined): boolean {
+function leadIsVisibleInReviewAdmin(lead: LeadJoin | undefined): boolean {
   return Boolean(
     lead &&
       !lead.archived &&
       !lead.converted_student_id &&
       typeof lead.stage === "string" &&
-      ["submitted", "reviewed"].includes(lead.stage)
+      ["submitted", "reviewed", "offered", "accepted", "offer_declined", "offer_lapsed"].includes(lead.stage)
   );
 }
 
@@ -315,7 +354,8 @@ function mapApplication(
   support?: SupportNeedsRow,
   slots: DocumentSlotRow[] = [],
   review?: ReviewRow,
-  decision?: DecisionRow
+  decision?: DecisionRow,
+  offer?: OfferRow
 ): StaffReviewApplication {
   const lead = joinedObject(row.admission_leads);
   return {
@@ -408,6 +448,23 @@ function mapApplication(
           decisionReason: optionalString(decision.decision_reason),
           decidedAt: optionalString(decision.decided_at),
           correspondenceLogId: optionalString(decision.correspondence_log_id)
+        }
+      : undefined,
+    offer: offer
+      ? {
+          id: offer.id,
+          offerReference: offer.offer_reference,
+          status: offer.status,
+          issuedAt: optionalString(offer.issued_at),
+          deadlineAt: optionalString(offer.deadline_at),
+          acceptedAt: optionalString(offer.accepted_at),
+          declinedAt: optionalString(offer.declined_at),
+          lapsedAt: optionalString(offer.lapsed_at),
+          deadlinePassed: offer.status === "issued" && offer.deadline_at ? new Date(offer.deadline_at).getTime() <= Date.now() : false,
+          reminderCount: offer.deadline_reminder_count ?? 0,
+          lastDeadlineReminderAt: optionalString(offer.last_deadline_reminder_at),
+          lastDeadlineReminderCorrespondenceLogId: optionalString(offer.last_deadline_reminder_correspondence_log_id),
+          correspondenceLogId: optionalString(offer.correspondence_log_id)
         }
       : undefined
   };
@@ -541,6 +598,21 @@ function demoApplications(): StaffReviewApplication[] {
         readinessStatus: "ready_for_decision",
         decisionReasonNotes: "Meets entry criteria once both required documents are verified.",
         lastReviewedAt: new Date().toISOString()
+      },
+      decision: {
+        outcome: "offer",
+        decidedAt: new Date().toISOString(),
+        correspondenceLogId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      },
+      offer: {
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        offerReference: "BETAR-DEMO-OFFER",
+        status: "issued",
+        issuedAt: new Date().toISOString(),
+        deadlineAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        deadlinePassed: false,
+        reminderCount: 0,
+        correspondenceLogId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
       }
     }
   ];
@@ -620,7 +692,7 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
 
   const applicationRows = ((applicationResult.data ?? []) as ApplicationRow[]).filter((row) => {
     const lead = joinedObject(row.admission_leads);
-    return leadIsReviewable(lead);
+    return leadIsVisibleInReviewAdmin(lead);
   });
   const applicationIds = applicationRows.map((row) => row.id);
 
@@ -628,7 +700,7 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     return [];
   }
 
-  const [choiceResult, supportNeedsResult, documentSlotResult, reviewResult, decisionResult] = await Promise.all([
+  const [choiceResult, supportNeedsResult, documentSlotResult, reviewResult, decisionResult, offerResult] = await Promise.all([
     supabase
       .from("application_module_offering_choices")
       .select("application_id, offering_id, choice_order")
@@ -652,7 +724,14 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     supabase
       .from("application_decisions")
       .select("application_id, outcome, decision_reason, decided_at, correspondence_log_id")
+      .in("application_id", applicationIds),
+    supabase
+      .from("application_offers")
+      .select(
+        "application_id, id, offer_reference, status, issued_at, deadline_at, accepted_at, declined_at, lapsed_at, deadline_reminder_count, last_deadline_reminder_at, last_deadline_reminder_correspondence_log_id, correspondence_log_id"
+      )
       .in("application_id", applicationIds)
+      .order("issued_at", { ascending: false })
   ]);
 
   if (choiceResult.error) {
@@ -670,6 +749,9 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
   if (decisionResult.error) {
     throw new Error(decisionResult.error.message);
   }
+  if (offerResult.error) {
+    throw new Error(offerResult.error.message);
+  }
 
   const choices = (choiceResult.data ?? []) as ChoiceRow[];
   const supportNeedsRows = (supportNeedsResult.data ?? []) as SupportNeedsRow[];
@@ -678,6 +760,12 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
   const slots = (documentSlotResult.data ?? []) as DocumentSlotRow[];
   const reviewByApplicationId = new Map(((reviewResult.data ?? []) as ReviewRow[]).map((row) => [row.application_id, row]));
   const decisionByApplicationId = new Map(((decisionResult.data ?? []) as DecisionRow[]).map((row) => [row.application_id, row]));
+  const offerByApplicationId = new Map<string, OfferRow>();
+  for (const offer of (offerResult.data ?? []) as OfferRow[]) {
+    if (!offerByApplicationId.has(offer.application_id)) {
+      offerByApplicationId.set(offer.application_id, offer);
+    }
+  }
 
   return applicationRows.map((row) =>
     mapApplication(
@@ -687,7 +775,8 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
       supportByApplicationId.get(row.id),
       slots,
       reviewByApplicationId.get(row.id),
-      decisionByApplicationId.get(row.id)
+      decisionByApplicationId.get(row.id),
+      offerByApplicationId.get(row.id)
     )
   );
 }
@@ -741,8 +830,42 @@ function ApplicationSummaryPanel({ application }: { application: StaffReviewAppl
         <DataItem label="Programme" value={application.programme === "pgcert" ? "PGCert" : "Microcredential"} />
         <DataItem label="Intended start term" value={startTerm} />
         <DataItem label="Selected offerings" value={application.selectedOfferings.length} />
+        <DataItem label="Offer deadline" value={application.offer?.deadlineAt ? formatDateTime(application.offer.deadlineAt) : "No offer issued"} />
       </div>
     </div>
+  );
+}
+
+function OfferDeadlineWorkflowPanel() {
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Offer Deadline Workflow</h2>
+          <p>Manual processor for suppressed deadline reminders and lapsed offers. No applicant emails are sent.</p>
+        </div>
+        <div className="icon-box">
+          <MailWarning size={18} />
+        </div>
+      </div>
+      <form className="toolbar" action={processApplicationOfferDeadlineWorkflow}>
+        <Field label="Reminder window" htmlFor="offer-reminder-window-days">
+          <input
+            id="offer-reminder-window-days"
+            name="reminder_window_days"
+            className="input"
+            type="number"
+            min={0}
+            max={30}
+            defaultValue={3}
+          />
+        </Field>
+        <button className="button primary">
+          <Clock size={16} />
+          Process offer deadlines
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -1098,6 +1221,64 @@ function RecordDecisionPanel({ application }: { application: StaffReviewApplicat
   );
 }
 
+function OfferStatusPanel({ application }: { application: StaffReviewApplication }) {
+  const offer = application.offer;
+
+  if (!offer) {
+    return null;
+  }
+
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Offer State</h2>
+          <p>Portal/database offer state, deadline tracking, and suppressed reminder/lapse logging</p>
+        </div>
+        <div className="toolbar">
+          <StatusPill value={offer.status} />
+          {offer.deadlinePassed ? <StatusPill value="watch" label="deadline passed" /> : null}
+        </div>
+      </div>
+
+      <div className="review-data-grid">
+        <DataItem label="Offer reference" value={offer.offerReference} />
+        <DataItem label="Issued" value={formatDateTime(offer.issuedAt)} />
+        <DataItem label="Response deadline" value={formatDateTime(offer.deadlineAt)} />
+        <DataItem label="Reminder logs" value={offer.reminderCount} />
+        <DataItem label="Last reminder eligibility" value={formatDateTime(offer.lastDeadlineReminderAt)} />
+        <DataItem label="Offer correspondence log" value={offer.correspondenceLogId ? "Created" : "Not recorded"} />
+      </div>
+
+      {offer.status === "lapsed" ? (
+        <div className="apply-error" role="status">
+          <Clock size={18} />
+          <div>
+            <h2>Offer lapsed</h2>
+            <p>This offer lapsed {formatDateTime(offer.lapsedAt)}. Applicants cannot accept or decline lapsed offers.</p>
+          </div>
+        </div>
+      ) : null}
+
+      {offer.deadlinePassed && offer.status === "issued" ? (
+        <div className="apply-error" role="status">
+          <Clock size={18} />
+          <div>
+            <h2>Deadline passed</h2>
+            <p>Run the offer deadline workflow to mark the overdue issued offer as lapsed and create suppressed lapse correspondence.</p>
+          </div>
+        </div>
+      ) : null}
+
+      {offer.lastDeadlineReminderCorrespondenceLogId ? (
+        <p className="muted small">Latest reminder correspondence log was created with delivery suppressed.</p>
+      ) : (
+        <p className="muted small">No reminder eligibility log has been recorded for this offer yet.</p>
+      )}
+    </section>
+  );
+}
+
 function ReviewApplicationRecord({ application, open }: { application: StaffReviewApplication; open: boolean }) {
   return (
     <details className="review-application-record" id={`application-${application.id}`} open={open}>
@@ -1128,6 +1309,7 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
         <EvidencePanel application={application} />
         <ReviewDecisionPanel application={application} />
         <RecordDecisionPanel application={application} />
+        <OfferStatusPanel application={application} />
       </div>
     </details>
   );
@@ -1141,6 +1323,8 @@ export default async function AdmissionsReviewsPage({
     document_verified?: string;
     review_saved?: string;
     decision_recorded?: string;
+    offer_deadlines_processed?: string;
+    offer_deadlines_demo?: string;
     document_demo?: string;
     review_demo?: string;
     decision_demo?: string;
@@ -1160,20 +1344,31 @@ export default async function AdmissionsReviewsPage({
         </Link>
       }
     >
-      {params.document_verified || params.review_saved || params.decision_recorded || params.document_demo || params.review_demo || params.decision_demo ? (
+      {params.document_verified ||
+      params.review_saved ||
+      params.decision_recorded ||
+      params.offer_deadlines_processed ||
+      params.document_demo ||
+      params.review_demo ||
+      params.decision_demo ||
+      params.offer_deadlines_demo ? (
         <div className="apply-success" role="status">
           <ShieldAlert size={18} />
           <div>
             <h2>
-              {params.decision_recorded || params.decision_demo
+              {params.offer_deadlines_processed || params.offer_deadlines_demo
+                ? "Offer deadlines processed"
+                : params.decision_recorded || params.decision_demo
                 ? "Decision recorded"
                 : params.review_saved || params.review_demo
                   ? "Review saved"
                   : "Document verification saved"}
             </h2>
             <p>
-              {params.document_demo || params.review_demo || params.decision_demo
+              {params.document_demo || params.review_demo || params.decision_demo || params.offer_deadlines_demo
                 ? "Demo mode simulated the action."
+                : params.offer_deadlines_processed
+                  ? "Eligible reminders and lapsed offers were logged with suppressed correspondence. No applicant email was sent."
                 : params.decision_recorded
                   ? "The lead moved to offered or rejected, a suppressed correspondence log was recorded, and no applicant email was sent."
                   : "Audit events were recorded for the staff action."}
@@ -1182,8 +1377,13 @@ export default async function AdmissionsReviewsPage({
         </div>
       ) : null}
 
+      <OfferDeadlineWorkflowPanel />
+
       {applications.length === 0 ? (
-        <EmptyState title="No submitted applications" detail="Submitted applicant records appear here until an offer or rejection decision is recorded." />
+        <EmptyState
+          title="No submitted applications"
+          detail="Submitted, offered, accepted, declined, and lapsed applicant records appear here for admissions review and offer operations."
+        />
       ) : (
         <section className="section">
           <div className="section-header">
