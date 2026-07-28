@@ -146,7 +146,7 @@ begin
     raise exception 'Only issued offers can be accepted or declined';
   end if;
 
-  if v_offer.deadline_at is not null and v_offer.deadline_at < now() then
+  if v_offer.deadline_at is not null and v_offer.deadline_at <= now() then
     raise exception 'Offer deadline has passed';
   end if;
 

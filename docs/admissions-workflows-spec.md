@@ -591,7 +591,7 @@ Offer records should include:
 - accepted/declined/lapsed timestamp.
 - acceptance metadata: auth user, IP, T&C/offer version where applicable.
 
-Default offer deadline is open until the business confirms it. Proposed default: 14 days.
+Default offer deadline is implemented as 14 days until the business confirms a different default.
 
 Offer emails must not be the only source of truth. The portal must show the current offer state.
 
@@ -606,7 +606,7 @@ Current Phase 1 decision-foundation implementation:
 - Staff can record an offer or rejection from `/admissions/reviews` after the application review is marked `ready_for_decision`.
 - `record_application_decision(...)` is admin-only, requires a submitted application whose lead is still in `submitted` or `reviewed`, requires a non-empty decision reason, prevents a second decision on the same application, updates the related lead to `offered` or `rejected`, and writes `offer.issued` or `application.rejected` audit events.
 - `application_decisions` stores the staff decision, reason, actor, timestamp, related application, lead, person, and correspondence-log link.
-- `application_offers` stores offer reference, programme, intended start term, optional deadline, issued timestamp, offer status foundation, letter template snapshot, correspondence-log link, and future acceptance/decline/lapse timestamp columns.
+- `application_offers` stores offer reference, programme, intended start term, required deadline, issued timestamp, offer status foundation, letter template snapshot, correspondence-log link, and future acceptance/decline/lapse timestamp columns.
 - `application_offer_module_offerings` snapshots one or two application-selected intended module offerings onto the offer without reserving capacity, creating enrolments, or creating finance rows.
 - `application_rejections` stores rejection-specific records with reason, actor, timestamp, template snapshot, and correspondence-log link.
 - Raw `application_decisions` and `application_rejections` rows are admin-only for now because they contain internal staff decision reasons. A later applicant-facing portal slice should expose only deliberately sanitized offer/rejection content.
@@ -617,13 +617,24 @@ Current Phase 1 applicant offer response implementation:
 
 - `/portal` is the applicant/student portal landing page and shows the current applicant offer after magic-link login.
 - The portal shows the offer reference, programme, intended start term, offered module offering snapshot, issued date, deadline, and current offer status.
-- Applicants can accept or decline only their own `issued` offer before `deadline_at`. Expired offers are blocked in the portal and by the database RPC, but this slice does not implement the reminder/lapse cron or automatically mark expired offers as lapsed.
+- Applicants can accept or decline only their own `issued` offer before `deadline_at`. Expired, accepted, declined, withdrawn, and lapsed offers are blocked in the portal and by the database RPC.
 - `respond_to_application_offer(...)` is the applicant-only RPC for offer responses. It validates the portal actor, person ownership, offer status, deadline, submitted application, non-archived/non-converted lead, and lead stage `offered` in one transaction.
 - Accepting an offer sets `application_offers.status = 'accepted'`, stores `accepted_at`, `accepted_by_auth_user_id`, `accepted_by_person_id`, `accepted_ip_address`, and `accepted_user_agent`, moves the related lead to `accepted`, and clears `next_action_on`.
 - Declining an offer sets `application_offers.status = 'declined'`, stores `declined_at`, `declined_by_auth_user_id`, `declined_by_person_id`, `declined_ip_address`, and `declined_user_agent`, moves the related lead to `offer_declined`, and clears `next_action_on`.
 - Both responses write applicant audit events: `offer.accepted` or `offer.declined`.
-- Both responses create suppressed correspondence-log records using `offer_accepted_confirmation` or `offer_declined_confirmation` template placeholders with `template_version = 1`, `delivery_status = suppressed`, `production_email_send_enabled = false`, and `provider_message_id = null`. No real emails are sent.
-- Accepted offers show a clear portal state that registration is the next step. The registration wizard, conversion, enrolments, finance rows, reminder/lapse cron, and production SMTP configuration remain separate future tasks.
+- Both responses create suppressed confirmation correspondence logs using template version 1, `delivery_status = suppressed`, and `provider_message_id = null`.
+
+Current Phase 1 offer deadline/reminder/lapse implementation:
+
+- `application_offers.deadline_at` is required for issued offers. Existing issued offers without deadlines are backfilled to a future 14-day deadline, and new offers default to `now() + interval '14 days'` when staff leave the offer deadline blank.
+- `process_application_offer_deadline_workflow(...)` is an admin-only reusable RPC/manual workflow. It accepts a reference timestamp and reminder window in days, currently wired to a staff button on `/admissions/reviews`.
+- The manual workflow records one suppressed `offer_deadline_reminder` correspondence log and `offer.reminder_eligible` audit event for each issued offer whose deadline is approaching within the configured window and has not already had reminder eligibility logged.
+- The manual workflow marks overdue issued offers as `application_offers.status = 'lapsed'`, stores `lapsed_at`, moves the related lead to `offer_lapsed`, clears `next_action_on`, writes an `offer.lapsed` audit event, and creates a suppressed `offer_lapsed_notice` correspondence log.
+- Reminder and lapse correspondence logs keep `delivery_status = suppressed`, `production_email_send_enabled = false`, and `provider_message_id = null`. They are placeholders only and do not send real email.
+- Staff review/admin UI now includes submitted, offered, accepted, declined, and lapsed offer-stage applications. It shows offer reference, status, deadline, deadline-passed state, reminder logging state, and lapsed state, plus the manual deadline workflow trigger.
+- Applicant portal UI shows deadline, lapsed state, and deadline-passed state clearly. The portal/database remains the source of truth.
+- This slice deliberately does not add a production scheduler/cron, Microsoft 365 SMTP configuration, real applicant sends, registration wizard, enrolments, finance rows, or module capacity changes.
+- Accepted offers show a clear portal state that registration is the next step. The registration wizard, conversion, enrolments, finance rows, production scheduling, and production SMTP configuration remain separate future tasks.
 
 ### Emails and Letters
 

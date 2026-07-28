@@ -32,6 +32,7 @@ interface PortalOfferSummary {
   acceptedAt?: string;
   declinedAt?: string;
   lapsedAt?: string;
+  deadlinePassed: boolean;
   termName?: string;
   termStartsOn?: string;
   modules: PortalOfferModule[];
@@ -120,6 +121,7 @@ function mapOfferRow(row: PortalOfferRow): PortalOfferSummary {
     acceptedAt: optionalString(row.accepted_at),
     declinedAt: optionalString(row.declined_at),
     lapsedAt: optionalString(row.lapsed_at),
+    deadlinePassed: row.status === "issued" && row.deadline_at ? new Date(row.deadline_at).getTime() <= Date.now() : false,
     termName: optionalString(term?.name),
     termStartsOn: optionalString(term?.starts_on),
     modules
@@ -157,6 +159,7 @@ async function getPortalOfferContext(personId: string): Promise<{ currentOffer?:
         status: "issued",
         issuedAt: new Date().toISOString(),
         deadlineAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        deadlinePassed: false,
         termName: term?.name,
         termStartsOn: term?.startsOn,
         modules
@@ -333,6 +336,18 @@ function OfferStatePanel({ offer }: { offer: PortalOfferSummary }) {
     );
   }
 
+  if (offer.deadlinePassed) {
+    return (
+      <div className="offer-state-panel declined">
+        <Clock size={18} />
+        <div>
+          <strong>Offer deadline passed</strong>
+          <p className="muted small">This offer cannot be accepted or declined unless admissions reissues it.</p>
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -345,6 +360,7 @@ function CurrentOfferPanel({ offer }: { offer: PortalOfferSummary }) {
           <p>Reference {offer.offerReference}</p>
         </div>
         <StatusPill value={offer.status} />
+        {offer.deadlinePassed ? <StatusPill value="watch" label="deadline passed" /> : null}
       </div>
 
       <div className="offer-summary-grid">
