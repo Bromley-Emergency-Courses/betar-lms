@@ -67,6 +67,7 @@ describe("application invitations", () => {
       "offered",
       "rejected",
       "accepted",
+      "offer_declined",
       "archived"
     ];
 

@@ -29,6 +29,7 @@ const colourByValue: Record<string, string> = {
   did_not_complete: "red",
   failed: "red",
   missed: "red",
+  offer_declined: "red",
   rejected: "red",
   withdrawn: "red",
   disputed: "red",

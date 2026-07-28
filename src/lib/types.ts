@@ -42,6 +42,7 @@ export type AdmissionLeadStage =
   | "offered"
   | "rejected"
   | "accepted"
+  | "offer_declined"
   | "archived";
 export type ApplicationStatus = "draft" | "submitted";
 
