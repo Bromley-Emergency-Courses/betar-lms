@@ -21,6 +21,8 @@ const colourByValue: Record<string, string> = {
   deferred: "amber",
   interrupted: "amber",
   prospect: "neutral",
+  not_started: "neutral",
+  submitted: "neutral",
   not_ready: "neutral",
   not_due: "neutral",
   not_requested: "neutral",
