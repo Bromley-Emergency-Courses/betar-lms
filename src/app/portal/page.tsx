@@ -38,6 +38,13 @@ interface PortalOfferSummary {
   modules: PortalOfferModule[];
 }
 
+interface PortalRegistrationSummary {
+  id: string;
+  status: "not_started" | "in_progress" | "submitted";
+  savedAt?: string;
+  submittedAt?: string;
+}
+
 type RelatedObject = Record<string, unknown>;
 
 type PortalOfferRow = {
@@ -128,7 +135,10 @@ function mapOfferRow(row: PortalOfferRow): PortalOfferSummary {
   };
 }
 
-async function getPortalOfferContext(personId: string): Promise<{ currentOffer?: PortalOfferSummary }> {
+async function getPortalOfferContext(personId: string): Promise<{
+  currentOffer?: PortalOfferSummary;
+  registration?: PortalRegistrationSummary;
+}> {
   if (!isSupabaseConfigured()) {
     const data = getAppData();
     const term = data.terms.find((candidate) => candidate.status === "published") ?? data.terms[0];
@@ -214,8 +224,36 @@ async function getPortalOfferContext(personId: string): Promise<{ currentOffer?:
     throw new Error(error.message);
   }
 
+  const currentOffer = data ? mapOfferRow(data) : undefined;
+  if (!currentOffer) {
+    return {};
+  }
+
+  const registrationResult = await supabase
+    .from("admissions_registrations")
+    .select("id, status, saved_at, submitted_at")
+    .eq("application_offer_id", currentOffer.id)
+    .maybeSingle();
+
+  if (registrationResult.error) {
+    throw new Error(registrationResult.error.message);
+  }
+
   return {
-    currentOffer: data ? mapOfferRow(data) : undefined
+    currentOffer,
+    registration: registrationResult.data
+      ? {
+          id: String(registrationResult.data.id),
+          status:
+            registrationResult.data.status === "submitted"
+              ? "submitted"
+              : registrationResult.data.status === "in_progress"
+                ? "in_progress"
+                : "not_started",
+          savedAt: optionalString(registrationResult.data.saved_at),
+          submittedAt: optionalString(registrationResult.data.submitted_at)
+        }
+      : undefined
   };
 }
 
@@ -297,16 +335,25 @@ function OfferActions({ offer }: { offer: PortalOfferSummary }) {
   );
 }
 
-function OfferStatePanel({ offer }: { offer: PortalOfferSummary }) {
+function OfferStatePanel({ offer, registration }: { offer: PortalOfferSummary; registration?: PortalRegistrationSummary }) {
   if (offer.status === "accepted") {
+    const registrationStatus = registration?.status ?? "not_started";
+    const detail =
+      registrationStatus === "submitted"
+        ? `Your registration was submitted ${formatDateTime(registration?.submittedAt)}.`
+        : registrationStatus === "in_progress"
+          ? `Your registration draft was last saved ${formatDateTime(registration?.savedAt)}.`
+          : `Your offer was accepted ${formatDateTime(offer.acceptedAt)}. Start registration when you are ready.`;
+
     return (
       <div className="offer-state-panel success">
         <GraduationCap size={18} />
         <div>
-          <strong>Registration is the next step</strong>
-          <p className="muted small">
-            Your offer was accepted {formatDateTime(offer.acceptedAt)}. The registration wizard is not available yet.
-          </p>
+          <strong>Registration {registrationStatus.replaceAll("_", " ")}</strong>
+          <p className="muted small">{detail}</p>
+          <Link className="button secondary apply-submit" href="/portal/registration">
+            Open registration
+          </Link>
         </div>
       </div>
     );
@@ -351,7 +398,7 @@ function OfferStatePanel({ offer }: { offer: PortalOfferSummary }) {
   return null;
 }
 
-function CurrentOfferPanel({ offer }: { offer: PortalOfferSummary }) {
+function CurrentOfferPanel({ offer, registration }: { offer: PortalOfferSummary; registration?: PortalRegistrationSummary }) {
   return (
     <div className="apply-form-panel application-draft-form">
       <div className="section-header">
@@ -403,7 +450,7 @@ function CurrentOfferPanel({ offer }: { offer: PortalOfferSummary }) {
         </div>
       </div>
 
-      <OfferStatePanel offer={offer} />
+      <OfferStatePanel offer={offer} registration={registration} />
       <OfferActions offer={offer} />
     </div>
   );
@@ -416,7 +463,7 @@ export default async function PortalPage({
 }) {
   const profile = await requireCurrentPortalProfile("/portal");
   const { offer: offerResult, offerError } = await searchParams;
-  const { currentOffer } = await getPortalOfferContext(profile.personId);
+  const { currentOffer, registration } = await getPortalOfferContext(profile.personId);
 
   return (
     <main className="apply-page">
@@ -436,7 +483,7 @@ export default async function PortalPage({
         <OfferResponseErrorBanner offerError={offerError} />
 
         {currentOffer ? (
-          <CurrentOfferPanel offer={currentOffer} />
+          <CurrentOfferPanel offer={currentOffer} registration={registration} />
         ) : (
           <div className="apply-form-panel">
             <div className="section-header">

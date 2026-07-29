@@ -92,6 +92,7 @@ interface StaffReviewApplication {
   review?: ApplicationReviewSummary;
   decision?: ApplicationDecisionSummary;
   offer?: ApplicationOfferSummary;
+  registration?: RegistrationStatusSummary;
 }
 
 interface SelectedOfferingSummary {
@@ -154,6 +155,18 @@ interface ApplicationOfferSummary {
   lastDeadlineReminderAt?: string;
   lastDeadlineReminderCorrespondenceLogId?: string;
   correspondenceLogId?: string;
+}
+
+interface RegistrationStatusSummary {
+  id: string;
+  status: "not_started" | "in_progress" | "submitted";
+  savedAt?: string;
+  submittedAt?: string;
+  termsVersion?: string;
+  termsAcceptedAt?: string;
+  moduleConfirmationAccepted: boolean;
+  requiredDocumentCount: number;
+  uploadedRequiredDocumentCount: number;
 }
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -272,6 +285,24 @@ type OfferRow = {
   correspondence_log_id: string | null;
 };
 
+type RegistrationRow = {
+  application_id: string;
+  id: string;
+  status: "not_started" | "in_progress" | "submitted";
+  saved_at: string | null;
+  submitted_at: string | null;
+  terms_version: string | null;
+  terms_accepted_at: string | null;
+  module_confirmation_accepted: boolean | null;
+};
+
+type RegistrationDocumentSlotRow = {
+  registration_id: string;
+  required: boolean;
+  managed_file_id: string | null;
+  verification_status: ApplicationDocumentVerificationStatus;
+};
+
 type LeadJoin = {
   stage?: string;
   archived?: boolean;
@@ -323,7 +354,7 @@ function leadIsVisibleInReviewAdmin(lead: LeadJoin | undefined): boolean {
       !lead.archived &&
       !lead.converted_student_id &&
       typeof lead.stage === "string" &&
-      ["submitted", "reviewed", "offered", "accepted", "offer_declined", "offer_lapsed"].includes(lead.stage)
+      ["submitted", "reviewed", "offered", "accepted", "registration_in_progress", "offer_declined", "offer_lapsed"].includes(lead.stage)
   );
 }
 
@@ -355,7 +386,8 @@ function mapApplication(
   slots: DocumentSlotRow[] = [],
   review?: ReviewRow,
   decision?: DecisionRow,
-  offer?: OfferRow
+  offer?: OfferRow,
+  registration?: RegistrationStatusSummary
 ): StaffReviewApplication {
   const lead = joinedObject(row.admission_leads);
   return {
@@ -466,7 +498,8 @@ function mapApplication(
           lastDeadlineReminderCorrespondenceLogId: optionalString(offer.last_deadline_reminder_correspondence_log_id),
           correspondenceLogId: optionalString(offer.correspondence_log_id)
         }
-      : undefined
+      : undefined,
+    registration
   };
 }
 
@@ -700,7 +733,7 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     return [];
   }
 
-  const [choiceResult, supportNeedsResult, documentSlotResult, reviewResult, decisionResult, offerResult] = await Promise.all([
+  const [choiceResult, supportNeedsResult, documentSlotResult, reviewResult, decisionResult, offerResult, registrationResult] = await Promise.all([
     supabase
       .from("application_module_offering_choices")
       .select("application_id, offering_id, choice_order")
@@ -731,7 +764,14 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
         "application_id, id, offer_reference, status, issued_at, deadline_at, accepted_at, declined_at, lapsed_at, deadline_reminder_count, last_deadline_reminder_at, last_deadline_reminder_correspondence_log_id, correspondence_log_id"
       )
       .in("application_id", applicationIds)
-      .order("issued_at", { ascending: false })
+      .order("issued_at", { ascending: false }),
+    supabase
+      .from("admissions_registrations")
+      .select(
+        "application_id, id, status, saved_at, submitted_at, terms_version, terms_accepted_at, module_confirmation_accepted"
+      )
+      .in("application_id", applicationIds)
+      .order("updated_at", { ascending: false })
   ]);
 
   if (choiceResult.error) {
@@ -752,6 +792,9 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
   if (offerResult.error) {
     throw new Error(offerResult.error.message);
   }
+  if (registrationResult.error) {
+    throw new Error(registrationResult.error.message);
+  }
 
   const choices = (choiceResult.data ?? []) as ChoiceRow[];
   const supportNeedsRows = (supportNeedsResult.data ?? []) as SupportNeedsRow[];
@@ -766,6 +809,41 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
       offerByApplicationId.set(offer.application_id, offer);
     }
   }
+  const registrationRows = (registrationResult.data ?? []) as RegistrationRow[];
+  const registrationIds = registrationRows.map((row) => row.id);
+  const registrationSlotResult =
+    registrationIds.length > 0
+      ? await supabase
+          .from("admissions_registration_document_slots")
+          .select("registration_id, required, managed_file_id, verification_status")
+          .in("registration_id", registrationIds)
+      : { data: [], error: null };
+
+  if (registrationSlotResult.error) {
+    throw new Error(registrationSlotResult.error.message);
+  }
+
+  const registrationSlots = (registrationSlotResult.data ?? []) as RegistrationDocumentSlotRow[];
+  const registrationByApplicationId = new Map<string, RegistrationStatusSummary>();
+  for (const registration of registrationRows) {
+    if (registrationByApplicationId.has(registration.application_id)) {
+      continue;
+    }
+    const registrationRequiredSlots = registrationSlots.filter((slot) => slot.registration_id === registration.id && slot.required);
+    registrationByApplicationId.set(registration.application_id, {
+      id: registration.id,
+      status: registration.status,
+      savedAt: optionalString(registration.saved_at),
+      submittedAt: optionalString(registration.submitted_at),
+      termsVersion: optionalString(registration.terms_version),
+      termsAcceptedAt: optionalString(registration.terms_accepted_at),
+      moduleConfirmationAccepted: Boolean(registration.module_confirmation_accepted),
+      requiredDocumentCount: registrationRequiredSlots.length,
+      uploadedRequiredDocumentCount: registrationRequiredSlots.filter(
+        (slot) => slot.managed_file_id && slot.verification_status !== "rejected"
+      ).length
+    });
+  }
 
   return applicationRows.map((row) =>
     mapApplication(
@@ -776,7 +854,8 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
       slots,
       reviewByApplicationId.get(row.id),
       decisionByApplicationId.get(row.id),
-      offerByApplicationId.get(row.id)
+      offerByApplicationId.get(row.id),
+      registrationByApplicationId.get(row.id)
     )
   );
 }
@@ -820,6 +899,7 @@ function ApplicationSummaryPanel({ application }: { application: StaffReviewAppl
         <div className="toolbar">
           <StatusPill value={application.leadStage} />
           <StatusPill value={application.review?.readinessStatus ?? "not_ready"} />
+          <StatusPill value={application.registration?.status ?? "not_started"} label={`registration ${application.registration?.status?.replaceAll("_", " ") ?? "not started"}`} />
         </div>
       </div>
 
@@ -831,6 +911,7 @@ function ApplicationSummaryPanel({ application }: { application: StaffReviewAppl
         <DataItem label="Intended start term" value={startTerm} />
         <DataItem label="Selected offerings" value={application.selectedOfferings.length} />
         <DataItem label="Offer deadline" value={application.offer?.deadlineAt ? formatDateTime(application.offer.deadlineAt) : "No offer issued"} />
+        <DataItem label="Registration" value={application.registration?.status.replaceAll("_", " ") ?? "Not started"} />
       </div>
     </div>
   );
@@ -1279,6 +1360,46 @@ function OfferStatusPanel({ application }: { application: StaffReviewApplication
   );
 }
 
+function RegistrationStatusPanel({ application }: { application: StaffReviewApplication }) {
+  const registration = application.registration;
+
+  if (!registration) {
+    return (
+      <section className="panel grid">
+        <div className="section-header">
+          <div>
+            <h2>Registration State</h2>
+            <p>No registration has been started for this accepted offer yet.</p>
+          </div>
+          <StatusPill value="not_started" />
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Registration State</h2>
+          <p>Applicant registration status only. Conversion, enrolments, and finance remain disabled.</p>
+        </div>
+        <StatusPill value={registration.status} />
+      </div>
+
+      <div className="review-data-grid">
+        <DataItem label="Status" value={registration.status.replaceAll("_", " ")} />
+        <DataItem label="Last saved" value={formatDateTime(registration.savedAt)} />
+        <DataItem label="Submitted" value={formatDateTime(registration.submittedAt)} />
+        <DataItem label="Course/modules confirmed" value={registration.moduleConfirmationAccepted} />
+        <DataItem label="Required docs uploaded" value={`${registration.uploadedRequiredDocumentCount}/${registration.requiredDocumentCount}`} />
+        <DataItem label="T&C version" value={registration.termsVersion} />
+        <DataItem label="T&C accepted" value={formatDateTime(registration.termsAcceptedAt)} />
+      </div>
+    </section>
+  );
+}
+
 function ReviewApplicationRecord({ application, open }: { application: StaffReviewApplication; open: boolean }) {
   return (
     <details className="review-application-record" id={`application-${application.id}`} open={open}>
@@ -1294,6 +1415,7 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
         <span className="toolbar">
           <StatusPill value={application.leadStage} />
           <StatusPill value={application.review?.readinessStatus ?? "not_ready"} />
+          <StatusPill value={application.registration?.status ?? "not_started"} label={`registration ${application.registration?.status?.replaceAll("_", " ") ?? "not started"}`} />
         </span>
       </summary>
       <div className="review-application-body">
@@ -1310,6 +1432,7 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
         <ReviewDecisionPanel application={application} />
         <RecordDecisionPanel application={application} />
         <OfferStatusPanel application={application} />
+        <RegistrationStatusPanel application={application} />
       </div>
     </details>
   );

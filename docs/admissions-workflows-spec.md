@@ -696,6 +696,18 @@ reopened
 
 The exact state names may differ, but the lifecycle must distinguish incomplete, submitted for staff checks, complete, and lapsed/reopened.
 
+Current Phase 2 registration foundation implementation:
+
+- `/portal/registration` is gated by the applicant portal auth boundary and database RPCs to authenticated applicants whose own `application_offers.status = 'accepted'`.
+- Starting registration calls `begin_admissions_registration(...)`, creates an `admissions_registrations` row in `in_progress`, moves the related lead to `registration_in_progress`, snapshots accepted offer programme/start term/module offerings with immutable displayed term/module/price/capacity fields, pre-fills personal details from application/person/lead data, creates required document slots, stores initial personal-detail version 1, and writes `registration.started`.
+- Registration distinguishes `not_started` in the portal when no registration row exists, then persists `in_progress` and `submitted` in `admissions_registration_status`.
+- Draft save calls `save_admissions_registration(...)`, updates the registration snapshot only while `in_progress`, preserves personal-detail versions in `admissions_registration_person_detail_versions` when details change, records module confirmation metadata, and writes `registration.saved`.
+- Registration document uploads use private storage plus `managed_files`, following the application-document pattern. Required slots are `identity_evidence` in `id-documents` and `qualification_evidence` in `qualification-documents`; optional `student_id_photo` uses `student-photos`. Successful uploads write `document.uploaded`.
+- T&Cs are versioned in `admissions_registration_terms_versions`. The portal reads the active version/text from the database, and the submit server action fetches the active version/hash before calling `submit_admissions_registration(...)`. Final submit saves the current draft form fields first, then records version, hash, person, auth user, timestamp, IP address, and user agent, and writes `registration.terms_accepted` and `registration.submitted`.
+- Final registration submission validates required personal details, confirmed offer modules, active accepted-term offerings, required uploaded identity/qualification slots, and current T&C acceptance.
+- `/portal` shows registration not-started/in-progress/submitted states for accepted offers, and `/admissions/reviews` shows registration status to admissions admins.
+- This slice deliberately does not call `convert_admissions_registration(...)`, create or activate student records, create enrolments, create finance rows or invoices, send emails, add a scheduler, or implement registration lapsed/reopened workflow.
+
 ## Phase 3: Termly Module Preferences
 
 Preference windows replace Google Forms and email chasing.
