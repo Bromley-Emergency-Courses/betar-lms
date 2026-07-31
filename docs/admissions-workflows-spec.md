@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Spec
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 This is the developer-facing build spec for the admissions, application, registration, and student portal work. It is derived from the original PGCert admissions system plan and adjusted for the current BETAR LMS codebase.
 
@@ -707,6 +707,19 @@ Current Phase 2 registration foundation implementation:
 - Final registration submission validates required personal details, confirmed offer modules, active accepted-term offerings, required uploaded identity/qualification slots, and current T&C acceptance.
 - `/portal` shows registration not-started/in-progress/submitted states for accepted offers, and `/admissions/reviews` shows registration status to admissions admins.
 - This slice deliberately does not call `convert_admissions_registration(...)`, create or activate student records, create enrolments, create finance rows or invoices, send emails, add a scheduler, or implement registration lapsed/reopened workflow.
+
+Current Phase 2 registration conversion implementation:
+
+- Admissions admins convert from `/admissions/reviews` after an applicant registration reaches `submitted`.
+- The staff action calls `convert_submitted_admissions_registration(...)`, which re-checks staff/admin authorization and submitted registration eligibility inside the database before staging or updating an `admissions_conversion_requests` row.
+- The old accepted-lead direct conversion UI is removed and its server action is blocked; authenticated staff should not create admissions students from leads without a submitted registration.
+- Authenticated staff execute the submitted-registration wrapper only. Direct authenticated execute access is revoked from the lower-level `convert_admissions_registration(...)` RPC, while service-role access remains available for controlled server/service use.
+- Conversion requires an accepted offer, submitted application, non-archived/non-converted lead, registration T&C acceptance metadata, confirmed modules, one or two active accepted-term module offerings from the accepted offer snapshot, required personal/contact fields, and uploaded required identity/qualification registration documents that have not been rejected.
+- `convert_submitted_admissions_registration(...)` stages conversion documents from registration document slots, then calls the existing `convert_admissions_registration(...)` transaction/RPC.
+- `convert_admissions_registration(...)` now creates or activates one existing `students` row linked to the same `person`, updates the canonical person/student details from registration, creates planned initial `enrolments` from the accepted registration module snapshot with duplicate protection, links managed files to the student, promotes the active portal identity to `student`, records `converted_at`/staff metadata, and writes `registration.converted_to_student`.
+- Conversion links metadata back onto `admissions_registrations`, `applications`, `application_offers`, and `admission_leads`; registration status becomes `complete`, lead stage becomes `registered`, and the lead stores `converted_student_id`.
+- Repeated conversion attempts for an already-complete registration return the existing linked student rather than creating duplicate students or enrolments.
+- This slice deliberately does not create finance rows, invoices, payment rows, real email/correspondence sends, scheduler jobs, capacity/waitlist behavior, or registration lapsed/reopened workflows.
 
 ## Phase 3: Termly Module Preferences
 

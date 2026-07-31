@@ -2,6 +2,7 @@ import clsx from "clsx";
 
 const colourByValue: Record<string, string> = {
   active: "green",
+  complete: "green",
   completed: "green",
   paid: "green",
   passed: "green",
@@ -11,6 +12,7 @@ const colourByValue: Record<string, string> = {
   ready_for_decision: "green",
   in_progress: "violet",
   accepted: "violet",
+  registered: "green",
   offered: "violet",
   watch: "amber",
   outstanding: "amber",

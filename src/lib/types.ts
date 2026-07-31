@@ -42,6 +42,8 @@ export type AdmissionLeadStage =
   | "offered"
   | "rejected"
   | "accepted"
+  | "registration_in_progress"
+  | "registered"
   | "offer_declined"
   | "offer_lapsed"
   | "archived";

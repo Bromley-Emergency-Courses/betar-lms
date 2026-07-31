@@ -3,7 +3,7 @@ import { z } from "zod";
 import { buildAuditEventInsert, type JsonRecord } from "@/lib/audit-correspondence";
 import { sanitizeApplicationDocumentFilename } from "@/lib/application-documents";
 
-export const admissionsRegistrationStatuses = ["not_started", "in_progress", "submitted"] as const;
+export const admissionsRegistrationStatuses = ["not_started", "in_progress", "submitted", "complete"] as const;
 export const admissionsRegistrationStartedAction = "registration.started";
 export const admissionsRegistrationSavedAction = "registration.saved";
 export const admissionsRegistrationSubmittedAction = "registration.submitted";

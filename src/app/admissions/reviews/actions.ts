@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseRecordApplicationDecisionForm } from "@/lib/application-decisions";
 import { parseProcessApplicationOfferDeadlineWorkflowForm } from "@/lib/application-offers";
+import { parseConvertSubmittedAdmissionsRegistrationForm } from "@/lib/admissions-conversion";
 import {
   parseRecordStaffApplicationReviewForm,
   parseVerifyApplicationDocumentForm
@@ -111,4 +112,28 @@ export async function processApplicationOfferDeadlineWorkflow(formData: FormData
   revalidatePath("/admissions");
   revalidatePath("/portal");
   redirect("/admissions/reviews?offer_deadlines_processed=1");
+}
+
+export async function convertSubmittedAdmissionsRegistration(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseConvertSubmittedAdmissionsRegistrationForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "conversion_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("convert_submitted_admissions_registration", {
+    p_registration_id: parsed.registration_id
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  revalidatePath("/students");
+  revalidatePath("/portal");
+  reviewRedirect(parsed.application_id, "registration_converted");
 }

@@ -497,6 +497,8 @@ const leadStageSchema = z.enum([
   "offered",
   "rejected",
   "accepted",
+  "registration_in_progress",
+  "registered",
   "offer_declined",
   "offer_lapsed",
   "archived"
@@ -611,56 +613,8 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
 
 export async function convertAdmissionLeadToStudent(formData: FormData) {
   await requirePermission("manage_admissions");
-  const leadId = idSchema.parse(value(formData, "lead_id"));
-  const temporaryId = value(formData, "temporary_id") || `BETAR-TMP-${Date.now()}`;
-  const cccuStudentId = optionalValue(formData, "cccu_student_id");
-  const startTermId = optionalValue(formData, "start_term_id");
-
-  const supabase = await createSupabaseServerClient();
-  const { data: lead, error: leadError } = await supabase.from("admission_leads").select("*").eq("id", leadId).single();
-  if (leadError) {
-    throw new Error(leadError.message);
-  }
-  if (lead.converted_student_id) {
-    redirect(`/students/${lead.converted_student_id}`);
-  }
-
-  const admissionStage = cccuStudentId ? "cccu_registration_complete" : "cccu_registration_pending";
-  const studentStatus = cccuStudentId ? "active" : "prospect";
-  const parsed = studentSchema.parse({
-    cccu_student_id: cccuStudentId,
-    temporary_id: temporaryId,
-    first_name: String(lead.first_name),
-    last_name: String(lead.last_name),
-    email: String(lead.email),
-    phone: optionalValue(formData, "phone") ?? (lead.phone ? String(lead.phone) : null),
-    status: studentStatus,
-    admission_stage: admissionStage,
-    programme: String(lead.programme),
-    start_term_id: startTermId,
-    notes: lead.notes ? String(lead.notes) : null
-  });
-
-  const { data: student, error: studentError } = await supabase.from("students").insert(parsed).select("id").single();
-  if (studentError) {
-    throw new Error(studentError.message);
-  }
-
-  const { error: updateLeadError } = await supabase
-    .from("admission_leads")
-    .update({
-      converted_student_id: student.id,
-      archived: true,
-      stage: "archived"
-    })
-    .eq("id", leadId);
-  if (updateLeadError) {
-    throw new Error(updateLeadError.message);
-  }
-
-  revalidatePath("/admissions");
-  revalidatePath("/students");
-  redirect(`/students/${student.id}`);
+  idSchema.parse(value(formData, "lead_id"));
+  throw new Error("Admissions conversion must be completed from a submitted registration review.");
 }
 
 export async function createProspect(formData: FormData) {

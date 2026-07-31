@@ -84,6 +84,7 @@ interface RegistrationSummary {
   moduleConfirmedAt?: string;
   savedAt?: string;
   submittedAt?: string;
+  convertedAt?: string;
   termsVersion?: string;
   termsAcceptedAt?: string;
   modules: RegistrationModuleSummary[];
@@ -126,6 +127,7 @@ type RegistrationRow = {
   submitted_at: string | null;
   terms_version: string | null;
   terms_accepted_at: string | null;
+  converted_at: string | null;
 };
 
 type RegistrationChoiceRow = {
@@ -276,6 +278,7 @@ function mapRegistration(
     moduleConfirmedAt: optionalString(row.module_confirmed_at),
     savedAt: optionalString(row.saved_at),
     submittedAt: optionalString(row.submitted_at),
+    convertedAt: optionalString(row.converted_at),
     termsVersion: optionalString(row.terms_version),
     termsAcceptedAt: optionalString(row.terms_accepted_at),
     modules,
@@ -431,7 +434,8 @@ async function getRegistrationContext(personId: string): Promise<{
         saved_at,
         submitted_at,
         terms_version,
-        terms_accepted_at
+        terms_accepted_at,
+        converted_at
       `
     )
     .eq("application_offer_id", acceptedOffer.id)
@@ -745,14 +749,19 @@ function RegistrationForm({
 }
 
 function SubmittedRegistrationPanel({ offer, registration }: { offer: AcceptedOfferSummary; registration: RegistrationSummary }) {
+  const complete = registration.status === "complete";
   return (
     <div className="apply-form-panel application-draft-form">
       <div className="section-header">
         <div>
-          <h2>Registration submitted</h2>
-          <p>Submitted {formatDateTime(registration.submittedAt)}. Admissions can now review the submitted registration status.</p>
+          <h2>{complete ? "Registration complete" : "Registration submitted"}</h2>
+          <p>
+            {complete
+              ? `Converted to a student record ${formatDateTime(registration.convertedAt)}.`
+              : `Submitted ${formatDateTime(registration.submittedAt)}. Admissions can now review the submitted registration status.`}
+          </p>
         </div>
-        <StatusPill value="submitted" />
+        <StatusPill value={complete ? "complete" : "submitted"} />
       </div>
 
       <CoursePanel offer={offer} modules={registration.modules} />
@@ -837,7 +846,7 @@ export default async function PortalRegistrationPage({
           </div>
         ) : !registration ? (
           <BeginRegistrationPanel offer={acceptedOffer} />
-        ) : registration.status === "submitted" ? (
+        ) : registration.status === "submitted" || registration.status === "complete" ? (
           <SubmittedRegistrationPanel offer={acceptedOffer} registration={registration} />
         ) : (
           <RegistrationForm offer={acceptedOffer} registration={registration} registrationTerms={registrationTerms} />
