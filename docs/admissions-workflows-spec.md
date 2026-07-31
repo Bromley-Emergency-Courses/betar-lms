@@ -788,6 +788,18 @@ Confirmation:
 - Confirming a window generates expected finance rows using the current finance model.
 - Non-responders should be visible to staff.
 
+Current Phase 3 preference-window foundation implementation:
+
+- `module_preference_windows` models the draft -> open -> closed -> confirmed lifecycle for a specific `terms` row, with admin actor/timestamp metadata for open, close, and confirm transitions.
+- `module_preference_window_offerings` ties a window to existing `module_offerings`; a database trigger rejects offerings from another term, inactive modules, and offerings whose term is not `published` or `active`.
+- Admissions admins manage windows from `/admissions/preferences`: create draft windows from a selected published/active term, choose available existing module offerings scoped to that term, edit draft windows, open, close, confirm, and view submitted/missing active-student preferences.
+- Student portal users with `person_auth_identities.actor_type = student` use `/portal/module-preferences` to submit 0, 1, or 2 explicitly ordered first/second choices only while a window has `status = open`, `opens_at <= now()`, and `closes_at > now()`. The portal resolves active-student eligibility through `current_active_student_id_for_module_preferences()`, a narrow security-definer helper that returns only the current active student ID and does not expose the full `students` row through portal RLS.
+- `submit_module_preferences(...)` resolves the active `students` row for the current portal person, validates all selected offerings against the configured window offering list, and uses `unique (window_id, student_id)` upsert behavior so repeated submissions update the same active submission rather than creating duplicates.
+- Student submissions store auth user, person, IP, user-agent, skip reason for 0-module submissions, and ordered selected offerings in `module_preference_submission_choices`; the RPC inserts choices from `unnest(...) with ordinality` so first/second preference ordering is explicit.
+- Audit events are written for `module_preference_window.created`, `module_preference_window.opened`, `module_preference_window.closed`, `module_preference_window.confirmed`, `module_preference.submitted`, and `module_preference.updated`.
+- Confirming a window is a lifecycle/status foundation only in this slice. It deliberately records that no enrolments or finance records were created.
+- This slice deliberately does not implement capacity row locking, waitlists, mandatory-module enforcement/override, reminder emails, low-uptake cancellation, enrolment creation, finance rows, invoices, or payments.
+
 ## Deferrals and Resits
 
 Model deferrals as first-class records.

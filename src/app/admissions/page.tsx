@@ -1,4 +1,4 @@
-import { ClipboardCheck, Eye, Pencil } from "lucide-react";
+import { ClipboardCheck, Eye, ListChecks, Pencil } from "lucide-react";
 import Link from "next/link";
 import { AdmissionsBoard, AdmissionsRecords, AdmissionsTools } from "@/components/admissions-records";
 import { AppShell } from "@/components/app-shell";
@@ -26,6 +26,10 @@ export default async function AdmissionsPage({
             <Link className="button" href="/admissions/reviews">
               <ClipboardCheck size={16} />
               Review applications
+            </Link>
+            <Link className="button" href="/admissions/preferences">
+              <ListChecks size={16} />
+              Module preferences
             </Link>
             {editMode ? (
               <Link className="button" href="/admissions">

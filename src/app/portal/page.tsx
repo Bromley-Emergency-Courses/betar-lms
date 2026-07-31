@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, Clock, FileText, GraduationCap, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, FileText, GraduationCap, ListChecks, XCircle } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { respondToApplicationOffer } from "@/app/portal/actions";
 import { canRespondToApplicationOffer, type ApplicationOfferStatus } from "@/lib/application-offers";
@@ -501,6 +501,21 @@ export default async function PortalPage({
 
         <OfferResponseBanner offerResult={offerResult} />
         <OfferResponseErrorBanner offerError={offerError} />
+
+        {profile.actorType === "student" ? (
+          <div className="apply-form-panel">
+            <div className="section-header">
+              <div>
+                <h2>Termly module preferences</h2>
+                <p>Submit or update preferences for any open continuing-student module windows.</p>
+              </div>
+              <ListChecks size={18} />
+            </div>
+            <Link className="button primary apply-submit" href="/portal/module-preferences">
+              Open module preferences
+            </Link>
+          </div>
+        ) : null}
 
         {currentOffer ? (
           <CurrentOfferPanel offer={currentOffer} registration={registration} />
