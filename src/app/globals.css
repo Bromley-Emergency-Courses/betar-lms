@@ -317,6 +317,25 @@ textarea {
   color: var(--muted);
 }
 
+.preference-option-list .check-option {
+  align-items: flex-start;
+}
+
+.preference-option-list .check-option span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.preference-option-list .check-option strong,
+.preference-option-list .check-option small {
+  overflow-wrap: anywhere;
+}
+
+.preference-option-list .check-option small {
+  color: var(--muted);
+}
+
 .inline-check {
   justify-self: start;
 }
