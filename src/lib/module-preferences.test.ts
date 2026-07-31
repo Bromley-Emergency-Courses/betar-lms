@@ -4,6 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import {
   canSubmitModulePreferences,
+  modulePreferenceCapacityBlockedAction,
   modulePreferenceSubmittedAction,
   modulePreferenceUpdatedAction,
   modulePreferenceWindowClosedAction,
@@ -18,6 +19,10 @@ import {
 
 const preferenceMigration = readFileSync(
   join(process.cwd(), "supabase/migrations/0032_termly_module_preference_windows.sql"),
+  "utf8"
+);
+const capacityMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/0033_module_preference_capacity_safe_submission.sql"),
   "utf8"
 );
 const portalPreferencesPage = readFileSync(
@@ -35,8 +40,11 @@ const portalPreferencesAction = readFileSync(
 
 const adminUserId = "11111111-1111-4111-8111-111111111111";
 const studentUserId = "22222222-2222-4222-8222-222222222222";
+const secondStudentUserId = "22222222-2222-4222-8222-222222222223";
 const personId = "33333333-3333-4333-8333-333333333333";
+const secondPersonId = "33333333-3333-4333-8333-333333333334";
 const studentId = "44444444-4444-4444-8444-444444444444";
+const secondStudentId = "44444444-4444-4444-8444-444444444445";
 const termId = "55555555-5555-4555-8555-555555555555";
 const otherTermId = "66666666-6666-4666-8666-666666666666";
 const moduleId = "77777777-7777-4777-8777-777777777777";
@@ -75,6 +83,7 @@ create type public.user_role as enum ('admin', 'teacher', 'reception');
 create type public.audit_actor_type as enum ('staff', 'applicant', 'student', 'service');
 create type public.portal_actor_type as enum ('applicant', 'student');
 create type public.student_status as enum ('prospect', 'active', 'completed', 'withdrawn', 'deferred', 'interrupted');
+create type public.enrolment_status as enum ('planned', 'in_progress', 'completed', 'failed', 'deferred', 'resit', 'did_not_complete');
 create type public.admission_stage as enum (
   'interest',
   'application_invited',
@@ -204,6 +213,14 @@ create table public.module_offerings (
   created_at timestamptz not null default now()
 );
 
+create table public.enrolments (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students(id),
+  offering_id uuid not null references public.module_offerings(id),
+  status public.enrolment_status not null default 'planned',
+  unique (student_id, offering_id)
+);
+
 create table public.audit_events (
   id uuid primary key default gen_random_uuid(),
   actor_type public.audit_actor_type not null,
@@ -223,22 +240,30 @@ async function createPreferenceWorkflowDb() {
   await db.waitReady;
   await db.exec(preferenceWorkflowSchema);
   await db.exec(preferenceMigration);
+  await db.exec(capacityMigration);
   await db.exec(`
     insert into auth.users (id) values
       ('${adminUserId}'),
-      ('${studentUserId}');
+      ('${studentUserId}'),
+      ('${secondStudentUserId}');
 
     insert into public.staff_profiles (id, full_name, role)
     values ('${adminUserId}', 'Admin User', 'admin');
 
     insert into public.persons (id, first_name, last_name, email)
-    values ('${personId}', 'Student', 'User', 'student@example.test');
+    values
+      ('${personId}', 'Student', 'User', 'student@example.test'),
+      ('${secondPersonId}', 'Second', 'Student', 'second@example.test');
 
     insert into public.person_auth_identities (person_id, auth_user_id, email, actor_type)
-    values ('${personId}', '${studentUserId}', 'student@example.test', 'student');
+    values
+      ('${personId}', '${studentUserId}', 'student@example.test', 'student'),
+      ('${secondPersonId}', '${secondStudentUserId}', 'second@example.test', 'student');
 
     insert into public.students (id, person_id, temporary_id, first_name, last_name, email, status)
-    values ('${studentId}', '${personId}', 'TMP-001', 'Student', 'User', 'student@example.test', 'active');
+    values
+      ('${studentId}', '${personId}', 'TMP-001', 'Student', 'User', 'student@example.test', 'active'),
+      ('${secondStudentId}', '${secondPersonId}', 'TMP-002', 'Second', 'Student', 'second@example.test', 'active');
 
     insert into public.terms (id, name, starts_on, status)
     values
@@ -257,6 +282,61 @@ async function createPreferenceWorkflowDb() {
       ('${unavailableOfferingId}', '${moduleId}', '${otherTermId}', 90000, 12);
   `);
   return db;
+}
+
+async function createOpenPreferenceWindow(db: PGlite, offeringIds: string[] = [offeringId, secondOfferingId]) {
+  const created = await db.query<{ window_id: string }>(
+    `
+      with auth_context as (
+        select
+          set_config('request.jwt.claim.sub', '${adminUserId}', true),
+          set_config('request.jwt.claim.role', 'authenticated', true)
+      )
+      select public.create_or_update_module_preference_window(
+        null,
+        $1,
+        'September preferences',
+        '2026-07-01T09:00:00Z',
+        '2026-12-01T17:00:00Z',
+        $2::uuid[],
+        null
+      )::text as window_id
+      from auth_context
+    `,
+    [termId, offeringIds]
+  );
+  const windowId = created.rows[0]?.window_id;
+  expect(windowId).toBeTruthy();
+
+  await db.query(
+    `
+      with auth_context as (
+        select
+          set_config('request.jwt.claim.sub', '${adminUserId}', true),
+          set_config('request.jwt.claim.role', 'authenticated', true)
+      )
+      select public.open_module_preference_window($1)
+      from auth_context
+    `,
+    [windowId]
+  );
+
+  return windowId;
+}
+
+async function submitPreferencesAs(db: PGlite, authUserId: string, windowId: string, offeringIds: string[]) {
+  return db.query<{ submission_id: string | null }>(
+    `
+      with auth_context as (
+        select
+          set_config('request.jwt.claim.sub', $2, true),
+          set_config('request.jwt.claim.role', 'authenticated', true)
+      )
+      select public.submit_module_preferences($1, $3::uuid[], null, null, 'vitest')::text as submission_id
+      from auth_context
+    `,
+    [windowId, authUserId, offeringIds]
+  );
 }
 
 describe("module preferences", () => {
@@ -349,6 +429,10 @@ describe("module preferences", () => {
     expect(preferenceMigration).toContain("with ordinality as selected(offering_id, preference_order)");
     expect(preferenceMigration).not.toContain("insert into public.enrolments");
     expect(preferenceMigration).not.toContain("insert into public.finance_records");
+    expect(capacityMigration).toContain("for update");
+    expect(capacityMigration).toContain("enrolment.status in ('planned', 'in_progress')");
+    expect(capacityMigration).toContain(modulePreferenceCapacityBlockedAction);
+    expect(capacityMigration).toContain("module_preference_window_offering_capacity");
   });
 
   it("keeps preference UI ordered and staff offering selection term-scoped", () => {
@@ -362,103 +446,208 @@ describe("module preferences", () => {
 
   it("submits and updates one active student submission per window", async () => {
     const db = await createPreferenceWorkflowDb();
+    try {
+      const windowId = await createOpenPreferenceWindow(db);
+      const firstSubmission = await submitPreferencesAs(db, studentUserId, windowId, [offeringId]);
+      const secondSubmission = await submitPreferencesAs(db, studentUserId, windowId, [secondOfferingId]);
 
-    await db.exec(`
-      set "request.jwt.claim.sub" = '${adminUserId}';
-      set "request.jwt.claim.role" = 'authenticated';
-    `);
-    const created = await db.query<{ window_id: string }>(
-      `
-        select public.create_or_update_module_preference_window(
-          null,
-          $1,
-          'September preferences',
-          '2026-07-01T09:00:00Z',
-          '2026-12-01T17:00:00Z',
-          array[$2::uuid, $3::uuid],
-          null
-        )::text as window_id
-      `,
-      [termId, offeringId, secondOfferingId]
-    );
-    const windowId = created.rows[0]?.window_id;
-    expect(windowId).toBeTruthy();
+      expect(secondSubmission.rows[0]?.submission_id).toBe(firstSubmission.rows[0]?.submission_id);
 
-    await db.query("select public.open_module_preference_window($1)", [windowId]);
+      const counts = await db.query<{
+        submission_count: number;
+        choice_count: number;
+        selected_offering_id: string;
+        submitted_events: number;
+        updated_events: number;
+      }>(`
+        select
+          (select count(*)::int from public.module_preference_submissions) as submission_count,
+          (select count(*)::int from public.module_preference_submission_choices) as choice_count,
+          (select offering_id::text from public.module_preference_submission_choices limit 1) as selected_offering_id,
+          (select count(*)::int from public.audit_events where action = '${modulePreferenceSubmittedAction}') as submitted_events,
+          (select count(*)::int from public.audit_events where action = '${modulePreferenceUpdatedAction}') as updated_events
+      `);
 
-    await db.exec(`
-      set "request.jwt.claim.sub" = '${studentUserId}';
-      set "request.jwt.claim.role" = 'authenticated';
-    `);
-    const firstSubmission = await db.query<{ submission_id: string }>(
-      "select public.submit_module_preferences($1, array[$2::uuid], null, null, 'vitest')::text as submission_id",
-      [windowId, offeringId]
-    );
-    const secondSubmission = await db.query<{ submission_id: string }>(
-      "select public.submit_module_preferences($1, array[$2::uuid], null, null, 'vitest')::text as submission_id",
-      [windowId, secondOfferingId]
-    );
+      expect(counts.rows[0]).toMatchObject({
+        submission_count: 1,
+        choice_count: 1,
+        selected_offering_id: secondOfferingId,
+        submitted_events: 1,
+        updated_events: 1
+      });
+    } finally {
+      await db.close();
+    }
+  });
 
-    expect(secondSubmission.rows[0]?.submission_id).toBe(firstSubmission.rows[0]?.submission_id);
+  it("updates a full own selection and releases the old choice for other students", async () => {
+    const db = await createPreferenceWorkflowDb();
+    try {
+      await db.exec(`
+        update public.module_offerings
+        set capacity = 1
+        where id in ('${offeringId}', '${secondOfferingId}');
+      `);
+      const windowId = await createOpenPreferenceWindow(db);
 
-    const counts = await db.query<{
-      submission_count: number;
-      choice_count: number;
-      selected_offering_id: string;
-      submitted_events: number;
-      updated_events: number;
-    }>(`
-      select
-        (select count(*)::int from public.module_preference_submissions) as submission_count,
-        (select count(*)::int from public.module_preference_submission_choices) as choice_count,
-        (select offering_id::text from public.module_preference_submission_choices limit 1) as selected_offering_id,
-        (select count(*)::int from public.audit_events where action = '${modulePreferenceSubmittedAction}') as submitted_events,
-        (select count(*)::int from public.audit_events where action = '${modulePreferenceUpdatedAction}') as updated_events
-    `);
+      const firstSubmission = await submitPreferencesAs(db, studentUserId, windowId, [offeringId]);
+      const sameChoiceUpdate = await submitPreferencesAs(db, studentUserId, windowId, [offeringId]);
+      const movedChoiceUpdate = await submitPreferencesAs(db, studentUserId, windowId, [secondOfferingId]);
+      const secondStudentSubmission = await submitPreferencesAs(db, secondStudentUserId, windowId, [offeringId]);
 
-    expect(counts.rows[0]).toMatchObject({
-      submission_count: 1,
-      choice_count: 1,
-      selected_offering_id: secondOfferingId,
-      submitted_events: 1,
-      updated_events: 1
-    });
+      expect(sameChoiceUpdate.rows[0]?.submission_id).toBe(firstSubmission.rows[0]?.submission_id);
+      expect(movedChoiceUpdate.rows[0]?.submission_id).toBe(firstSubmission.rows[0]?.submission_id);
+      expect(secondStudentSubmission.rows[0]?.submission_id).toBeTruthy();
+
+      const capacity = await db.query<{
+        offering_id: string;
+        preference_selection_count: number;
+        remaining_places: number;
+        is_full: boolean;
+      }>(
+        `
+          with auth_context as (
+            select
+              set_config('request.jwt.claim.sub', '${adminUserId}', true),
+              set_config('request.jwt.claim.role', 'authenticated', true)
+          )
+          select
+            offering_id::text,
+            preference_selection_count,
+            remaining_places,
+            is_full
+          from auth_context, public.module_preference_window_offering_capacity(array[$1::uuid])
+          where offering_id in ($2, $3)
+          order by offering_id::text
+        `,
+        [windowId, offeringId, secondOfferingId]
+      );
+
+      expect(capacity.rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            offering_id: offeringId,
+            preference_selection_count: 1,
+            remaining_places: 0,
+            is_full: true
+          }),
+          expect.objectContaining({
+            offering_id: secondOfferingId,
+            preference_selection_count: 1,
+            remaining_places: 0,
+            is_full: true
+          })
+        ])
+      );
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("rejects full offerings and records a capacity-blocked audit event", async () => {
+    const db = await createPreferenceWorkflowDb();
+    try {
+      await db.exec(`
+        update public.module_offerings set capacity = 1 where id = '${offeringId}';
+        insert into public.enrolments (student_id, offering_id, status)
+        values ('${secondStudentId}', '${offeringId}', 'planned');
+      `);
+      const windowId = await createOpenPreferenceWindow(db, [offeringId]);
+
+      const blockedSubmission = await submitPreferencesAs(db, studentUserId, windowId, [offeringId]);
+      expect(blockedSubmission.rows[0]?.submission_id).toBeNull();
+
+      const counts = await db.query<{
+        submission_count: number;
+        choice_count: number;
+        blocked_events: number;
+      }>(`
+        select
+          (select count(*)::int from public.module_preference_submissions) as submission_count,
+          (select count(*)::int from public.module_preference_submission_choices) as choice_count,
+          (select count(*)::int from public.audit_events where action = '${modulePreferenceCapacityBlockedAction}') as blocked_events
+      `);
+
+      expect(counts.rows[0]).toMatchObject({
+        submission_count: 0,
+        choice_count: 0,
+        blocked_events: 1
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("prevents oversubscription when two students request the final place", async () => {
+    const db = await createPreferenceWorkflowDb();
+    try {
+      await db.exec(`update public.module_offerings set capacity = 1 where id = '${offeringId}';`);
+      const windowId = await createOpenPreferenceWindow(db, [offeringId]);
+
+      const [firstSubmission, secondSubmission] = await Promise.all([
+        submitPreferencesAs(db, studentUserId, windowId, [offeringId]),
+        submitPreferencesAs(db, secondStudentUserId, windowId, [offeringId])
+      ]);
+      const returnedSubmissionIds = [firstSubmission.rows[0]?.submission_id, secondSubmission.rows[0]?.submission_id];
+
+      expect(returnedSubmissionIds.filter(Boolean)).toHaveLength(1);
+      expect(returnedSubmissionIds.filter((value) => value === null)).toHaveLength(1);
+
+      const counts = await db.query<{
+        choice_count: number;
+        blocked_events: number;
+      }>(`
+        select
+          (select count(*)::int from public.module_preference_submission_choices where offering_id = '${offeringId}') as choice_count,
+          (select count(*)::int from public.audit_events where action = '${modulePreferenceCapacityBlockedAction}') as blocked_events
+      `);
+
+      expect(counts.rows[0]).toMatchObject({
+        choice_count: 1,
+        blocked_events: 1
+      });
+    } finally {
+      await db.close();
+    }
   });
 
   it("rejects student choices outside the window offering list", async () => {
     const db = await createPreferenceWorkflowDb();
+    try {
+      await db.exec(`
+        set "request.jwt.claim.sub" = '${adminUserId}';
+        set "request.jwt.claim.role" = 'authenticated';
+      `);
+      const created = await db.query<{ window_id: string }>(
+        `
+          select public.create_or_update_module_preference_window(
+            null,
+            $1,
+            'September preferences',
+            '2026-07-01T09:00:00Z',
+            '2026-12-01T17:00:00Z',
+            array[$2::uuid],
+            null
+          )::text as window_id
+        `,
+        [termId, offeringId]
+      );
+      const windowId = created.rows[0]?.window_id;
+      await db.query("select public.open_module_preference_window($1)", [windowId]);
 
-    await db.exec(`
-      set "request.jwt.claim.sub" = '${adminUserId}';
-      set "request.jwt.claim.role" = 'authenticated';
-    `);
-    const created = await db.query<{ window_id: string }>(
-      `
-        select public.create_or_update_module_preference_window(
-          null,
-          $1,
-          'September preferences',
-          '2026-07-01T09:00:00Z',
-          '2026-12-01T17:00:00Z',
-          array[$2::uuid],
-          null
-        )::text as window_id
-      `,
-      [termId, offeringId]
-    );
-    const windowId = created.rows[0]?.window_id;
-    await db.query("select public.open_module_preference_window($1)", [windowId]);
+      await db.exec(`
+        set "request.jwt.claim.sub" = '${studentUserId}';
+        set "request.jwt.claim.role" = 'authenticated';
+      `);
 
-    await db.exec(`
-      set "request.jwt.claim.sub" = '${studentUserId}';
-      set "request.jwt.claim.role" = 'authenticated';
-    `);
-
-    await expect(
-      db.query("select public.submit_module_preferences($1, array[$2::uuid], null, null, 'vitest')", [
-        windowId,
-        unavailableOfferingId
-      ])
-    ).rejects.toThrow(/available in this preference window/);
+      await expect(
+        db.query("select public.submit_module_preferences($1, array[$2::uuid], null, null, 'vitest')", [
+          windowId,
+          unavailableOfferingId
+        ])
+      ).rejects.toThrow(/available in this preference window/);
+    } finally {
+      await db.close();
+    }
   });
 });

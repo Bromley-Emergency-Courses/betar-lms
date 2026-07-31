@@ -17,6 +17,11 @@ interface StudentPreferenceOffering {
   credits: number;
   mode: "online" | "practical";
   capacity: number;
+  alreadyEnrolledCount: number;
+  preferenceSelectionCount: number;
+  remainingPlaces: number;
+  isFull: boolean;
+  isUnavailable: boolean;
 }
 
 interface StudentPreferenceSubmission {
@@ -60,6 +65,17 @@ type SubmissionRow = {
   module_preference_submission_choices: RelatedObject[] | null;
 };
 
+type CapacityRow = {
+  window_id: string;
+  offering_id: string;
+  capacity: number;
+  already_enrolled_count: number;
+  preference_selection_count: number;
+  remaining_places: number;
+  is_full: boolean;
+  is_unavailable: boolean;
+};
+
 function relatedObject(value: unknown): RelatedObject | undefined {
   if (Array.isArray(value)) {
     return value[0] && typeof value[0] === "object" ? (value[0] as RelatedObject) : undefined;
@@ -83,6 +99,36 @@ function formatDateTime(value?: string): string {
   return value ? new Date(value).toLocaleString("en-GB") : "Not set";
 }
 
+function capacityKey(windowId: string, offeringId: string): string {
+  return `${windowId}:${offeringId}`;
+}
+
+function defaultCapacityCounters(capacity: number): Pick<
+  StudentPreferenceOffering,
+  "alreadyEnrolledCount" | "preferenceSelectionCount" | "remainingPlaces" | "isFull" | "isUnavailable"
+> {
+  return {
+    alreadyEnrolledCount: 0,
+    preferenceSelectionCount: 0,
+    remainingPlaces: capacity,
+    isFull: false,
+    isUnavailable: false
+  };
+}
+
+function capacityCountersFromRow(row: CapacityRow): Pick<
+  StudentPreferenceOffering,
+  "alreadyEnrolledCount" | "preferenceSelectionCount" | "remainingPlaces" | "isFull" | "isUnavailable"
+> {
+  return {
+    alreadyEnrolledCount: Number(row.already_enrolled_count ?? 0),
+    preferenceSelectionCount: Number(row.preference_selection_count ?? 0),
+    remainingPlaces: Number(row.remaining_places ?? 0),
+    isFull: Boolean(row.is_full),
+    isUnavailable: Boolean(row.is_unavailable)
+  };
+}
+
 function mapWindowOffering(row: RelatedObject): StudentPreferenceOffering | undefined {
   const offering = relatedObject(row.module_offerings);
   const courseModule = relatedObject(offering?.course_modules);
@@ -97,7 +143,8 @@ function mapWindowOffering(row: RelatedObject): StudentPreferenceOffering | unde
     moduleTitle: String(courseModule.title ?? ""),
     credits: Number(courseModule.credits ?? 0),
     mode: courseModule.mode === "online" ? "online" : "practical",
-    capacity: Number(offering.capacity ?? 0)
+    capacity: Number(offering.capacity ?? 0),
+    ...defaultCapacityCounters(Number(offering.capacity ?? 0))
   };
 }
 
@@ -158,7 +205,12 @@ async function getStudentPreferenceWindows(): Promise<StudentPreferenceWindow[]>
               moduleTitle: courseModule?.title ?? "",
               credits: courseModule?.credits ?? 0,
               mode: courseModule?.mode ?? "practical",
-              capacity: offering.capacity
+              capacity: offering.capacity,
+              alreadyEnrolledCount: 0,
+              preferenceSelectionCount: 0,
+              remainingPlaces: offering.capacity,
+              isFull: false,
+              isUnavailable: false
             };
           })
       }
@@ -216,6 +268,12 @@ async function getStudentPreferenceWindows(): Promise<StudentPreferenceWindow[]>
 
   const windows = (windowResult.data ?? []) as unknown as WindowRow[];
   const windowIds = windows.map((window) => window.id);
+  const capacityResult =
+    windowIds.length > 0
+      ? await supabase.rpc("module_preference_window_offering_capacity", {
+          p_window_ids: windowIds
+        })
+      : { data: [], error: null };
   const submissionResult =
     windowIds.length > 0
       ? await supabase
@@ -241,9 +299,17 @@ async function getStudentPreferenceWindows(): Promise<StudentPreferenceWindow[]>
     throw new Error(submissionResult.error.message);
   }
 
+  if (capacityResult.error) {
+    throw new Error(capacityResult.error.message);
+  }
+
   const submissionByWindow = new Map<string, StudentPreferenceSubmission>();
   ((submissionResult.data ?? []) as unknown as SubmissionRow[]).forEach((submission) => {
     submissionByWindow.set(submission.window_id, mapSubmission(submission));
+  });
+  const capacityByWindowOffering = new Map<string, CapacityRow>();
+  ((capacityResult.data ?? []) as unknown as CapacityRow[]).forEach((row) => {
+    capacityByWindowOffering.set(capacityKey(row.window_id, row.offering_id), row);
   });
 
   return windows.map((row) => {
@@ -259,6 +325,21 @@ async function getStudentPreferenceWindows(): Promise<StudentPreferenceWindow[]>
       offerings: relatedArray(row.module_preference_window_offerings)
         .map(mapWindowOffering)
         .filter((offering): offering is StudentPreferenceOffering => Boolean(offering))
+        .map((offering) => ({
+          ...offering,
+          ...capacityCountersFromRow(
+            capacityByWindowOffering.get(capacityKey(row.id, offering.offeringId)) ?? {
+              window_id: row.id,
+              offering_id: offering.offeringId,
+              capacity: offering.capacity,
+              already_enrolled_count: 0,
+              preference_selection_count: 0,
+              remaining_places: offering.capacity,
+              is_full: false,
+              is_unavailable: false
+            }
+          )
+        }))
         .sort((first, second) => first.displayOrder - second.displayOrder),
       submission: submissionByWindow.get(row.id)
     };
@@ -286,6 +367,7 @@ function ResultBanner({ submitted, preferenceError }: { submitted?: string; pref
     closed: "This preference window is not currently open.",
     too_many: "Choose no more than two module offerings.",
     unavailable: "One of the selected module offerings is not available in this window.",
+    full: "One of the selected module offerings is full. Choose another available module or keep your current saved choice.",
     ineligible: "Only active students can submit module preferences.",
     invalid_order: "Choose a first preference before a second preference, and do not choose the same module twice.",
     failed: "Your preferences could not be saved. Please try again."
@@ -305,6 +387,7 @@ function ResultBanner({ submitted, preferenceError }: { submitted?: string; pref
 function PreferenceWindowForm({ window }: { window: StudentPreferenceWindow }) {
   const firstChoiceOfferingId = window.submission?.offeringIds[0] ?? "";
   const secondChoiceOfferingId = window.submission?.offeringIds[1] ?? "";
+  const currentOfferingIds = new Set(window.submission?.offeringIds ?? []);
 
   return (
     <form className="apply-form-panel application-draft-form" action={submitModulePreferences} id={`window-${window.id}`}>
@@ -344,8 +427,13 @@ function PreferenceWindowForm({ window }: { window: StudentPreferenceWindow }) {
             >
               <option value="">No module this term</option>
               {window.offerings.map((offering) => (
-                <option key={offering.offeringId} value={offering.offeringId}>
+                <option
+                  disabled={offering.isUnavailable && !currentOfferingIds.has(offering.offeringId)}
+                  key={offering.offeringId}
+                  value={offering.offeringId}
+                >
                   {offering.moduleCode} - {offering.moduleTitle}
+                  {offering.isUnavailable && !currentOfferingIds.has(offering.offeringId) ? " (full)" : ""}
                 </option>
               ))}
             </select>
@@ -359,8 +447,13 @@ function PreferenceWindowForm({ window }: { window: StudentPreferenceWindow }) {
             >
               <option value="">No second choice</option>
               {window.offerings.map((offering) => (
-                <option key={offering.offeringId} value={offering.offeringId}>
+                <option
+                  disabled={offering.isUnavailable && !currentOfferingIds.has(offering.offeringId)}
+                  key={offering.offeringId}
+                  value={offering.offeringId}
+                >
                   {offering.moduleCode} - {offering.moduleTitle}
+                  {offering.isUnavailable && !currentOfferingIds.has(offering.offeringId) ? " (full)" : ""}
                 </option>
               ))}
             </select>
@@ -373,7 +466,8 @@ function PreferenceWindowForm({ window }: { window: StudentPreferenceWindow }) {
                 {offering.moduleCode} - {offering.moduleTitle}
               </strong>
               <p className="muted small">
-                {offering.credits} credits · {offering.mode} · capacity {offering.capacity}
+                {offering.credits} credits · {offering.mode} · capacity {offering.capacity} · {offering.remainingPlaces} places remaining
+                {offering.isUnavailable ? " · full" : ""}
               </p>
             </div>
           ))}

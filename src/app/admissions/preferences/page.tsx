@@ -33,6 +33,11 @@ interface PreferenceWindowOffering {
   mode: "online" | "practical";
   capacity: number;
   pricePence: number;
+  alreadyEnrolledCount: number;
+  preferenceSelectionCount: number;
+  remainingPlaces: number;
+  isFull: boolean;
+  isUnavailable: boolean;
 }
 
 interface PreferenceSubmission {
@@ -94,6 +99,17 @@ type SubmissionRow = {
   module_preference_submission_choices: RelatedObject[] | null;
 };
 
+type CapacityRow = {
+  window_id: string;
+  offering_id: string;
+  capacity: number;
+  already_enrolled_count: number;
+  preference_selection_count: number;
+  remaining_places: number;
+  is_full: boolean;
+  is_unavailable: boolean;
+};
+
 function relatedObject(value: unknown): RelatedObject | undefined {
   if (Array.isArray(value)) {
     return value[0] && typeof value[0] === "object" ? (value[0] as RelatedObject) : undefined;
@@ -130,6 +146,36 @@ function moduleLabel(offering: PreferenceWindowOffering): string {
   return `${offering.moduleCode} - ${offering.moduleTitle}`;
 }
 
+function capacityKey(windowId: string, offeringId: string): string {
+  return `${windowId}:${offeringId}`;
+}
+
+function defaultCapacityCounters(capacity: number): Pick<
+  PreferenceWindowOffering,
+  "alreadyEnrolledCount" | "preferenceSelectionCount" | "remainingPlaces" | "isFull" | "isUnavailable"
+> {
+  return {
+    alreadyEnrolledCount: 0,
+    preferenceSelectionCount: 0,
+    remainingPlaces: capacity,
+    isFull: false,
+    isUnavailable: false
+  };
+}
+
+function capacityCountersFromRow(row: CapacityRow): Pick<
+  PreferenceWindowOffering,
+  "alreadyEnrolledCount" | "preferenceSelectionCount" | "remainingPlaces" | "isFull" | "isUnavailable"
+> {
+  return {
+    alreadyEnrolledCount: Number(row.already_enrolled_count ?? 0),
+    preferenceSelectionCount: Number(row.preference_selection_count ?? 0),
+    remainingPlaces: Number(row.remaining_places ?? 0),
+    isFull: Boolean(row.is_full),
+    isUnavailable: Boolean(row.is_unavailable)
+  };
+}
+
 function mapOfferingRelation(value: unknown): PreferenceWindowOffering | undefined {
   const offering = relatedObject(value);
   const courseModule = relatedObject(offering?.course_modules);
@@ -146,7 +192,8 @@ function mapOfferingRelation(value: unknown): PreferenceWindowOffering | undefin
     credits: Number(courseModule.credits ?? 0),
     mode: courseModule.mode === "online" ? "online" : "practical",
     capacity: Number(offering.capacity ?? 0),
-    pricePence: Number(offering.price_pence ?? 0)
+    pricePence: Number(offering.price_pence ?? 0),
+    ...defaultCapacityCounters(Number(offering.capacity ?? 0))
   };
 }
 
@@ -204,7 +251,12 @@ function buildDemoContext(): {
         credits: courseModule?.credits ?? 0,
         mode: courseModule?.mode ?? "practical",
         capacity: offering.capacity,
-        pricePence: offering.pricePence
+        pricePence: offering.pricePence,
+        alreadyEnrolledCount: 0,
+        preferenceSelectionCount: 0,
+        remainingPlaces: offering.capacity,
+        isFull: false,
+        isUnavailable: false
       };
     });
   const activeStudents = data.students.filter((student) => student.status === "active");
@@ -299,6 +351,12 @@ async function getPreferenceWindowContext(): Promise<{
 
   const windows = (windowResult.data ?? []) as unknown as WindowRow[];
   const windowIds = windows.map((window) => window.id);
+  const capacityResult =
+    windowIds.length > 0
+      ? await supabase.rpc("module_preference_window_offering_capacity", {
+          p_window_ids: windowIds
+        })
+      : { data: [], error: null };
   const submissionResult =
     windowIds.length > 0
       ? await supabase
@@ -341,6 +399,10 @@ async function getPreferenceWindowContext(): Promise<{
     throw new Error(submissionResult.error.message);
   }
 
+  if (capacityResult.error) {
+    throw new Error(capacityResult.error.message);
+  }
+
   const activeStudents = (studentResult.data ?? []).map((row) => ({
     id: String(row.id),
     personId: optionalString(row.person_id),
@@ -361,6 +423,10 @@ async function getPreferenceWindowContext(): Promise<{
   const submissionsByWindow = new Map<string, PreferenceSubmission[]>();
   ((submissionResult.data ?? []) as unknown as SubmissionRow[]).forEach((row) => {
     submissionsByWindow.set(row.window_id, [...(submissionsByWindow.get(row.window_id) ?? []), mapSubmission(row)]);
+  });
+  const capacityByWindowOffering = new Map<string, CapacityRow>();
+  ((capacityResult.data ?? []) as unknown as CapacityRow[]).forEach((row) => {
+    capacityByWindowOffering.set(capacityKey(row.window_id, row.offering_id), row);
   });
 
   return {
@@ -412,6 +478,21 @@ async function getPreferenceWindowContext(): Promise<{
         offerings: relatedArray(row.module_preference_window_offerings)
           .map(mapWindowOffering)
           .filter((offering): offering is PreferenceWindowOffering => Boolean(offering))
+          .map((offering) => ({
+            ...offering,
+            ...capacityCountersFromRow(
+              capacityByWindowOffering.get(capacityKey(row.id, offering.offeringId)) ?? {
+                window_id: row.id,
+                offering_id: offering.offeringId,
+                capacity: offering.capacity,
+                already_enrolled_count: 0,
+                preference_selection_count: 0,
+                remaining_places: offering.capacity,
+                is_full: false,
+                is_unavailable: false
+              }
+            )
+          }))
           .sort((first, second) => first.displayOrder - second.displayOrder),
         submissions,
         missingStudents: activeStudents.filter((student) => !submittedStudentIds.has(student.id))
@@ -602,7 +683,9 @@ function PreferenceWindowCard({
             <div className="review-offering-row" key={offering.offeringId}>
               <strong>{moduleLabel(offering)}</strong>
               <p className="muted small">
-                {offering.credits} credits · {offering.mode} · capacity {offering.capacity}
+                {offering.credits} credits · {offering.mode} · capacity {offering.capacity} · enrolled{" "}
+                {offering.alreadyEnrolledCount} · preferences {offering.preferenceSelectionCount} · remaining {offering.remainingPlaces}
+                {offering.isUnavailable ? " · full/unavailable" : ""}
               </p>
             </div>
           ))}
