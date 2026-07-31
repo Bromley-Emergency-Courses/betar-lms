@@ -7,6 +7,7 @@ export const modulePreferenceWindowClosedAction = "module_preference_window.clos
 export const modulePreferenceWindowConfirmedAction = "module_preference_window.confirmed";
 export const modulePreferenceSubmittedAction = "module_preference.submitted";
 export const modulePreferenceUpdatedAction = "module_preference.updated";
+export const modulePreferenceCapacityBlockedAction = "module_preference.capacity_blocked";
 export const modulePreferenceWindowEntityType = "module_preference_window";
 export const modulePreferenceSubmissionEntityType = "module_preference_submission";
 

@@ -21,6 +21,9 @@ function preferenceErrorCode(message: string): string {
   if (message.includes("available")) {
     return "unavailable";
   }
+  if (message.includes("capacity") || message.includes("full")) {
+    return "full";
+  }
   if (message.includes("active students")) {
     return "ineligible";
   }
@@ -50,7 +53,7 @@ export async function submitModulePreferences(formData: FormData) {
 
   const headerStore = await headers();
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.rpc("submit_module_preferences", {
+  const { data, error } = await supabase.rpc("submit_module_preferences", {
     p_window_id: parsed.window_id,
     p_offering_ids: parsed.offering_ids,
     p_skip_reason: parsed.skip_reason,
@@ -60,6 +63,10 @@ export async function submitModulePreferences(formData: FormData) {
 
   if (error) {
     redirect(`/portal/module-preferences?preferenceError=${preferenceErrorCode(error.message)}#window-${parsed.window_id}`);
+  }
+
+  if (!data) {
+    redirect(`/portal/module-preferences?preferenceError=full#window-${parsed.window_id}`);
   }
 
   revalidatePath("/portal");
