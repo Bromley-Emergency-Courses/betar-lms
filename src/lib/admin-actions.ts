@@ -498,6 +498,7 @@ const leadStageSchema = z.enum([
   "rejected",
   "accepted",
   "registration_in_progress",
+  "registration_lapsed",
   "registered",
   "offer_declined",
   "offer_lapsed",

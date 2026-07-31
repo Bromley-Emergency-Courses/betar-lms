@@ -3,13 +3,17 @@ import { z } from "zod";
 import { buildAuditEventInsert, type JsonRecord } from "@/lib/audit-correspondence";
 import { sanitizeApplicationDocumentFilename } from "@/lib/application-documents";
 
-export const admissionsRegistrationStatuses = ["not_started", "in_progress", "submitted", "complete"] as const;
+export const admissionsRegistrationStatuses = ["not_started", "in_progress", "submitted", "complete", "lapsed"] as const;
 export const admissionsRegistrationStartedAction = "registration.started";
 export const admissionsRegistrationSavedAction = "registration.saved";
 export const admissionsRegistrationSubmittedAction = "registration.submitted";
 export const admissionsRegistrationTermsAcceptedAction = "registration.terms_accepted";
 export const admissionsRegistrationDocumentUploadedAction = "document.uploaded";
+export const admissionsRegistrationLapsedAction = "registration.lapsed";
+export const admissionsRegistrationReopenedAction = "registration.reopened";
 export const admissionsRegistrationEntityType = "admissions_registration";
+export const admissionsRegistrationLapsedTemplateKey = "registration_lapsed_notice";
+export const admissionsRegistrationReopenedTemplateKey = "registration_reopened_notice";
 export const admissionsRegistrationTermsVersion = "registration-terms-2026-07-28-v1";
 export const admissionsRegistrationTermsText =
   "I agree to the BETAR registration terms and conditions for my accepted course place, including the course participation, attendance, assessment, fee liability, and data processing terms presented in this portal.";
@@ -53,6 +57,17 @@ export interface AdmissionsRegistrationAuditInput {
   admissionLeadId: string;
   personId: string;
   status?: AdmissionsRegistrationStatus;
+}
+
+export interface StaffRegistrationReopenAccessRow {
+  registrationStatus?: string | null;
+  convertedStudentId?: string | null;
+  leadStage: string;
+}
+
+export interface StaffRegistrationReopenAccessDecision {
+  allowed: boolean;
+  reason: "allowed" | "missing_registration" | "not_lapsed" | "already_converted" | "lead_not_reopenable";
 }
 
 export interface AdmissionsRegistrationDocumentValidationInput {
@@ -200,10 +215,40 @@ const registrationSubmitSchema = z
     }
   });
 
+const registrationDeadlineWorkflowFormSchema = z.object({
+  lapse_reason: nullableText(4000).default("Registration deadline passed before submission or conversion.")
+});
+
+const registrationReopenSchema = z.object({
+  registration_id: idSchema,
+  application_id: idSchema,
+  reopen_reason: z.string().trim().min(1, "Reopen reason is required.").max(4000),
+  new_deadline_at: z
+    .string()
+    .trim()
+    .transform((value, context) => {
+      if (!value) {
+        return null;
+      }
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T23:59:59Z`))) {
+        context.addIssue({
+          code: "custom",
+          message: "Enter a valid registration deadline."
+        });
+        return z.NEVER;
+      }
+
+      return `${value}T23:59:59Z`;
+    })
+});
+
 export type BeginAdmissionsRegistrationPayload = z.infer<typeof beginRegistrationSchema>;
 export type AdmissionsRegistrationDraftPayload = z.infer<typeof registrationDraftSchema>;
 export type AdmissionsRegistrationDocumentUploadPayload = z.infer<typeof registrationDocumentUploadSchema>;
 export type SubmitAdmissionsRegistrationPayload = z.infer<typeof registrationSubmitSchema>;
+export type ProcessAdmissionsRegistrationDeadlineWorkflowPayload = z.infer<typeof registrationDeadlineWorkflowFormSchema>;
+export type ReopenLapsedAdmissionsRegistrationPayload = z.infer<typeof registrationReopenSchema>;
 
 function formString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "");
@@ -254,6 +299,25 @@ export function parseSubmitAdmissionsRegistrationForm(formData: FormData): Submi
   return registrationSubmitSchema.parse({
     registration_id: formString(formData, "registration_id"),
     terms_accepted: formBoolean(formData, "terms_accepted")
+  });
+}
+
+export function parseProcessAdmissionsRegistrationDeadlineWorkflowForm(
+  formData: FormData
+): ProcessAdmissionsRegistrationDeadlineWorkflowPayload {
+  return registrationDeadlineWorkflowFormSchema.parse({
+    lapse_reason: formString(formData, "lapse_reason")
+  });
+}
+
+export function parseReopenLapsedAdmissionsRegistrationForm(
+  formData: FormData
+): ReopenLapsedAdmissionsRegistrationPayload {
+  return registrationReopenSchema.parse({
+    registration_id: formString(formData, "registration_id"),
+    application_id: formString(formData, "application_id"),
+    reopen_reason: formString(formData, "reopen_reason"),
+    new_deadline_at: formString(formData, "new_deadline_at")
   });
 }
 
@@ -320,6 +384,28 @@ export function canAccessAcceptedOfferRegistration(row: AdmissionsRegistrationAc
     !row.convertedStudentId &&
     ["accepted", "registration_in_progress"].includes(row.leadStage)
   );
+}
+
+export function canReopenLapsedRegistration(
+  row: StaffRegistrationReopenAccessRow | undefined
+): StaffRegistrationReopenAccessDecision {
+  if (!row) {
+    return { allowed: false, reason: "missing_registration" };
+  }
+
+  if (row.convertedStudentId || row.registrationStatus === "complete") {
+    return { allowed: false, reason: "already_converted" };
+  }
+
+  if (row.registrationStatus !== "lapsed") {
+    return { allowed: false, reason: "not_lapsed" };
+  }
+
+  if (row.leadStage !== "registration_lapsed") {
+    return { allowed: false, reason: "lead_not_reopenable" };
+  }
+
+  return { allowed: true, reason: "allowed" };
 }
 
 export function buildAdmissionsRegistrationAuditMetadata(input: AdmissionsRegistrationAuditInput): JsonRecord {

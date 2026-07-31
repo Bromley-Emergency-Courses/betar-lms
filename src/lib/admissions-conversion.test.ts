@@ -634,6 +634,7 @@ describe("admissions registration conversion", () => {
     expect(
       canConvertSubmittedRegistration({
         registrationStatus: "submitted",
+        registrationDeadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         requiredDocumentCount: 2,
         uploadedRequiredDocumentCount: 2,
         moduleConfirmationAccepted: true,
@@ -652,6 +653,18 @@ describe("admissions registration conversion", () => {
         leadStage: "registration_in_progress"
       }).reason
     ).toBe("required_documents_missing");
+
+    expect(
+      canConvertSubmittedRegistration({
+        registrationStatus: "submitted",
+        registrationDeadlineAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        requiredDocumentCount: 2,
+        uploadedRequiredDocumentCount: 2,
+        moduleConfirmationAccepted: true,
+        termsAcceptedAt: new Date().toISOString(),
+        leadStage: "registration_in_progress"
+      }).reason
+    ).toBe("registration_deadline_passed");
   });
 
   it("creates a student, planned enrolment, conversion metadata, and no finance rows", async () => {

@@ -7,6 +7,7 @@ export const admissionsRegistrationCompleteStatus = "complete";
 
 export interface StaffRegistrationConversionAccessRow {
   registrationStatus?: string | null;
+  registrationDeadlineAt?: string | null;
   requiredDocumentCount: number;
   uploadedRequiredDocumentCount: number;
   moduleConfirmationAccepted: boolean;
@@ -20,6 +21,7 @@ export interface StaffRegistrationConversionAccessDecision {
   reason:
     | "allowed"
     | "already_converted"
+    | "registration_deadline_passed"
     | "registration_not_submitted"
     | "required_documents_missing"
     | "modules_not_confirmed"
@@ -69,6 +71,10 @@ export function canConvertSubmittedRegistration(
 
   if (row.registrationStatus !== "submitted") {
     return { allowed: false, reason: "registration_not_submitted" };
+  }
+
+  if (row.registrationDeadlineAt && new Date(row.registrationDeadlineAt).getTime() <= Date.now()) {
+    return { allowed: false, reason: "registration_deadline_passed" };
   }
 
   if (!["accepted", "registration_in_progress"].includes(row.leadStage)) {

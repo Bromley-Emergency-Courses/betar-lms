@@ -6,6 +6,10 @@ import { parseRecordApplicationDecisionForm } from "@/lib/application-decisions"
 import { parseProcessApplicationOfferDeadlineWorkflowForm } from "@/lib/application-offers";
 import { parseConvertSubmittedAdmissionsRegistrationForm } from "@/lib/admissions-conversion";
 import {
+  parseProcessAdmissionsRegistrationDeadlineWorkflowForm,
+  parseReopenLapsedAdmissionsRegistrationForm
+} from "@/lib/admissions-registration";
+import {
   parseRecordStaffApplicationReviewForm,
   parseVerifyApplicationDocumentForm
 } from "@/lib/application-review";
@@ -136,4 +140,54 @@ export async function convertSubmittedAdmissionsRegistration(formData: FormData)
   revalidatePath("/students");
   revalidatePath("/portal");
   reviewRedirect(parsed.application_id, "registration_converted");
+}
+
+export async function processAdmissionsRegistrationDeadlineWorkflow(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseProcessAdmissionsRegistrationDeadlineWorkflowForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    redirect("/admissions/reviews?registration_deadlines_demo=1");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("process_admissions_registration_deadline_workflow", {
+    p_reference_time: new Date().toISOString(),
+    p_lapse_reason: parsed.lapse_reason
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  revalidatePath("/portal");
+  redirect("/admissions/reviews?registration_deadlines_processed=1");
+}
+
+export async function reopenLapsedAdmissionsRegistration(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseReopenLapsedAdmissionsRegistrationForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "registration_reopened_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("reopen_lapsed_admissions_registration", {
+    p_registration_id: parsed.registration_id,
+    p_reopen_reason: parsed.reopen_reason,
+    p_new_deadline_at: parsed.new_deadline_at
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  revalidatePath("/portal");
+  revalidatePath("/portal/registration");
+  reviewRedirect(parsed.application_id, "registration_reopened");
 }

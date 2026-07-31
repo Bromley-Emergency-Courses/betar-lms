@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Spec
 
-Last updated: 2026-07-29
+Last updated: 2026-07-31
 
 This is the developer-facing build spec for the admissions, application, registration, and student portal work. It is derived from the original PGCert admissions system plan and adjusted for the current BETAR LMS codebase.
 
@@ -719,7 +719,19 @@ Current Phase 2 registration conversion implementation:
 - `convert_admissions_registration(...)` now creates or activates one existing `students` row linked to the same `person`, updates the canonical person/student details from registration, creates planned initial `enrolments` from the accepted registration module snapshot with duplicate protection, links managed files to the student, promotes the active portal identity to `student`, records `converted_at`/staff metadata, and writes `registration.converted_to_student`.
 - Conversion links metadata back onto `admissions_registrations`, `applications`, `application_offers`, and `admission_leads`; registration status becomes `complete`, lead stage becomes `registered`, and the lead stores `converted_student_id`.
 - Repeated conversion attempts for an already-complete registration return the existing linked student rather than creating duplicate students or enrolments.
-- This slice deliberately does not create finance rows, invoices, payment rows, real email/correspondence sends, scheduler jobs, capacity/waitlist behavior, or registration lapsed/reopened workflows.
+- This conversion slice deliberately does not create finance rows, invoices, payment rows, real email/correspondence sends, scheduler jobs, or capacity/waitlist behavior.
+
+Current Phase 2 registration lapsed/reopened implementation:
+
+- `admissions_registrations` now stores an interim 14-day `registration_deadline_at` plus lapsed/reopened timestamp, actor, reason, and correspondence-log metadata. The 14-day default still needs business confirmation before go-live.
+- `registration_lapsed` is an admissions lead stage and `lapsed` is a registration status.
+- `process_admissions_registration_deadline_workflow(...)` is an admin/service-safe manual processor. It marks overdue `in_progress` registrations that were not submitted in time and overdue `submitted` registrations that were not converted in time as `lapsed`, provided the offer is still accepted and the lead/registration are not archived, converted, or complete.
+- Lapsing writes `registration.lapsed`, stores the actor, timestamp, reason, and suppressed correspondence-log ID on the registration, moves the lead to `registration_lapsed`, and creates a suppressed `registration_lapsed_notice` correspondence log with `production_email_send_enabled = false` and no provider message ID.
+- `reopen_lapsed_admissions_registration(...)` is admin-only, accepts only lapsed, unconverted registrations whose lead is `registration_lapsed`, requires a non-empty reason, accepts an optional future new deadline, writes `registration.reopened`, records actor/timestamp/reason/correspondence-log metadata, creates a suppressed `registration_reopened_notice`, clears current submission/T&C/module-confirmation fields, and returns the lead/registration to registration-in-progress for applicant editing and resubmission.
+- Lapsed registrations cannot be saved/submitted by applicants because the applicant registration RPCs still accept only in-progress registrations. Lapsed and expired submitted registrations cannot be converted; reopened registrations must be resubmitted before conversion.
+- Complete or already-converted registrations cannot be lapsed or reopened. Already-created enrolments are not changed by this workflow.
+- Applicant portal and staff review UI show registration deadline, lapsed state, reopened state, and suppressed-notice behavior.
+- This slice deliberately does not create finance rows, invoices, payment rows, real email sends, production SMTP configuration, scheduler/cron deployment, capacity/waitlist behavior, or Phase 3 module preference windows.
 
 ## Phase 3: Termly Module Preferences
 
