@@ -66,6 +66,7 @@ interface RegistrationTermsSummary {
 interface RegistrationSummary {
   id: string;
   status: AdmissionsRegistrationStatus;
+  registrationDeadlineAt?: string;
   title?: string;
   firstName: string;
   middleNames?: string;
@@ -84,6 +85,10 @@ interface RegistrationSummary {
   moduleConfirmedAt?: string;
   savedAt?: string;
   submittedAt?: string;
+  lapsedAt?: string;
+  lapsedReason?: string;
+  reopenedAt?: string;
+  reopenedReason?: string;
   convertedAt?: string;
   termsVersion?: string;
   termsAcceptedAt?: string;
@@ -107,6 +112,7 @@ type OfferRow = {
 type RegistrationRow = {
   id: string;
   status: AdmissionsRegistrationStatus;
+  registration_deadline_at: string | null;
   title: string | null;
   first_name: string;
   middle_names: string | null;
@@ -125,6 +131,10 @@ type RegistrationRow = {
   module_confirmed_at: string | null;
   saved_at: string | null;
   submitted_at: string | null;
+  lapsed_at: string | null;
+  lapsed_reason: string | null;
+  reopened_at: string | null;
+  reopened_reason: string | null;
   terms_version: string | null;
   terms_accepted_at: string | null;
   converted_at: string | null;
@@ -260,6 +270,7 @@ function mapRegistration(
   return {
     id: row.id,
     status: row.status,
+    registrationDeadlineAt: optionalString(row.registration_deadline_at),
     title: optionalString(row.title),
     firstName: row.first_name,
     middleNames: optionalString(row.middle_names),
@@ -278,6 +289,10 @@ function mapRegistration(
     moduleConfirmedAt: optionalString(row.module_confirmed_at),
     savedAt: optionalString(row.saved_at),
     submittedAt: optionalString(row.submitted_at),
+    lapsedAt: optionalString(row.lapsed_at),
+    lapsedReason: optionalString(row.lapsed_reason),
+    reopenedAt: optionalString(row.reopened_at),
+    reopenedReason: optionalString(row.reopened_reason),
     convertedAt: optionalString(row.converted_at),
     termsVersion: optionalString(row.terms_version),
     termsAcceptedAt: optionalString(row.terms_accepted_at),
@@ -415,6 +430,7 @@ async function getRegistrationContext(personId: string): Promise<{
       `
         id,
         status,
+        registration_deadline_at,
         title,
         first_name,
         middle_names,
@@ -433,6 +449,10 @@ async function getRegistrationContext(personId: string): Promise<{
         module_confirmed_at,
         saved_at,
         submitted_at,
+        lapsed_at,
+        lapsed_reason,
+        reopened_at,
+        reopened_reason,
         terms_version,
         terms_accepted_at,
         converted_at
@@ -634,7 +654,13 @@ function RegistrationForm({
       <div className="section-header">
         <div>
           <h2>Registration in progress</h2>
-          <p>{registration.savedAt ? `Last saved ${formatDateTime(registration.savedAt)}` : "Save a draft as you check your details."}</p>
+          <p>
+            {registration.reopenedAt
+              ? `Reopened ${formatDateTime(registration.reopenedAt)}. Current deadline: ${formatDateTime(registration.registrationDeadlineAt)}.`
+              : registration.savedAt
+                ? `Last saved ${formatDateTime(registration.savedAt)}. Deadline: ${formatDateTime(registration.registrationDeadlineAt)}.`
+                : `Save a draft as you check your details. Deadline: ${formatDateTime(registration.registrationDeadlineAt)}.`}
+          </p>
         </div>
         <StatusPill value={registration.status} />
       </div>
@@ -785,6 +811,41 @@ function SubmittedRegistrationPanel({ offer, registration }: { offer: AcceptedOf
   );
 }
 
+function LapsedRegistrationPanel({ offer, registration }: { offer: AcceptedOfferSummary; registration: RegistrationSummary }) {
+  return (
+    <div className="apply-form-panel application-draft-form">
+      <div className="section-header">
+        <div>
+          <h2>Registration lapsed</h2>
+          <p>
+            This registration lapsed {formatDateTime(registration.lapsedAt)}. Admissions must reopen it before you can submit or update
+            it.
+          </p>
+        </div>
+        <StatusPill value="lapsed" />
+      </div>
+
+      <CoursePanel offer={offer} modules={registration.modules} />
+      <div className="review-data-grid">
+        <div className="review-data-item">
+          <span>Deadline</span>
+          <strong>{formatDateTime(registration.registrationDeadlineAt)}</strong>
+        </div>
+        <div className="review-data-item">
+          <span>Last saved</span>
+          <strong>{formatDateTime(registration.savedAt)}</strong>
+        </div>
+        <div className="review-data-item">
+          <span>Submitted</span>
+          <strong>{formatDateTime(registration.submittedAt)}</strong>
+        </div>
+      </div>
+      <p className="muted small">No applicant email has been sent from this placeholder workflow.</p>
+      <RegistrationDocumentSlotsPanel registrationId={registration.id} documentSlots={registration.documentSlots} editable={false} />
+    </div>
+  );
+}
+
 export default async function PortalRegistrationPage({
   searchParams
 }: {
@@ -846,6 +907,8 @@ export default async function PortalRegistrationPage({
           </div>
         ) : !registration ? (
           <BeginRegistrationPanel offer={acceptedOffer} />
+        ) : registration.status === "lapsed" ? (
+          <LapsedRegistrationPanel offer={acceptedOffer} registration={registration} />
         ) : registration.status === "submitted" || registration.status === "complete" ? (
           <SubmittedRegistrationPanel offer={acceptedOffer} registration={registration} />
         ) : (

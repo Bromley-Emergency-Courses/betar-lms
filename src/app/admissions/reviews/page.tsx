@@ -2,9 +2,11 @@ import { BadgeCheck, ClipboardCheck, Clock, FileCheck2, GraduationCap, LockKeyho
 import Link from "next/link";
 import {
   convertSubmittedAdmissionsRegistration,
+  processAdmissionsRegistrationDeadlineWorkflow,
   processApplicationOfferDeadlineWorkflow,
   recordApplicationDecision,
   recordStaffApplicationReview,
+  reopenLapsedAdmissionsRegistration,
   verifyApplicationDocument
 } from "@/app/admissions/reviews/actions";
 import { DocumentOpenButton } from "@/app/admissions/reviews/document-open-button";
@@ -24,6 +26,7 @@ import {
   type ApplicationReviewReadinessStatus
 } from "@/lib/application-review";
 import { canConvertSubmittedRegistration } from "@/lib/admissions-conversion";
+import { canReopenLapsedRegistration } from "@/lib/admissions-registration";
 import type {
   ApplicationDocumentSlotKey,
   ApplicationDocumentVerificationStatus
@@ -164,9 +167,14 @@ interface ApplicationOfferSummary {
 
 interface RegistrationStatusSummary {
   id: string;
-  status: "not_started" | "in_progress" | "submitted" | "complete";
+  status: "not_started" | "in_progress" | "submitted" | "complete" | "lapsed";
+  registrationDeadlineAt?: string;
   savedAt?: string;
   submittedAt?: string;
+  lapsedAt?: string;
+  lapsedReason?: string;
+  reopenedAt?: string;
+  reopenedReason?: string;
   termsVersion?: string;
   termsAcceptedAt?: string;
   moduleConfirmationAccepted: boolean;
@@ -298,9 +306,14 @@ type OfferRow = {
 type RegistrationRow = {
   application_id: string;
   id: string;
-  status: "not_started" | "in_progress" | "submitted" | "complete";
+  status: "not_started" | "in_progress" | "submitted" | "complete" | "lapsed";
+  registration_deadline_at: string | null;
   saved_at: string | null;
   submitted_at: string | null;
+  lapsed_at: string | null;
+  lapsed_reason: string | null;
+  reopened_at: string | null;
+  reopened_reason: string | null;
   terms_version: string | null;
   terms_accepted_at: string | null;
   module_confirmation_accepted: boolean | null;
@@ -366,7 +379,17 @@ function leadIsVisibleInReviewAdmin(lead: LeadJoin | undefined): boolean {
     lead &&
       !lead.archived &&
       typeof lead.stage === "string" &&
-      ["submitted", "reviewed", "offered", "accepted", "registration_in_progress", "registered", "offer_declined", "offer_lapsed"].includes(lead.stage)
+      [
+        "submitted",
+        "reviewed",
+        "offered",
+        "accepted",
+        "registration_in_progress",
+        "registration_lapsed",
+        "registered",
+        "offer_declined",
+        "offer_lapsed"
+      ].includes(lead.stage)
   );
 }
 
@@ -666,6 +689,7 @@ function demoApplications(): StaffReviewApplication[] {
       registration: {
         id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         status: "submitted",
+        registrationDeadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         submittedAt: new Date().toISOString(),
         termsVersion: "registration-terms-2026-07-28-v1",
         termsAcceptedAt: new Date().toISOString(),
@@ -794,7 +818,7 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     supabase
       .from("admissions_registrations")
       .select(
-        "application_id, id, status, saved_at, submitted_at, terms_version, terms_accepted_at, module_confirmation_accepted, conversion_request_id, student_id, converted_at"
+        "application_id, id, status, registration_deadline_at, saved_at, submitted_at, lapsed_at, lapsed_reason, reopened_at, reopened_reason, terms_version, terms_accepted_at, module_confirmation_accepted, conversion_request_id, student_id, converted_at"
       )
       .in("application_id", applicationIds)
       .order("updated_at", { ascending: false })
@@ -859,8 +883,13 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     registrationByApplicationId.set(registration.application_id, {
       id: registration.id,
       status: registration.status,
+      registrationDeadlineAt: optionalString(registration.registration_deadline_at),
       savedAt: optionalString(registration.saved_at),
       submittedAt: optionalString(registration.submitted_at),
+      lapsedAt: optionalString(registration.lapsed_at),
+      lapsedReason: optionalString(registration.lapsed_reason),
+      reopenedAt: optionalString(registration.reopened_at),
+      reopenedReason: optionalString(registration.reopened_reason),
       termsVersion: optionalString(registration.terms_version),
       termsAcceptedAt: optionalString(registration.terms_accepted_at),
       moduleConfirmationAccepted: Boolean(registration.module_confirmation_accepted),
@@ -973,6 +1002,37 @@ function OfferDeadlineWorkflowPanel() {
         <button className="button primary">
           <Clock size={16} />
           Process offer deadlines
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function RegistrationDeadlineWorkflowPanel() {
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Registration Deadline Workflow</h2>
+          <p>Marks overdue in-progress or submitted registrations as lapsed and logs suppressed applicant notices.</p>
+        </div>
+        <div className="icon-box">
+          <MailWarning size={18} />
+        </div>
+      </div>
+      <form className="grid" action={processAdmissionsRegistrationDeadlineWorkflow}>
+        <Field label="Lapse reason" htmlFor="registration-lapse-reason">
+          <input
+            id="registration-lapse-reason"
+            name="lapse_reason"
+            className="input"
+            maxLength={4000}
+            defaultValue="Registration deadline passed before submission or conversion."
+          />
+        </Field>
+        <button className="button primary">
+          <Clock size={16} />
+          Process registration deadlines
         </button>
       </form>
     </section>
@@ -1418,8 +1478,11 @@ function RegistrationStatusPanel({ application }: { application: StaffReviewAppl
 
       <div className="review-data-grid">
         <DataItem label="Status" value={registration.status.replaceAll("_", " ")} />
+        <DataItem label="Registration deadline" value={formatDateTime(registration.registrationDeadlineAt)} />
         <DataItem label="Last saved" value={formatDateTime(registration.savedAt)} />
         <DataItem label="Submitted" value={formatDateTime(registration.submittedAt)} />
+        <DataItem label="Lapsed" value={formatDateTime(registration.lapsedAt)} />
+        <DataItem label="Reopened" value={formatDateTime(registration.reopenedAt)} />
         <DataItem label="Course/modules confirmed" value={registration.moduleConfirmationAccepted} />
         <DataItem label="Required docs uploaded" value={`${registration.uploadedRequiredDocumentCount}/${registration.requiredDocumentCount}`} />
         <DataItem label="T&C version" value={registration.termsVersion} />
@@ -1427,6 +1490,102 @@ function RegistrationStatusPanel({ application }: { application: StaffReviewAppl
         <DataItem label="Converted" value={formatDateTime(registration.convertedAt)} />
         <DataItem label="Student record" value={registration.studentId ? "Linked" : "Not created"} />
       </div>
+
+      {registration.status === "lapsed" ? (
+        <div className="apply-error" role="status">
+          <Clock size={18} />
+          <div>
+            <h2>Registration lapsed</h2>
+            <p>
+              This registration lapsed {formatDateTime(registration.lapsedAt)}. Applicants cannot submit it and staff cannot convert it
+              unless it is reopened.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {registration.reopenedAt ? (
+        <div className="apply-success" role="status">
+          <ShieldAlert size={18} />
+          <div>
+            <h2>Registration reopened</h2>
+            <p>
+              Reopened {formatDateTime(registration.reopenedAt)}. Current deadline:{" "}
+              {formatDateTime(registration.registrationDeadlineAt)}.
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function RegistrationReopenPanel({ application }: { application: StaffReviewApplication }) {
+  const registration = application.registration;
+  const access = canReopenLapsedRegistration(
+    registration
+      ? {
+          registrationStatus: registration.status,
+          convertedStudentId: registration.studentId ?? application.leadConvertedStudentId ?? application.offer?.convertedStudentId,
+          leadStage: application.leadStage
+        }
+      : undefined
+  );
+
+  const reasonByKey: Record<typeof access.reason, string> = {
+    allowed: "This lapsed registration can be reopened for applicant editing and resubmission.",
+    missing_registration: "No registration exists to reopen.",
+    not_lapsed: "Only lapsed registrations can be reopened.",
+    already_converted: "Converted registrations cannot be reopened.",
+    lead_not_reopenable: "The admissions lead is not in the lapsed-registration stage."
+  };
+
+  if (!registration) {
+    return null;
+  }
+
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Registration Reopen</h2>
+          <p>Reopening requires a staff reason and creates a suppressed applicant notice. No email is sent.</p>
+        </div>
+        <StatusPill value={access.allowed ? "ready_for_decision" : "not_ready"} label={access.allowed ? "available" : "blocked"} />
+      </div>
+
+      <p className="muted small">{reasonByKey[access.reason]}</p>
+
+      <form className="grid" action={reopenLapsedAdmissionsRegistration}>
+        <input type="hidden" name="application_id" value={application.id} />
+        <input type="hidden" name="registration_id" value={registration.id} />
+        <FormGrid>
+          <Field label="New deadline" htmlFor={`registration-reopen-deadline-${registration.id}`}>
+            <input
+              id={`registration-reopen-deadline-${registration.id}`}
+              name="new_deadline_at"
+              className="input"
+              type="date"
+              disabled={!access.allowed}
+            />
+          </Field>
+          <DataItem label="Previous deadline" value={formatDateTime(registration.registrationDeadlineAt)} />
+        </FormGrid>
+        <Field label="Reopen reason" htmlFor={`registration-reopen-reason-${registration.id}`}>
+          <textarea
+            id={`registration-reopen-reason-${registration.id}`}
+            name="reopen_reason"
+            className="textarea"
+            maxLength={4000}
+            required
+            disabled={!access.allowed}
+          />
+        </Field>
+        <button className="button primary" disabled={!access.allowed}>
+          <ShieldAlert size={16} />
+          Reopen registration
+        </button>
+      </form>
     </section>
   );
 }
@@ -1435,6 +1594,7 @@ function RegistrationConversionPanel({ application }: { application: StaffReview
   const registration = application.registration;
   const access = canConvertSubmittedRegistration({
     registrationStatus: registration?.status ?? "not_started",
+    registrationDeadlineAt: registration?.registrationDeadlineAt,
     requiredDocumentCount: registration?.requiredDocumentCount ?? 0,
     uploadedRequiredDocumentCount: registration?.uploadedRequiredDocumentCount ?? 0,
     moduleConfirmationAccepted: Boolean(registration?.moduleConfirmationAccepted),
@@ -1446,6 +1606,7 @@ function RegistrationConversionPanel({ application }: { application: StaffReview
   const reasonByKey: Record<typeof access.reason, string> = {
     allowed: "Ready to convert.",
     already_converted: "This registration has already been converted to a student record.",
+    registration_deadline_passed: "The registration deadline has passed. Reopen the registration before conversion.",
     registration_not_submitted: "The applicant must submit registration before conversion.",
     required_documents_missing: "Required registration documents must be uploaded and not rejected.",
     modules_not_confirmed: "The applicant must confirm the accepted modules.",
@@ -1526,6 +1687,7 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
         <RecordDecisionPanel application={application} />
         <OfferStatusPanel application={application} />
         <RegistrationStatusPanel application={application} />
+        <RegistrationReopenPanel application={application} />
         <RegistrationConversionPanel application={application} />
       </div>
     </details>
@@ -1542,8 +1704,12 @@ export default async function AdmissionsReviewsPage({
     decision_recorded?: string;
     offer_deadlines_processed?: string;
     registration_converted?: string;
+    registration_reopened?: string;
+    registration_deadlines_processed?: string;
     offer_deadlines_demo?: string;
     conversion_demo?: string;
+    registration_reopened_demo?: string;
+    registration_deadlines_demo?: string;
     document_demo?: string;
     review_demo?: string;
     decision_demo?: string;
@@ -1567,11 +1733,15 @@ export default async function AdmissionsReviewsPage({
       params.review_saved ||
       params.decision_recorded ||
       params.registration_converted ||
+      params.registration_reopened ||
+      params.registration_deadlines_processed ||
       params.offer_deadlines_processed ||
       params.document_demo ||
       params.review_demo ||
       params.decision_demo ||
       params.conversion_demo ||
+      params.registration_reopened_demo ||
+      params.registration_deadlines_demo ||
       params.offer_deadlines_demo ? (
         <div className="apply-success" role="status">
           <ShieldAlert size={18} />
@@ -1579,6 +1749,10 @@ export default async function AdmissionsReviewsPage({
             <h2>
               {params.offer_deadlines_processed || params.offer_deadlines_demo
                 ? "Offer deadlines processed"
+                : params.registration_deadlines_processed || params.registration_deadlines_demo
+                ? "Registration deadlines processed"
+                : params.registration_reopened || params.registration_reopened_demo
+                ? "Registration reopened"
                 : params.registration_converted || params.conversion_demo
                   ? "Registration converted"
                 : params.decision_recorded || params.decision_demo
@@ -1588,10 +1762,20 @@ export default async function AdmissionsReviewsPage({
                   : "Document verification saved"}
             </h2>
             <p>
-              {params.document_demo || params.review_demo || params.decision_demo || params.offer_deadlines_demo || params.conversion_demo
+              {params.document_demo ||
+              params.review_demo ||
+              params.decision_demo ||
+              params.offer_deadlines_demo ||
+              params.registration_deadlines_demo ||
+              params.registration_reopened_demo ||
+              params.conversion_demo
                 ? "Demo mode simulated the action."
                 : params.offer_deadlines_processed
                   ? "Eligible reminders and lapsed offers were logged with suppressed correspondence. No applicant email was sent."
+                : params.registration_deadlines_processed
+                  ? "Eligible overdue registrations were marked lapsed with suppressed correspondence. No applicant email was sent."
+                : params.registration_reopened
+                  ? "The lapsed registration was reopened, audited, and logged with suppressed correspondence. No applicant email was sent."
                 : params.registration_converted
                   ? "The linked student record and planned initial enrolments were created or activated. No finance rows were created."
                 : params.decision_recorded
@@ -1603,6 +1787,7 @@ export default async function AdmissionsReviewsPage({
       ) : null}
 
       <OfferDeadlineWorkflowPanel />
+      <RegistrationDeadlineWorkflowPanel />
 
       {applications.length === 0 ? (
         <EmptyState
