@@ -40,9 +40,10 @@ interface PortalOfferSummary {
 
 interface PortalRegistrationSummary {
   id: string;
-  status: "not_started" | "in_progress" | "submitted";
+  status: "not_started" | "in_progress" | "submitted" | "complete";
   savedAt?: string;
   submittedAt?: string;
+  convertedAt?: string;
 }
 
 type RelatedObject = Record<string, unknown>;
@@ -231,7 +232,7 @@ async function getPortalOfferContext(personId: string): Promise<{
 
   const registrationResult = await supabase
     .from("admissions_registrations")
-    .select("id, status, saved_at, submitted_at")
+    .select("id, status, saved_at, submitted_at, converted_at")
     .eq("application_offer_id", currentOffer.id)
     .maybeSingle();
 
@@ -245,13 +246,16 @@ async function getPortalOfferContext(personId: string): Promise<{
       ? {
           id: String(registrationResult.data.id),
           status:
-            registrationResult.data.status === "submitted"
+            registrationResult.data.status === "complete"
+              ? "complete"
+              : registrationResult.data.status === "submitted"
               ? "submitted"
               : registrationResult.data.status === "in_progress"
                 ? "in_progress"
                 : "not_started",
           savedAt: optionalString(registrationResult.data.saved_at),
-          submittedAt: optionalString(registrationResult.data.submitted_at)
+          submittedAt: optionalString(registrationResult.data.submitted_at),
+          convertedAt: optionalString(registrationResult.data.converted_at)
         }
       : undefined
   };
@@ -341,6 +345,8 @@ function OfferStatePanel({ offer, registration }: { offer: PortalOfferSummary; r
     const detail =
       registrationStatus === "submitted"
         ? `Your registration was submitted ${formatDateTime(registration?.submittedAt)}.`
+        : registrationStatus === "complete"
+          ? `Your registration was converted to a student record ${formatDateTime(registration?.convertedAt)}.`
         : registrationStatus === "in_progress"
           ? `Your registration draft was last saved ${formatDateTime(registration?.savedAt)}.`
           : `Your offer was accepted ${formatDateTime(offer.acceptedAt)}. Start registration when you are ready.`;
@@ -351,9 +357,11 @@ function OfferStatePanel({ offer, registration }: { offer: PortalOfferSummary; r
         <div>
           <strong>Registration {registrationStatus.replaceAll("_", " ")}</strong>
           <p className="muted small">{detail}</p>
-          <Link className="button secondary apply-submit" href="/portal/registration">
-            Open registration
-          </Link>
+          {registrationStatus === "complete" ? null : (
+            <Link className="button secondary apply-submit" href="/portal/registration">
+              Open registration
+            </Link>
+          )}
         </div>
       </div>
     );

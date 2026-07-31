@@ -3,7 +3,6 @@ import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
 import { canIssueApplicationInvitationForLead } from "@/lib/application-invitations";
 import {
-  convertAdmissionLeadToStudent,
   createAdmissionLead,
   inviteAdmissionLeadToApply,
   importAdmissionsCsv,
@@ -19,6 +18,8 @@ export const leadStages: AdmissionLeadStage[] = [
   "offered",
   "rejected",
   "accepted",
+  "registration_in_progress",
+  "registered",
   "offer_declined",
   "offer_lapsed",
   "archived"
@@ -194,39 +195,6 @@ export function AdmissionsTools({ data }: { data: AppData }) {
   );
 }
 
-function ConvertLeadForm({ data, lead }: { data: AppData; lead: AdmissionLead }) {
-  return (
-    <details className="expected-details">
-      <summary>
-        Convert to student
-        <span className="muted small">Creates full student profile</span>
-      </summary>
-      <form className="grid session-form" action={convertAdmissionLeadToStudent}>
-        <input type="hidden" name="lead_id" value={lead.id} />
-        <FormGrid>
-          <Field label="Temporary ID" htmlFor={`lead-temp-id-${lead.id}`}>
-            <input id={`lead-temp-id-${lead.id}`} name="temporary_id" className="input" placeholder="Auto-generated if blank" />
-          </Field>
-          <Field label="CCCU student ID" htmlFor={`lead-cccu-id-${lead.id}`}>
-            <input id={`lead-cccu-id-${lead.id}`} name="cccu_student_id" className="input" />
-          </Field>
-          <Field label="Start term" htmlFor={`lead-start-term-${lead.id}`}>
-            <select id={`lead-start-term-${lead.id}`} name="start_term_id" className="select">
-              <option value="">Not set</option>
-              {data.terms.map((term) => (
-                <option key={term.id} value={term.id}>
-                  {term.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </FormGrid>
-        <button className="button primary">Convert to student</button>
-      </form>
-    </details>
-  );
-}
-
 function ApplicationInvitationForm({ lead }: { lead: AdmissionLead }) {
   if (!canIssueApplicationInvitationForLead(lead)) {
     return null;
@@ -286,7 +254,6 @@ export function AdmissionsRecords({ data }: { data: AppData }) {
               <button className="button primary">Save lead</button>
             </form>
             <ApplicationInvitationForm lead={lead} />
-            {!lead.convertedStudentId && lead.stage === "accepted" ? <ConvertLeadForm data={data} lead={lead} /> : null}
           </div>
         ))}
       </div>

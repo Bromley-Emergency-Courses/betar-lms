@@ -1,6 +1,7 @@
-import { BadgeCheck, ClipboardCheck, Clock, FileCheck2, LockKeyhole, MailWarning, ShieldAlert, XCircle } from "lucide-react";
+import { BadgeCheck, ClipboardCheck, Clock, FileCheck2, GraduationCap, LockKeyhole, MailWarning, ShieldAlert, XCircle } from "lucide-react";
 import Link from "next/link";
 import {
+  convertSubmittedAdmissionsRegistration,
   processApplicationOfferDeadlineWorkflow,
   recordApplicationDecision,
   recordStaffApplicationReview,
@@ -22,6 +23,7 @@ import {
   applicationReviewReadinessStatuses,
   type ApplicationReviewReadinessStatus
 } from "@/lib/application-review";
+import { canConvertSubmittedRegistration } from "@/lib/admissions-conversion";
 import type {
   ApplicationDocumentSlotKey,
   ApplicationDocumentVerificationStatus
@@ -42,6 +44,7 @@ interface StaffReviewApplication {
   personId: string;
   status: "submitted";
   leadStage: string;
+  leadConvertedStudentId?: string;
   programme: "pgcert" | "microcredential";
   submittedAt?: string;
   declarationAcceptedAt?: string;
@@ -155,11 +158,13 @@ interface ApplicationOfferSummary {
   lastDeadlineReminderAt?: string;
   lastDeadlineReminderCorrespondenceLogId?: string;
   correspondenceLogId?: string;
+  convertedStudentId?: string;
+  convertedAt?: string;
 }
 
 interface RegistrationStatusSummary {
   id: string;
-  status: "not_started" | "in_progress" | "submitted";
+  status: "not_started" | "in_progress" | "submitted" | "complete";
   savedAt?: string;
   submittedAt?: string;
   termsVersion?: string;
@@ -167,6 +172,9 @@ interface RegistrationStatusSummary {
   moduleConfirmationAccepted: boolean;
   requiredDocumentCount: number;
   uploadedRequiredDocumentCount: number;
+  conversionRequestId?: string;
+  studentId?: string;
+  convertedAt?: string;
 }
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -283,17 +291,22 @@ type OfferRow = {
   last_deadline_reminder_at: string | null;
   last_deadline_reminder_correspondence_log_id: string | null;
   correspondence_log_id: string | null;
+  converted_student_id: string | null;
+  converted_at: string | null;
 };
 
 type RegistrationRow = {
   application_id: string;
   id: string;
-  status: "not_started" | "in_progress" | "submitted";
+  status: "not_started" | "in_progress" | "submitted" | "complete";
   saved_at: string | null;
   submitted_at: string | null;
   terms_version: string | null;
   terms_accepted_at: string | null;
   module_confirmation_accepted: boolean | null;
+  conversion_request_id: string | null;
+  student_id: string | null;
+  converted_at: string | null;
 };
 
 type RegistrationDocumentSlotRow = {
@@ -352,9 +365,8 @@ function leadIsVisibleInReviewAdmin(lead: LeadJoin | undefined): boolean {
   return Boolean(
     lead &&
       !lead.archived &&
-      !lead.converted_student_id &&
       typeof lead.stage === "string" &&
-      ["submitted", "reviewed", "offered", "accepted", "registration_in_progress", "offer_declined", "offer_lapsed"].includes(lead.stage)
+      ["submitted", "reviewed", "offered", "accepted", "registration_in_progress", "registered", "offer_declined", "offer_lapsed"].includes(lead.stage)
   );
 }
 
@@ -396,6 +408,7 @@ function mapApplication(
     personId: row.person_id,
     status: "submitted",
     leadStage: String(lead?.stage ?? "submitted"),
+    leadConvertedStudentId: optionalString(String(lead?.converted_student_id ?? "")),
     programme: row.programme,
     submittedAt: optionalString(row.submitted_at),
     declarationAcceptedAt: optionalString(row.declaration_accepted_at),
@@ -496,7 +509,9 @@ function mapApplication(
           reminderCount: offer.deadline_reminder_count ?? 0,
           lastDeadlineReminderAt: optionalString(offer.last_deadline_reminder_at),
           lastDeadlineReminderCorrespondenceLogId: optionalString(offer.last_deadline_reminder_correspondence_log_id),
-          correspondenceLogId: optionalString(offer.correspondence_log_id)
+          correspondenceLogId: optionalString(offer.correspondence_log_id),
+          convertedStudentId: optionalString(offer.converted_student_id),
+          convertedAt: optionalString(offer.converted_at)
         }
       : undefined,
     registration
@@ -558,7 +573,8 @@ function demoApplications(): StaffReviewApplication[] {
       admissionLeadId: "11111111-1111-4111-8111-111111111111",
       personId: "22222222-2222-4222-8222-222222222222",
       status: "submitted",
-      leadStage: "submitted",
+      leadStage: "registration_in_progress",
+      leadConvertedStudentId: undefined,
       programme: "pgcert",
       submittedAt: new Date().toISOString(),
       declarationAcceptedAt: new Date().toISOString(),
@@ -646,6 +662,16 @@ function demoApplications(): StaffReviewApplication[] {
         deadlinePassed: false,
         reminderCount: 0,
         correspondenceLogId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      },
+      registration: {
+        id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        status: "submitted",
+        submittedAt: new Date().toISOString(),
+        termsVersion: "registration-terms-2026-07-28-v1",
+        termsAcceptedAt: new Date().toISOString(),
+        moduleConfirmationAccepted: true,
+        requiredDocumentCount: 2,
+        uploadedRequiredDocumentCount: 2
       }
     }
   ];
@@ -761,14 +787,14 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
     supabase
       .from("application_offers")
       .select(
-        "application_id, id, offer_reference, status, issued_at, deadline_at, accepted_at, declined_at, lapsed_at, deadline_reminder_count, last_deadline_reminder_at, last_deadline_reminder_correspondence_log_id, correspondence_log_id"
+        "application_id, id, offer_reference, status, issued_at, deadline_at, accepted_at, declined_at, lapsed_at, deadline_reminder_count, last_deadline_reminder_at, last_deadline_reminder_correspondence_log_id, correspondence_log_id, converted_student_id, converted_at"
       )
       .in("application_id", applicationIds)
       .order("issued_at", { ascending: false }),
     supabase
       .from("admissions_registrations")
       .select(
-        "application_id, id, status, saved_at, submitted_at, terms_version, terms_accepted_at, module_confirmation_accepted"
+        "application_id, id, status, saved_at, submitted_at, terms_version, terms_accepted_at, module_confirmation_accepted, conversion_request_id, student_id, converted_at"
       )
       .in("application_id", applicationIds)
       .order("updated_at", { ascending: false })
@@ -841,7 +867,10 @@ async function getStaffReviewApplications(staffUserId: string): Promise<StaffRev
       requiredDocumentCount: registrationRequiredSlots.length,
       uploadedRequiredDocumentCount: registrationRequiredSlots.filter(
         (slot) => slot.managed_file_id && slot.verification_status !== "rejected"
-      ).length
+      ).length,
+      conversionRequestId: optionalString(registration.conversion_request_id),
+      studentId: optionalString(registration.student_id),
+      convertedAt: optionalString(registration.converted_at)
     });
   }
 
@@ -1203,7 +1232,7 @@ function RecordDecisionPanel({ application }: { application: StaffReviewApplicat
     applicationStatus: application.status,
     leadStage: application.leadStage,
     archived: false,
-    convertedStudentId: null,
+    convertedStudentId: application.leadConvertedStudentId ?? application.registration?.studentId ?? application.offer?.convertedStudentId ?? null,
     readinessStatus: readiness,
     existingDecisionOutcome: application.decision?.outcome
   });
@@ -1382,7 +1411,7 @@ function RegistrationStatusPanel({ application }: { application: StaffReviewAppl
       <div className="section-header">
         <div>
           <h2>Registration State</h2>
-          <p>Applicant registration status only. Conversion, enrolments, and finance remain disabled.</p>
+          <p>Submitted registrations can be converted to student records with planned initial enrolments. Finance remains disabled.</p>
         </div>
         <StatusPill value={registration.status} />
       </div>
@@ -1395,7 +1424,71 @@ function RegistrationStatusPanel({ application }: { application: StaffReviewAppl
         <DataItem label="Required docs uploaded" value={`${registration.uploadedRequiredDocumentCount}/${registration.requiredDocumentCount}`} />
         <DataItem label="T&C version" value={registration.termsVersion} />
         <DataItem label="T&C accepted" value={formatDateTime(registration.termsAcceptedAt)} />
+        <DataItem label="Converted" value={formatDateTime(registration.convertedAt)} />
+        <DataItem label="Student record" value={registration.studentId ? "Linked" : "Not created"} />
       </div>
+    </section>
+  );
+}
+
+function RegistrationConversionPanel({ application }: { application: StaffReviewApplication }) {
+  const registration = application.registration;
+  const access = canConvertSubmittedRegistration({
+    registrationStatus: registration?.status ?? "not_started",
+    requiredDocumentCount: registration?.requiredDocumentCount ?? 0,
+    uploadedRequiredDocumentCount: registration?.uploadedRequiredDocumentCount ?? 0,
+    moduleConfirmationAccepted: Boolean(registration?.moduleConfirmationAccepted),
+    termsAcceptedAt: registration?.termsAcceptedAt,
+    convertedStudentId: registration?.studentId ?? application.leadConvertedStudentId ?? application.offer?.convertedStudentId,
+    leadStage: application.leadStage
+  });
+
+  const reasonByKey: Record<typeof access.reason, string> = {
+    allowed: "Ready to convert.",
+    already_converted: "This registration has already been converted to a student record.",
+    registration_not_submitted: "The applicant must submit registration before conversion.",
+    required_documents_missing: "Required registration documents must be uploaded and not rejected.",
+    modules_not_confirmed: "The applicant must confirm the accepted modules.",
+    terms_not_accepted: "Registration terms must be accepted.",
+    lead_not_convertible: "This admissions stage cannot be converted."
+  };
+
+  if (!registration) {
+    return null;
+  }
+
+  return (
+    <section className="panel grid">
+      <div className="section-header">
+        <div>
+          <h2>Student Conversion</h2>
+          <p>Create or activate the linked student record and planned initial enrolments. Finance rows are not created here.</p>
+        </div>
+        <div className="toolbar">
+          <GraduationCap size={18} />
+          <StatusPill
+            value={registration.status === "complete" || registration.studentId ? "completed" : access.allowed ? "ready_for_decision" : "not_ready"}
+            label={registration.status === "complete" || registration.studentId ? "converted" : access.allowed ? "ready" : "blocked"}
+          />
+        </div>
+      </div>
+
+      <div className="review-data-grid">
+        <DataItem label="Conversion request" value={registration.conversionRequestId ? "Linked" : "Not staged"} />
+        <DataItem label="Student record" value={registration.studentId ?? application.leadConvertedStudentId ?? application.offer?.convertedStudentId ?? "Not linked"} />
+        <DataItem label="Converted at" value={formatDateTime(registration.convertedAt ?? application.offer?.convertedAt)} />
+      </div>
+
+      <p className="muted small">{reasonByKey[access.reason]}</p>
+
+      <form action={convertSubmittedAdmissionsRegistration}>
+        <input type="hidden" name="application_id" value={application.id} />
+        <input type="hidden" name="registration_id" value={registration.id} />
+        <button className="button primary" disabled={!access.allowed}>
+          <GraduationCap size={16} />
+          Convert to student
+        </button>
+      </form>
     </section>
   );
 }
@@ -1433,6 +1526,7 @@ function ReviewApplicationRecord({ application, open }: { application: StaffRevi
         <RecordDecisionPanel application={application} />
         <OfferStatusPanel application={application} />
         <RegistrationStatusPanel application={application} />
+        <RegistrationConversionPanel application={application} />
       </div>
     </details>
   );
@@ -1447,7 +1541,9 @@ export default async function AdmissionsReviewsPage({
     review_saved?: string;
     decision_recorded?: string;
     offer_deadlines_processed?: string;
+    registration_converted?: string;
     offer_deadlines_demo?: string;
+    conversion_demo?: string;
     document_demo?: string;
     review_demo?: string;
     decision_demo?: string;
@@ -1470,10 +1566,12 @@ export default async function AdmissionsReviewsPage({
       {params.document_verified ||
       params.review_saved ||
       params.decision_recorded ||
+      params.registration_converted ||
       params.offer_deadlines_processed ||
       params.document_demo ||
       params.review_demo ||
       params.decision_demo ||
+      params.conversion_demo ||
       params.offer_deadlines_demo ? (
         <div className="apply-success" role="status">
           <ShieldAlert size={18} />
@@ -1481,6 +1579,8 @@ export default async function AdmissionsReviewsPage({
             <h2>
               {params.offer_deadlines_processed || params.offer_deadlines_demo
                 ? "Offer deadlines processed"
+                : params.registration_converted || params.conversion_demo
+                  ? "Registration converted"
                 : params.decision_recorded || params.decision_demo
                 ? "Decision recorded"
                 : params.review_saved || params.review_demo
@@ -1488,10 +1588,12 @@ export default async function AdmissionsReviewsPage({
                   : "Document verification saved"}
             </h2>
             <p>
-              {params.document_demo || params.review_demo || params.decision_demo || params.offer_deadlines_demo
+              {params.document_demo || params.review_demo || params.decision_demo || params.offer_deadlines_demo || params.conversion_demo
                 ? "Demo mode simulated the action."
                 : params.offer_deadlines_processed
                   ? "Eligible reminders and lapsed offers were logged with suppressed correspondence. No applicant email was sent."
+                : params.registration_converted
+                  ? "The linked student record and planned initial enrolments were created or activated. No finance rows were created."
                 : params.decision_recorded
                   ? "The lead moved to offered or rejected, a suppressed correspondence log was recorded, and no applicant email was sent."
                   : "Audit events were recorded for the staff action."}
