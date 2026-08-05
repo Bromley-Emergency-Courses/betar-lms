@@ -14,10 +14,20 @@ import {
   parseVerifyApplicationDocumentForm
 } from "@/lib/application-review";
 import { requirePermission } from "@/lib/auth";
+import { correspondenceEmailFailed, sendCorrespondenceLogEmail } from "@/lib/email-delivery";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
 function reviewRedirect(applicationId: string, result: string): never {
   redirect(`/admissions/reviews?application=${applicationId}&${result}=1#application-${applicationId}`);
+}
+
+function correspondenceLogIdFromRpc(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const value = (data as { correspondence_log_id?: unknown }).correspondence_log_id;
+  return typeof value === "string" ? value : null;
 }
 
 export async function verifyApplicationDocument(formData: FormData) {
@@ -78,7 +88,7 @@ export async function recordApplicationDecision(formData: FormData) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.rpc("record_application_decision", {
+  const { data, error } = await supabase.rpc("record_application_decision", {
     p_application_id: parsed.application_id,
     p_decision_outcome: parsed.decision_outcome,
     p_decision_reason: parsed.decision_reason,
@@ -91,6 +101,14 @@ export async function recordApplicationDecision(formData: FormData) {
 
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
+  const correspondenceLogId = correspondenceLogIdFromRpc(data);
+  if (correspondenceLogId) {
+    const deliveryResult = await sendCorrespondenceLogEmail(correspondenceLogId);
+    if (correspondenceEmailFailed(deliveryResult)) {
+      reviewRedirect(parsed.application_id, "decision_email_failed");
+    }
+  }
+
   reviewRedirect(parsed.application_id, "decision_recorded");
 }
 
@@ -103,8 +121,9 @@ export async function processApplicationOfferDeadlineWorkflow(formData: FormData
   }
 
   const supabase = await createSupabaseServerClient();
+  const referenceTime = new Date().toISOString();
   const { error } = await supabase.rpc("process_application_offer_deadline_workflow", {
-    p_reference_time: new Date().toISOString(),
+    p_reference_time: referenceTime,
     p_reminder_window_days: parsed.reminder_window_days
   });
 
@@ -115,6 +134,41 @@ export async function processApplicationOfferDeadlineWorkflow(formData: FormData
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   revalidatePath("/portal");
+
+  const correspondenceResult = await supabase
+    .from("correspondence_logs")
+    .select("id")
+    .in("template_key", ["offer_deadline_reminder", "offer_lapsed_notice"])
+    .eq("delivery_status", "suppressed")
+    .filter("metadata->>reference_time", "eq", referenceTime);
+
+  if (correspondenceResult.error) {
+    throw new Error(correspondenceResult.error.message);
+  }
+
+  let failedCount = 0;
+  let sentCount = 0;
+  let disabled = false;
+  for (const row of correspondenceResult.data ?? []) {
+    const deliveryResult = await sendCorrespondenceLogEmail(String(row.id));
+    if (deliveryResult.status === "disabled") {
+      disabled = true;
+      break;
+    }
+    if (correspondenceEmailFailed(deliveryResult)) {
+      failedCount += 1;
+    } else if (deliveryResult.status === "sent") {
+      sentCount += 1;
+    }
+  }
+
+  if (disabled) {
+    redirect("/admissions/reviews?offer_deadlines_email_disabled=1");
+  }
+  if (failedCount > 0) {
+    redirect(`/admissions/reviews?${sentCount > 0 ? "offer_deadlines_email_partial" : "offer_deadlines_email_failed"}=1`);
+  }
+
   redirect("/admissions/reviews?offer_deadlines_processed=1");
 }
 

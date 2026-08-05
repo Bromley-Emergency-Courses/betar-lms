@@ -275,6 +275,7 @@ function OfferResponseBanner({ offerResult }: { offerResult?: string }) {
   }
 
   const accepted = offerResult.startsWith("accepted");
+  const emailFailed = offerResult.endsWith("email-failed");
   return (
     <div className="apply-success" role="status">
       {accepted ? <CheckCircle2 size={22} /> : <XCircle size={22} />}
@@ -283,6 +284,8 @@ function OfferResponseBanner({ offerResult }: { offerResult?: string }) {
         <p>
           {offerResult.endsWith("demo")
             ? "Demo mode is running without a Supabase database, so no live offer response was saved."
+            : emailFailed
+              ? "Your response has been recorded, but the confirmation email could not be sent."
             : "Your response has been recorded in the portal."}
         </p>
       </div>

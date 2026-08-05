@@ -50,7 +50,13 @@ export default async function AdmissionsPage({
         <>
           {invited ? (
             <div className="apply-success" role="status">
-              Application invitation {invited === "demo" ? "simulated in demo mode" : "sent"}.
+              {invited === "demo"
+                ? "Application invitation simulated in demo mode."
+                : invited === "email_disabled"
+                  ? "Application invitation was created, but email delivery is disabled."
+                : invited === "email_failed"
+                  ? "Application invitation was created, but the email could not be sent."
+                  : "Application invitation sent."}
             </div>
           ) : null}
           <AdmissionsTools data={data} />

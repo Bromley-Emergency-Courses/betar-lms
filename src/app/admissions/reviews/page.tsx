@@ -1702,7 +1702,11 @@ export default async function AdmissionsReviewsPage({
     document_verified?: string;
     review_saved?: string;
     decision_recorded?: string;
+    decision_email_failed?: string;
     offer_deadlines_processed?: string;
+    offer_deadlines_email_disabled?: string;
+    offer_deadlines_email_partial?: string;
+    offer_deadlines_email_failed?: string;
     registration_converted?: string;
     registration_reopened?: string;
     registration_deadlines_processed?: string;
@@ -1732,10 +1736,14 @@ export default async function AdmissionsReviewsPage({
       {params.document_verified ||
       params.review_saved ||
       params.decision_recorded ||
+      params.decision_email_failed ||
       params.registration_converted ||
       params.registration_reopened ||
       params.registration_deadlines_processed ||
       params.offer_deadlines_processed ||
+      params.offer_deadlines_email_disabled ||
+      params.offer_deadlines_email_partial ||
+      params.offer_deadlines_email_failed ||
       params.document_demo ||
       params.review_demo ||
       params.decision_demo ||
@@ -1747,7 +1755,11 @@ export default async function AdmissionsReviewsPage({
           <ShieldAlert size={18} />
           <div>
             <h2>
-              {params.offer_deadlines_processed || params.offer_deadlines_demo
+              {params.offer_deadlines_processed ||
+              params.offer_deadlines_email_disabled ||
+              params.offer_deadlines_email_partial ||
+              params.offer_deadlines_email_failed ||
+              params.offer_deadlines_demo
                 ? "Offer deadlines processed"
                 : params.registration_deadlines_processed || params.registration_deadlines_demo
                 ? "Registration deadlines processed"
@@ -1755,7 +1767,7 @@ export default async function AdmissionsReviewsPage({
                 ? "Registration reopened"
                 : params.registration_converted || params.conversion_demo
                   ? "Registration converted"
-                : params.decision_recorded || params.decision_demo
+                : params.decision_recorded || params.decision_email_failed || params.decision_demo
                 ? "Decision recorded"
                 : params.review_saved || params.review_demo
                   ? "Review saved"
@@ -1770,16 +1782,24 @@ export default async function AdmissionsReviewsPage({
               params.registration_reopened_demo ||
               params.conversion_demo
                 ? "Demo mode simulated the action."
+                : params.offer_deadlines_email_disabled
+                  ? "Eligible reminders and lapsed offers were logged, but email delivery is disabled."
+                : params.offer_deadlines_email_partial
+                  ? "Eligible reminders and lapsed offers were logged, but one or more emails could not be sent."
+                : params.offer_deadlines_email_failed
+                  ? "Eligible reminders and lapsed offers were logged, but no emails could be sent."
                 : params.offer_deadlines_processed
-                  ? "Eligible reminders and lapsed offers were logged with suppressed correspondence. No applicant email was sent."
+                  ? "Eligible reminders and lapsed offers were logged, and email delivery was attempted when enabled."
                 : params.registration_deadlines_processed
                   ? "Eligible overdue registrations were marked lapsed with suppressed correspondence. No applicant email was sent."
                 : params.registration_reopened
                   ? "The lapsed registration was reopened, audited, and logged with suppressed correspondence. No applicant email was sent."
                 : params.registration_converted
                   ? "The linked student record and planned initial enrolments were created or activated. No finance rows were created."
+                : params.decision_email_failed
+                  ? "The admissions decision was recorded, but the applicant email could not be sent. Check the correspondence log and SMTP configuration."
                 : params.decision_recorded
-                  ? "The lead moved to offered or rejected, a suppressed correspondence log was recorded, and no applicant email was sent."
+                  ? "The lead moved to offered or rejected, correspondence was logged, and email delivery was attempted when enabled."
                   : "Audit events were recorded for the staff action."}
             </p>
           </div>

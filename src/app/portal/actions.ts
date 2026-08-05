@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { parseRespondToApplicationOfferForm } from "@/lib/application-offers";
 import { getClientIpAddress } from "@/lib/application-submit";
+import { correspondenceEmailFailed, sendCorrespondenceLogEmail } from "@/lib/email-delivery";
 import { requireApplicantProfile } from "@/lib/portal-auth";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -34,7 +35,7 @@ export async function respondToApplicationOffer(formData: FormData) {
 
   const headerStore = await headers();
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.rpc("respond_to_application_offer", {
+  const { data, error } = await supabase.rpc("respond_to_application_offer", {
     p_offer_id: parsed.offer_id,
     p_response: parsed.offer_response,
     p_ip_address: getClientIpAddress(headerStore),
@@ -46,5 +47,16 @@ export async function respondToApplicationOffer(formData: FormData) {
   }
 
   revalidatePath("/portal");
+  const correspondenceLogId =
+    data && typeof data === "object" && typeof (data as { correspondence_log_id?: unknown }).correspondence_log_id === "string"
+      ? (data as { correspondence_log_id: string }).correspondence_log_id
+      : null;
+  if (correspondenceLogId) {
+    const deliveryResult = await sendCorrespondenceLogEmail(correspondenceLogId);
+    if (correspondenceEmailFailed(deliveryResult)) {
+      redirect(`/portal?offer=${parsed.offer_response === "accept" ? "accepted-email-failed" : "declined-email-failed"}`);
+    }
+  }
+
   redirect(`/portal?offer=${parsed.offer_response === "accept" ? "accepted" : "declined"}`);
 }
