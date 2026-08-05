@@ -1,0 +1,334 @@
+import type { JsonRecord, JsonValue } from "@/lib/audit-correspondence";
+
+export const admissionsEmailTemplateKeys = [
+  "application_invitation",
+  "module_preference_window_opened",
+  "offer_issued",
+  "rejection",
+  "offer_deadline_reminder",
+  "offer_lapsed_notice",
+  "offer_accepted_confirmation",
+  "offer_declined_confirmation",
+  "registration_lapsed_notice",
+  "registration_reopened_notice"
+] as const;
+
+export type AdmissionsEmailTemplateKey = (typeof admissionsEmailTemplateKeys)[number];
+
+export type AdmissionsEmailProvider = "smtp" | "graph";
+
+export interface SmtpAdmissionsEmailConfig {
+  provider: "smtp";
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password: string;
+  from: string;
+  replyTo?: string;
+}
+
+export interface GraphAdmissionsEmailConfig {
+  provider: "graph";
+  enabled: boolean;
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+  senderEmail: string;
+  replyTo?: string;
+}
+
+export type AdmissionsEmailConfig = SmtpAdmissionsEmailConfig | GraphAdmissionsEmailConfig;
+
+export interface AdmissionsEmailConfigResult {
+  enabled: boolean;
+  config?: AdmissionsEmailConfig;
+  missing: string[];
+  provider: AdmissionsEmailProvider;
+}
+
+export interface CorrespondenceEmailRenderInput {
+  templateKey: string;
+  recipientName?: string | null;
+  renderedSubject: string;
+  metadata?: JsonRecord | null;
+  appUrl?: string;
+}
+
+export interface RenderedCorrespondenceEmail {
+  subject: string;
+  text: string;
+  html: string;
+}
+
+const smtpRequiredEnvKeys = [
+  "ADMISSIONS_EMAIL_FROM",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASSWORD"
+] as const;
+
+const graphRequiredEnvKeys = [
+  "MICROSOFT_GRAPH_TENANT_ID",
+  "MICROSOFT_GRAPH_CLIENT_ID",
+  "MICROSOFT_GRAPH_CLIENT_SECRET",
+  "MICROSOFT_GRAPH_SENDER_EMAIL"
+] as const;
+
+function envFlag(value: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
+}
+
+function optionalEnv(value: string | undefined): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function emailProvider(env: Record<string, string | undefined>): AdmissionsEmailProvider {
+  const configuredProvider = optionalEnv(env.ADMISSIONS_EMAIL_PROVIDER)?.toLowerCase();
+  if (configuredProvider === "graph") {
+    return "graph";
+  }
+  if (configuredProvider === "smtp") {
+    return "smtp";
+  }
+
+  return graphRequiredEnvKeys.some((key) => optionalEnv(env[key])) ? "graph" : "smtp";
+}
+
+function stringMetadata(metadata: JsonRecord, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function formatDate(value: JsonValue | undefined): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "long",
+    timeZone: "Europe/London"
+  }).format(date);
+}
+
+function greeting(name?: string | null): string {
+  const trimmed = (name ?? "").trim();
+  return trimmed.length > 0 ? `Dear ${trimmed},` : "Dear applicant,";
+}
+
+function portalUrl(appUrl: string): string {
+  return new URL("/portal", appUrl).toString();
+}
+
+function registrationUrl(appUrl: string): string {
+  return new URL("/portal/registration", appUrl).toString();
+}
+
+function htmlEscape(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function textToHtml(text: string): string {
+  return text
+    .split("\n\n")
+    .map((paragraph) => `<p>${paragraph.split("\n").map(htmlEscape).join("<br />")}</p>`)
+    .join("\n");
+}
+
+export function getAdmissionsEmailConfig(
+  env: Record<string, string | undefined> = process.env
+): AdmissionsEmailConfigResult {
+  const provider = emailProvider(env);
+  const enabled = envFlag(env.ADMISSIONS_EMAIL_ENABLED);
+  if (!enabled) {
+    return { enabled: false, missing: [], provider };
+  }
+
+  if (provider === "graph") {
+    const missing = graphRequiredEnvKeys.filter((key) => !optionalEnv(env[key]));
+    if (missing.length > 0) {
+      return { enabled: true, missing: [...new Set(missing)], provider };
+    }
+
+    return {
+      enabled: true,
+      missing: [],
+      provider,
+      config: {
+        provider,
+        enabled: true,
+        tenantId: optionalEnv(env.MICROSOFT_GRAPH_TENANT_ID)!,
+        clientId: optionalEnv(env.MICROSOFT_GRAPH_CLIENT_ID)!,
+        clientSecret: optionalEnv(env.MICROSOFT_GRAPH_CLIENT_SECRET)!,
+        senderEmail: optionalEnv(env.MICROSOFT_GRAPH_SENDER_EMAIL)!,
+        replyTo: optionalEnv(env.ADMISSIONS_EMAIL_REPLY_TO)
+      }
+    };
+  }
+
+  const missing = smtpRequiredEnvKeys.filter((key) => !optionalEnv(env[key]));
+  const parsedPort = Number(env.SMTP_PORT);
+  if (!Number.isInteger(parsedPort) || parsedPort <= 0 || parsedPort > 65535) {
+    missing.push("SMTP_PORT");
+  }
+
+  if (missing.length > 0) {
+    return { enabled: true, missing: [...new Set(missing)], provider };
+  }
+
+  const secure = env.SMTP_SECURE
+    ? envFlag(env.SMTP_SECURE)
+    : parsedPort === 465;
+
+  return {
+    enabled: true,
+    missing: [],
+    provider,
+    config: {
+      provider,
+      enabled: true,
+      host: optionalEnv(env.SMTP_HOST)!,
+      port: parsedPort,
+      secure,
+      user: optionalEnv(env.SMTP_USER)!,
+      password: optionalEnv(env.SMTP_PASSWORD)!,
+      from: optionalEnv(env.ADMISSIONS_EMAIL_FROM)!,
+      replyTo: optionalEnv(env.ADMISSIONS_EMAIL_REPLY_TO)
+    }
+  };
+}
+
+export function isSupportedAdmissionsTemplateKey(templateKey: string): templateKey is AdmissionsEmailTemplateKey {
+  return admissionsEmailTemplateKeys.some((key) => key === templateKey);
+}
+
+export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput): RenderedCorrespondenceEmail {
+  const metadata = input.metadata ?? {};
+  const appUrl = input.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const portal = portalUrl(appUrl);
+  const registration = registrationUrl(appUrl);
+  const deadline =
+    formatDate(metadata.deadline_at) ??
+    formatDate(metadata.registration_deadline_at) ??
+    formatDate(metadata.preference_closes_at);
+  const offerReference = stringMetadata(metadata, "offer_reference");
+  const subject = input.renderedSubject.trim();
+  const intro = greeting(input.recipientName);
+
+  let text: string;
+  switch (input.templateKey) {
+    case "offer_issued":
+      text = [
+        intro,
+        `We are pleased to let you know that your BETAR application has received an offer${offerReference ? ` (${offerReference})` : ""}.`,
+        deadline
+          ? `Please sign in to the applicant portal to review and respond to your offer by ${deadline}.`
+          : "Please sign in to the applicant portal to review and respond to your offer.",
+        portal,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "application_invitation":
+      text = [
+        intro,
+        "You have been invited to complete your BETAR application.",
+        "Use the secure link below to sign in and continue your application.",
+        stringMetadata(metadata, "action_link") ?? portal,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "module_preference_window_opened":
+      text = [
+        intro,
+        "Module preferences are now open for your next BETAR term.",
+        deadline
+          ? `Please sign in to the student portal and submit your choices by ${deadline}.`
+          : "Please sign in to the student portal and submit your choices.",
+        stringMetadata(metadata, "action_link") ?? new URL("/portal/module-preferences", appUrl).toString(),
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "rejection":
+      text = [
+        intro,
+        "Thank you for your BETAR application. After review, we are not able to make you an offer for this intake.",
+        "If you have questions about the outcome, please reply to this email and the admissions team will respond.",
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "offer_deadline_reminder":
+      text = [
+        intro,
+        deadline
+          ? `This is a reminder that your BETAR offer response is due by ${deadline}.`
+          : "This is a reminder that your BETAR offer response deadline is approaching.",
+        "Please sign in to the applicant portal to accept or decline your offer.",
+        portal,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "offer_lapsed_notice":
+      text = [
+        intro,
+        "Your BETAR offer has now lapsed because the response deadline has passed.",
+        "If you still want to discuss your application, please reply to this email.",
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "offer_accepted_confirmation":
+      text = [
+        intro,
+        "Thank you for accepting your BETAR offer.",
+        "Your next step is to complete registration in the portal.",
+        registration,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "offer_declined_confirmation":
+      text = [
+        intro,
+        "This confirms that you have declined your BETAR offer.",
+        "If this was a mistake, please reply to this email.",
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "registration_lapsed_notice":
+      text = [
+        intro,
+        "Your BETAR registration has lapsed because the registration deadline has passed.",
+        "If you still want to complete registration, please reply to this email.",
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "registration_reopened_notice":
+      text = [
+        intro,
+        deadline
+          ? `Your BETAR registration has been reopened. Please complete it by ${deadline}.`
+          : "Your BETAR registration has been reopened.",
+        registration,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    default:
+      throw new Error(`Unsupported admissions email template: ${input.templateKey}`);
+  }
+
+  return {
+    subject,
+    text,
+    html: textToHtml(text)
+  };
+}

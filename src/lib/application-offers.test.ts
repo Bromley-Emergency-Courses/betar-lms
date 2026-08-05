@@ -414,14 +414,14 @@ async function seedOfferScenario(
 }
 
 async function processOfferDeadlineWorkflow(db: PGlite, referenceTime = "2026-07-28T12:00:00Z") {
-  return db.query(
+  return db.query<{ result: Record<string, unknown> }>(
     "select public.process_application_offer_deadline_workflow($1::timestamptz, 3) as result",
     [referenceTime]
   );
 }
 
 async function respondToOffer(db: PGlite, response: "accept" | "decline") {
-  return db.query(
+  return db.query<{ result: Record<string, unknown> }>(
     "select public.respond_to_application_offer($1, $2, '203.0.113.8'::inet, 'vitest user agent') as result",
     [offerId, response]
   );

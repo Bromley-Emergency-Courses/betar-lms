@@ -4,7 +4,8 @@ import {
   closeModulePreferenceWindow,
   confirmModulePreferenceWindow,
   openModulePreferenceWindow,
-  saveModulePreferenceWindow
+  saveModulePreferenceWindow,
+  sendModulePreferenceWindowLinks
 } from "@/app/admissions/preferences/actions";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
@@ -673,6 +674,27 @@ function PreferenceWindowCard({
         </div>
       </div>
 
+      {window.status === "open" && window.missingStudents.length > 0 ? (
+        <form className="application-section grid" action={sendModulePreferenceWindowLinks}>
+          <input type="hidden" name="window_id" value={window.id} />
+          <div className="application-section-heading">
+            <h3>Preference links</h3>
+            <span>{window.missingStudents.length} missing</span>
+          </div>
+          <p className="muted small">
+            Sends secure portal links to active students who have not submitted preferences for this open window.
+          </p>
+          <label className="check-option">
+            <input name="confirm_send" type="checkbox" required />
+            <span>Confirm sending preference links to missing students</span>
+          </label>
+          <button className="button primary" type="submit">
+            <Send size={16} />
+            Send preference links
+          </button>
+        </form>
+      ) : null}
+
       <div className="application-section">
         <div className="application-section-heading">
           <h3>Offered in this window</h3>
@@ -747,11 +769,44 @@ function PreferenceWindowCard({
 }
 
 function ResultBanner({ params }: { params: Record<string, string | undefined> }) {
-  const key = ["saved", "opened", "closed", "confirmed", "saved_demo", "opened_demo", "closed_demo", "confirmed_demo"].find(
-    (candidate) => params[candidate]
-  );
+  const key = [
+    "saved",
+    "opened",
+    "closed",
+    "confirmed",
+    "links_sent",
+    "links_partial",
+    "links_failed",
+    "links_not_open",
+    "links_email_disabled",
+    "saved_demo",
+    "opened_demo",
+    "closed_demo",
+    "confirmed_demo",
+    "links_demo"
+  ].find((candidate) => params[candidate]);
   if (!key) {
     return null;
+  }
+
+  if (key.startsWith("links")) {
+    const messages: Record<string, string> = {
+      links_sent: "Preference links were sent to missing students.",
+      links_partial: "Some preference links were sent, but one or more students could not be emailed.",
+      links_failed: "No preference links were sent. Check email configuration and student portal identities.",
+      links_not_open: "Preference links can only be sent for an open window.",
+      links_email_disabled: "Preference links were not sent because email delivery is disabled.",
+      links_demo: "Demo mode simulated sending preference links."
+    };
+    return (
+      <div className={key === "links_sent" || key === "links_demo" ? "apply-success" : "apply-error"} role="status">
+        {key === "links_sent" || key === "links_demo" ? <CheckCircle2 size={22} /> : <XCircle size={22} />}
+        <div>
+          <h2>Preference links</h2>
+          <p>{messages[key]}</p>
+        </div>
+      </div>
+    );
   }
 
   const label = key.replace("_demo", "");

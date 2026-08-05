@@ -10,6 +10,7 @@ export const modulePreferenceUpdatedAction = "module_preference.updated";
 export const modulePreferenceCapacityBlockedAction = "module_preference.capacity_blocked";
 export const modulePreferenceWindowEntityType = "module_preference_window";
 export const modulePreferenceSubmissionEntityType = "module_preference_submission";
+export const modulePreferenceWindowOpenedTemplateKey = "module_preference_window_opened";
 
 export type ModulePreferenceWindowStatus = (typeof modulePreferenceWindowStatuses)[number];
 
@@ -108,6 +109,11 @@ const lifecycleFormSchema = z.object({
   window_id: idSchema
 });
 
+const sendLinksFormSchema = z.object({
+  window_id: idSchema,
+  confirm_send: z.literal(true)
+});
+
 const submissionFormSchema = z
   .object({
     window_id: idSchema,
@@ -146,6 +152,7 @@ const submissionFormSchema = z
 
 export type ModulePreferenceWindowFormPayload = z.infer<typeof windowFormSchema>;
 export type ModulePreferenceLifecyclePayload = z.infer<typeof lifecycleFormSchema>;
+export type ModulePreferenceSendLinksPayload = z.infer<typeof sendLinksFormSchema>;
 export type ModulePreferenceSubmissionPayload = z.infer<typeof submissionFormSchema>;
 
 function formString(formData: FormData, key: string): string {
@@ -179,6 +186,13 @@ export function parseModulePreferenceWindowForm(formData: FormData): ModulePrefe
 export function parseModulePreferenceLifecycleForm(formData: FormData): ModulePreferenceLifecyclePayload {
   return parseOrThrow(lifecycleFormSchema, {
     window_id: formString(formData, "window_id")
+  });
+}
+
+export function parseModulePreferenceSendLinksForm(formData: FormData): ModulePreferenceSendLinksPayload {
+  return parseOrThrow(sendLinksFormSchema, {
+    window_id: formString(formData, "window_id"),
+    confirm_send: formData.get("confirm_send") === "on"
   });
 }
 

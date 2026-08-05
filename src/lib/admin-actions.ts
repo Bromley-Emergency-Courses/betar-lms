@@ -11,6 +11,7 @@ import {
   parseStaffInvitationForm
 } from "@/lib/application-invitations";
 import { requirePermission } from "@/lib/auth";
+import { correspondenceEmailFailed } from "@/lib/email-delivery";
 import {
   normalizeInboundExamResult,
   parsePracticalModuleCodeMap,
@@ -22,7 +23,8 @@ import {
 } from "@/lib/exam-adapters";
 import { getLmsData } from "@/lib/lms-data";
 import { presentationRubricCriteria } from "@/lib/presentation-rubric";
-import { createSupabaseAuthEmailClient, createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
+import { sendPortalMagicLinkEmail } from "@/lib/portal-email";
+import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -595,17 +597,25 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
     throw new Error("Application invitation response was not valid.");
   }
 
-  const authClient = createSupabaseAuthEmailClient();
-  const { error: magicLinkError } = await authClient.auth.signInWithOtp({
+  const deliveryResult = await sendPortalMagicLinkEmail({
     email: data.email,
-    options: {
-      emailRedirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application", data),
-      shouldCreateUser: true
+    subject: "Your BETAR application invitation",
+    templateKey: "application_invitation",
+    redirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application", data),
+    metadata: {
+      admission_lead_id: data.lead_id,
+      invitation_id: data.invitation_id
     }
   });
 
-  if (magicLinkError) {
-    throw new Error(magicLinkError.message);
+  if (deliveryResult.status === "disabled") {
+    revalidatePath("/admissions");
+    redirect("/admissions?mode=edit&invited=email_disabled");
+  }
+
+  if (correspondenceEmailFailed(deliveryResult)) {
+    revalidatePath("/admissions");
+    redirect("/admissions?mode=edit&invited=email_failed");
   }
 
   revalidatePath("/admissions");

@@ -3,8 +3,10 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { applicationMagicLinkRedirectUrl, parseApplicantMagicLinkForm } from "@/lib/application-invitations";
+import { correspondenceEmailFailed } from "@/lib/email-delivery";
 import { safePortalNextPath } from "@/lib/portal-access";
-import { createSupabaseAuthEmailClient, isSupabaseConfigured } from "@/lib/supabase";
+import { sendPortalMagicLinkEmail } from "@/lib/portal-email";
+import { isSupabaseConfigured } from "@/lib/supabase";
 
 async function requestOrigin(): Promise<string> {
   const headerStore = await headers();
@@ -26,17 +28,20 @@ export async function sendApplicantMagicLink(formData: FormData) {
     redirect(loginPath({ sent: "1", demo: "1", next }));
   }
 
-  const authClient = createSupabaseAuthEmailClient();
-  const { error } = await authClient.auth.signInWithOtp({
+  const deliveryResult = await sendPortalMagicLinkEmail({
     email: parsed.email,
-    options: {
-      emailRedirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), next),
-      shouldCreateUser: true
-    }
+    subject: "Your BETAR portal sign-in link",
+    templateKey: "application_invitation",
+    redirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), next)
   });
 
-  if (error) {
-    redirect(loginPath({ error: error.message, next }));
+  if (deliveryResult.status === "disabled") {
+    redirect(loginPath({ error: "Email delivery is disabled for this environment.", next }));
+  }
+
+  if (correspondenceEmailFailed(deliveryResult)) {
+    const message = deliveryResult.status === "failed" ? deliveryResult.error : "Email delivery could not be completed.";
+    redirect(loginPath({ error: message, next }));
   }
 
   redirect(loginPath({ sent: "1", next }));

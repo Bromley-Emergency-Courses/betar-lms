@@ -46,3 +46,17 @@ npm run lint
 npm run test
 npm run build
 ```
+
+## Admissions Email Delivery
+
+Applicant magic links are sent by Supabase Auth, so production magic-link delivery must be configured in the Supabase dashboard with the organisation mailbox as custom SMTP.
+
+For app-sent admissions correspondence, set the `ADMISSIONS_EMAIL_*` variables plus either the `MICROSOFT_GRAPH_*` or `SMTP_*` variables from `.env.example` in `.env.local` or the production secret store. Microsoft Graph is preferred when Microsoft 365 security policy blocks password-based SMTP. Keep `ADMISSIONS_EMAIL_ENABLED=false` until delivery has been tested.
+
+To send mailbox test messages:
+
+```bash
+npm run email:test -- --to internal@example.org,gmail@example.com,user@nhs.net
+```
+
+The admissions workflow sends offer/rejection and offer-response confirmation emails only when `ADMISSIONS_EMAIL_ENABLED=true`; otherwise correspondence remains logged without delivery. The standalone `email:test` command can test Graph or SMTP from `.env.local` without enabling workflow sends.
