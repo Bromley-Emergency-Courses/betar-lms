@@ -21,6 +21,7 @@ import { requirePermission } from "@/lib/auth";
 import { getAppData } from "@/lib/seed";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { CourseModule, ModuleOffering, Student, Term } from "@/lib/types";
+import { ReturningStudentsPrototype } from "./returning-students-prototype";
 
 export const dynamic = "force-dynamic";
 
@@ -833,6 +834,18 @@ export default async function AdmissionsPreferencesPage({
     context.terms.find((term) => term.id === params.term) ??
     context.terms.find((term) => term.status === "published") ??
     context.terms[0];
+
+  if (process.env.NODE_ENV !== "production" && params.variant && ["A", "B", "C"].includes(params.variant)) {
+    return (
+      <AppShell
+        title="Returning-student admissions"
+        subtitle="Plan, contact, and confirm future-term study"
+        actions={<span className="status-pill warning">Prototype · read only</span>}
+      >
+        <ReturningStudentsPrototype variant={params.variant} />
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell
