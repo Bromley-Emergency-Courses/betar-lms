@@ -5,16 +5,29 @@ import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { requirePermission } from "@/lib/auth";
 import { getLmsData } from "@/lib/lms-data";
+import { AdmissionsOverviewPrototype } from "./admissions-overview-prototype";
 
 export default async function AdmissionsPage({
   searchParams
 }: {
-  searchParams: Promise<{ mode?: string; invited?: string }>;
+  searchParams: Promise<{ mode?: string; invited?: string; variant?: string }>;
 }) {
   await requirePermission("manage_admissions");
-  const { mode, invited } = await searchParams;
+  const { mode, invited, variant } = await searchParams;
   const editMode = mode === "edit";
   const data = await getLmsData();
+
+  if (process.env.NODE_ENV !== "production" && variant && ["A", "B", "C"].includes(variant)) {
+    return (
+      <AppShell
+        title="Admissions"
+        subtitle="New and returning student workflows"
+        actions={<span className="status-pill warning">Prototype · read only</span>}
+      >
+        <AdmissionsOverviewPrototype variant={variant} />
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell
