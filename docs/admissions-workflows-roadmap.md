@@ -1,15 +1,20 @@
 # Admissions and Applications Workflows Roadmap
 
-Last updated: 2026-07-31
+Last updated: 2026-08-08
 
 This document is the durable handoff record for the admissions, application, registration, and student portal work. Keep it updated when branches are merged so new Conductor workspaces created from `origin/main` can pick up the current state without needing prior chat context.
 
-Use `docs/admissions-workflows-spec.md` as the developer-facing implementation spec. This roadmap tracks status, decisions, and implementation history.
+Use `docs/admissions-workflows-spec.md` for the full admissions/application history and `docs/admissions-staff-workflows-implementation-spec.md` for the approved staff-workflow redesign contract. This roadmap tracks status, decisions, and implementation history.
 
 The workspace-local companion file is `.context/admissions-workflows-handoff.md`. Use that for branch-specific notes, partial work, and immediate next steps.
 
 ## Current Direction
 
+- Replace the current test-only staff admissions and module-preference UX with one stable Admissions overview and separate table-first New students and Returning students workspaces.
+- Treat `docs/admissions-staff-workflows-implementation-spec.md` as authoritative wherever older roadmap or phase text conflicts with the validated redesign.
+- Implement in internal slices but activate the overview and both complete workspaces through one coordinated feature-flagged cutover.
+- Preserve production people, students, terms, modules, offerings, enrolments, awarded credits, attendance, assessments, and other academic data; no production admissions or module-preference records require migration.
+- Run email in server-enforced allowlisted pilot mode against clearly marked fake applicant/student records first. Live recipients require successful full new-applicant and returning-student journeys, product-owner approval of the workflow and application form, and a deliberate configuration change.
 - Extend the existing BETAR LMS rather than creating a separate admissions system.
 - Keep one Supabase/Postgres system of record so accepted applicants can become students without sync jobs or re-keying.
 - Build the first release around the core admissions journey: enquiry/application, review, offer, acceptance, registration, and conversion to student.
@@ -18,9 +23,34 @@ The workspace-local companion file is `.context/admissions-workflows-handoff.md`
 - Defer expanded finance work until after the admissions and registration flow is reliable. Existing term finance records can continue to be used in the interim.
 - Treat security, RLS, private storage, audit logging, and retention decisions as foundation work, not later polish.
 
+## Staff Admissions UX Redesign
+
+Status: `Design complete; implementation not started`
+
+Authoritative contract: `docs/admissions-staff-workflows-implementation-spec.md`
+
+Validated prototypes:
+
+- New students Variant A operations table: `prototype/new-student-admissions-workspace` at `2c37c97b52a1e1bc7c6bb26eaf47dac4e2182a1e`.
+- Returning students Variant A cycle operations table: `prototype/returning-student-admissions-workspace` at `1d2419dc4e22960574b93e56f9fabfcf6a4729bb`.
+- Shared overview Variant A two-workspace gateway: `prototype/shared-admissions-overview-navigation` at `1ba35c3c8353bc6bca14e2e94d099144fda7d3fc`.
+
+Implementation sequence:
+
+- [ ] Add authoritative source-state projections and workflow guards; remove normal direct stage editing.
+- [ ] Add structured correction requests, returning cycles/participants, operational batches, and log-first correspondence foundations.
+- [ ] Build the shared Admissions overview, local navigation, table/query/selection primitives, drawers, and durable batch results.
+- [ ] Build the complete new-student operations workspace and full-record actions.
+- [ ] Build the complete returning-student cycle workspace, advisory demand, confirmations, study-break handling, and reactivation exceptions.
+- [ ] Replace direct returning-student magic-link sends with per-recipient correspondence attempts and background delivery.
+- [ ] Pass WCAG 2.2 AA, permission, protected-data regression, idempotency, 1,000-record, and 500-recipient-batch acceptance.
+- [ ] Activate the three staff surfaces together behind a feature flag in non-production, then production.
+- [ ] Complete allowlisted fake-record new-applicant and returning-student pilots and obtain deliberate product-owner approval.
+- [ ] Enable genuine production recipients through a separate deliberate configuration change.
+
 ## Current Application Form Adjustment
 
-The expanded application draft-save slice and transactional final submit/declaration slice are implemented. The remaining application-form work should add repeatable qualification rows if needed and document upload slots before staff review/offers are built.
+The core new-applicant flow is implemented from enquiry through application, staff review, offer response, registration, and conversion to student. The remaining application-form work is mostly refinement: repeatable qualification rows if needed, final business-field confirmation, live email deliverability checks, and the deferred finance/compliance pieces.
 
 Required changes:
 
@@ -33,12 +63,12 @@ Required changes:
 - Selected offerings do not reserve places, create enrolments, or create finance records.
 - Optional disability/support-needs information is stored separately from general application fields with restricted access and redacted audit metadata.
 - Final submit is separate from draft save. It validates the saved application snapshot and selected offerings, locks the application by setting `submitted`, updates the lead stage, stores declaration acceptance metadata, and writes `application.submitted` transactionally.
-- Application evidence uploads are implemented as applicant-owned slots linked to `managed_files`. Required qualification and professional-registration evidence block final submission when missing or rejected; staff verification remains a later Phase 1 slice.
+- Application evidence uploads are implemented as applicant-owned slots linked to `managed_files`. Required qualification and professional-registration evidence block final submission when missing or rejected; staff can open evidence files and verify, reject, or reset document slots from the review screen.
 - Staff application review is implemented as a staff-only admissions/admin screen for submitted applications. It shows applicant/application detail, intended start term, selected module offerings, POCUS answers, uploaded evidence status, and separated restricted support-needs information; disclosed support-needs views are audit logged with redacted metadata; staff can verify/reject/reset document slots with audit events and record review notes plus decision readiness without issuing offers/rejections or touching registration/email flows.
 - Offer/rejection decision foundation is implemented from the staff review screen. Admissions admins can record an offer or rejection only after review readiness, with a required decision reason, offer/rejection records, one or two offer module snapshots, `offer.issued` or `application.rejected` audit events, and correspondence-log/template records. Raw staff decision/rejection reasons remain admin-only; email delivery is attempted only when configured/enabled, and `last_contacted_on` is not marked by suppressed correspondence. Registration, enrolments, finance rows, and production scheduler remain separate slices.
-- Applicant offer accept/decline is implemented in the portal. Applicants can view their current offer after magic-link login, accept or decline an issued unexpired offer, and the system records response timestamp plus auth user, person, IP, and user-agent metadata. Acceptance moves the lead to `accepted` and shows registration as the next step without building registration. Decline moves the lead to `offer_declined`. Both actions write audit events and correspondence-log records, with confirmation email delivery attempted only when configured/enabled.
+- Applicant offer accept/decline is implemented in the portal. Applicants can view their current offer after magic-link login, accept or decline an issued unexpired offer, and the system records response timestamp plus auth user, person, IP, and user-agent metadata. Acceptance moves the lead to `accepted` and exposes registration as the next step. Decline moves the lead to `offer_declined`. Both actions write audit events and correspondence-log records, with confirmation email delivery attempted only when configured/enabled.
 - Offer deadline, reminder, and lapse foundations are implemented without a production scheduler. New issued offers receive a future deadline, defaulting to 14 days when staff leave the deadline blank; applicants cannot respond after the deadline or once offers are accepted, declined, withdrawn, or lapsed. Admissions admins can manually run `process_application_offer_deadline_workflow(...)` from the staff review/admin screen to log one reminder eligibility record for issued offers approaching deadline and to mark overdue issued offers as `lapsed`, move the lead to `offer_lapsed`, write audit events, create correspondence logs, and attempt email delivery when configured/enabled. Staff and portal UIs show deadlines, deadline-passed state, reminder logging, and lapsed state.
-- Registration wizard foundation is implemented for accepted offers. Authenticated applicants with an accepted offer can start `/portal/registration`, which creates an in-progress registration snapshot, confirms the accepted course/modules with immutable displayed module/term/price/capacity snapshot fields, captures versioned personal-detail snapshots, supports draft save, uploads required identity and qualification evidence plus optional student ID photo into private managed storage, reads the active registration T&C version from the database, saves the current draft fields before final submit, records T&C version/hash/person/auth user/timestamp/IP metadata on final submission, writes registration/document/T&C audit events, and shows portal states for not started, in progress, and submitted. Staff review/admin pages show registration status for accepted applicants. This slice does not call conversion or create student, enrolment, finance, invoice, scheduler, or production email rows.
+- Registration wizard foundation is implemented for accepted offers. Authenticated applicants with an accepted offer can start `/portal/registration`, which creates an in-progress registration snapshot, confirms the accepted course/modules with immutable displayed module/term/price/capacity snapshot fields, captures versioned personal-detail snapshots, supports draft save, uploads required identity and qualification evidence plus optional student ID photo into private managed storage, reads the active registration T&C version from the database, saves the current draft fields before final submit, records T&C version/hash/person/auth user/timestamp/IP metadata on final submission, writes registration/document/T&C audit events, and shows portal states for not started, in progress, submitted, lapsed, reopened, and complete. Staff review/admin pages show registration status for accepted applicants and expose submitted-registration conversion controls. Finance, invoice/payment, scheduler, and production registration-email work remain separate.
 - Submitted registration conversion is implemented for admissions admins. Staff can convert only submitted registrations that pass required field, T&C, required-document, accepted-offer, and confirmed-offering checks; conversion stages/uses `admissions_conversion_requests`, creates or activates one linked `students` row for the existing `person`, creates planned initial `enrolments` from the accepted offer registration snapshot, links conversion metadata back to registration/application/offer/lead, marks the lead `registered`, promotes the portal identity to student, writes `registration.converted_to_student`, and is idempotent for already-complete registrations. The old accepted-lead direct conversion UI/action is disabled, and authenticated staff use the submitted-registration wrapper rather than the lower-level conversion RPC directly. This conversion slice deliberately does not create finance rows, invoices, payments, emails, or capacity/waitlist changes.
 - Registration lapsed/reopened workflow is implemented for admissions admins. Registrations now have an interim 14-day registration deadline, a manual staff/admin deadline processor marks overdue in-progress or submitted-but-not-converted registrations as `lapsed`, moves the lead to `registration_lapsed`, writes `registration.lapsed` audit events, stores lapsed actor/timestamp/reason/correspondence-log metadata, and creates suppressed `registration_lapsed_notice` correspondence logs. Admins can reopen only lapsed, unconverted registrations with a mandatory reason and optional new deadline; reopening records actor/timestamp/reason/correspondence-log metadata, writes `registration.reopened`, creates suppressed `registration_reopened_notice` logs, clears current submission/T&C/module-confirmation fields, and returns the lead/registration to editable registration-in-progress state for applicant resubmission. Lapsed registrations cannot be submitted or converted unless reopened, and complete/converted registrations cannot be lapsed or reopened. Applicant portal and staff review screens show deadlines, lapsed state, and reopened state. This slice does not send real emails, create finance rows/invoices/payments, alter already-created enrolments, or build Phase 3 module preference windows.
 - Termly module preference window foundation is implemented for continuing students. Admissions admins can create draft windows for published/active terms, configure available existing `module_offerings` from the selected term, open/close/confirm the window lifecycle, see submitted/missing active-student preferences from `/admissions/preferences`, and send secure portal preference links to missing active students for an open window. Student portal users with `actor_type = student` can submit 0, 1, or 2 explicitly ordered first/second preferences from `/portal/module-preferences` only while a window is open and within its date range; repeated submissions update the same student/window row; selected offerings must be configured on that window and tied to the same term with active modules. The portal resolves active-student eligibility through a narrow security-definer helper that returns only the current student ID, without exposing the full `students` row to portal RLS. This slice writes `module_preference_window.created/opened/closed/confirmed` and `module_preference.submitted/updated` audit events, but does not create enrolments, finance records, waitlists, cancellation actions, or low-uptake workflows.
@@ -137,22 +167,21 @@ Goal: accepted applicants complete registration and become BETAR student records
 - [ ] Generate expected finance rows using existing finance model.
 - [x] Handle registration lapsed/reopened states.
 
-## Phase 3: Termly Module Preferences
+## Phase 3: Returning-Student Cycles
 
-Status: `In progress`
+Status: `Legacy test foundation implemented; replacement not started`
 
-Goal: replace termly Google Forms/email chasing for continuing students.
+Goal: replace termly Google Forms/email chasing and the test-only module-preference window with the returning-student cycle in `docs/admissions-staff-workflows-implementation-spec.md`.
 
-- [x] Staff create preference windows per term.
-- [x] Staff publish offered module list from existing module offerings.
-- [x] Students choose 0, 1, or 2 modules.
-- [x] Capacity-safe selection with database row locking.
-- [ ] Waitlist support if enabled for an offering.
-- [ ] Mandatory module rule with staff override.
-- [x] Staff-triggered preference link emails for missing responders in an open preference window.
-- [ ] Follow-up reminder emails for preference non-responders after the first preference link send.
-- [ ] Staff cancellation flow for low-uptake offerings.
-- [ ] Confirm-enrolments action creates enrolments and expected finance rows.
+- [x] Test-only preference-window, portal-submission, capacity, and link-email foundations exist and may inform implementation.
+- [ ] Target the single upcoming Published term and use Setup, Collecting responses, Review and confirmation, and Complete phases.
+- [ ] Snapshot an explicit PGCert participant set from chosen active/deferred/interrupted groups plus reasoned individual changes.
+- [ ] Collect one or two unranked provisional selections or an explicit study-break response; reject empty responses.
+- [ ] Make planned capacity advisory and expose module demand without blocking valid learner responses.
+- [ ] Confirm valid selections into idempotent planned enrolments, with explicit above-capacity acknowledgement where needed.
+- [ ] Resolve study breaks, no responses, additional study, reactivation, and source-data exceptions explicitly.
+- [ ] Support contextual individual, selected, and all-matching communications/actions through durable background batches.
+- [ ] Remove the test-only ranked-preference, hard-capacity, active-only, and lifecycle-only confirmation implementation after replacement acceptance.
 
 ## Phase 4: Expanded Finance
 
@@ -209,6 +238,10 @@ Goal: provide operational evidence for GDPR, retention, DSARs, and university da
 | 2026-07-23 | Production applicant email must use organisation-controlled Microsoft 365/Outlook SMTP, not the default Supabase email sender. | Supabase's default sender is rate-limited and best-effort; admissions may need hundreds of application invitations and later offer/reminder emails. An `@gmail.com` company mailbox is not preferred for production because it looks less official and is less controlled than the organisation domain. |
 | 2026-07-28 | Use a 14-day offer deadline default for issued offers until the business confirms a different default. | Issued offers need a valid future deadline so applicant responses, reminder eligibility, and lapse handling have a clear source of truth. |
 | 2026-08-05 | Keep portal module/offering RLS checks behind security-definer helper functions when they need to inspect related module catalogue tables. | Direct module/offering policies that query each other can trigger Postgres infinite-recursion errors in production, especially when application, offer, registration, and module-preference portal policies overlap. |
+| 2026-08-08 | Use separate table-first staff workspaces for new-student and returning-student admissions under a stable overview. | The validated Variant A prototypes keep stages, workload, filters, and safe actions visible while scaling to hundreds of records. |
+| 2026-08-08 | Replace normal direct stage editing with derived stages and guarded workflow actions. | Staff actions must not fabricate offer, registration, or completion states without their authoritative records. |
+| 2026-08-08 | Replace test-only ranked module preferences with explicit returning-student cycles and unranked provisional selections. | Membership, study breaks, flexible demand, and planned-enrolment confirmation require an auditable participant workflow rather than a generic preference window. |
+| 2026-08-08 | Use coordinated staff-UX cutover and an allowlisted fake-record email pilot before deliberate live enablement. | There is no production admissions workflow data to migrate, while protected academic data and genuine recipients require a controlled safety boundary. |
 
 ## Open Decisions
 
