@@ -10,6 +10,7 @@ import {
   isIssuedApplicationInvitation,
   parseStaffInvitationForm
 } from "@/lib/application-invitations";
+import { parseAdmissionLeadAdministrativeDetails } from "@/lib/admission-lead-administration";
 import { requirePermission } from "@/lib/auth";
 import { correspondenceEmailFailed } from "@/lib/email-delivery";
 import {
@@ -491,68 +492,23 @@ export async function updateStudentLifecycle(formData: FormData) {
   revalidatePath("/admissions");
 }
 
-const leadStageSchema = z.enum([
-  "interest",
-  "application_invited",
-  "submitted",
-  "reviewed",
-  "offered",
-  "rejected",
-  "accepted",
-  "registration_in_progress",
-  "registration_lapsed",
-  "registered",
-  "offer_declined",
-  "offer_lapsed",
-  "archived"
-]);
-
-function moduleInterestIds(formData: FormData): string[] {
-  return formData
-    .getAll("module_interest_ids")
-    .map((entryValue) => String(entryValue).trim())
-    .filter(Boolean);
-}
-
-const admissionLeadSchema = z.object({
-  first_name: z.string().min(1).max(80),
-  last_name: z.string().min(1).max(80),
-  email: z.string().email(),
-  phone: z.string().nullable(),
-  stage: leadStageSchema,
-  programme: z.enum(["pgcert", "microcredential"]),
-  module_interest_ids: z.array(z.string().uuid()),
-  source: z.string().nullable(),
-  last_contacted_on: z.string().nullable(),
-  next_action_on: z.string().nullable(),
-  notes: z.string().nullable(),
-  archived: z.boolean()
-});
-
-function parseAdmissionLeadForm(formData: FormData) {
-  const stage = (value(formData, "stage") || "interest") as z.infer<typeof leadStageSchema>;
-  return admissionLeadSchema.parse({
-    first_name: value(formData, "first_name"),
-    last_name: value(formData, "last_name"),
-    email: value(formData, "email"),
-    phone: optionalValue(formData, "phone"),
-    stage,
-    programme: value(formData, "programme") || "pgcert",
-    module_interest_ids: moduleInterestIds(formData),
-    source: optionalValue(formData, "source"),
-    last_contacted_on: optionalValue(formData, "last_contacted_on"),
-    next_action_on: optionalValue(formData, "next_action_on"),
-    notes: optionalValue(formData, "notes"),
-    archived: stage === "archived" || formData.get("archived") === "on"
-  });
-}
-
 export async function createAdmissionLead(formData: FormData) {
   await requirePermission("manage_admissions");
-  const parsed = parseAdmissionLeadForm(formData);
+  const parsed = parseAdmissionLeadAdministrativeDetails(formData);
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("admission_leads").insert(parsed);
+  const { error } = await supabase.rpc("record_staff_admission_enquiry", {
+    p_first_name: parsed.first_name,
+    p_last_name: parsed.last_name,
+    p_email: parsed.email,
+    p_phone: parsed.phone,
+    p_programme: parsed.programme,
+    p_module_interest_ids: parsed.module_interest_ids,
+    p_source: parsed.source,
+    p_last_contacted_on: parsed.last_contacted_on,
+    p_next_action_on: parsed.next_action_on,
+    p_notes: parsed.notes
+  });
   if (error) {
     throw new Error(error.message);
   }
@@ -564,10 +520,22 @@ export async function createAdmissionLead(formData: FormData) {
 export async function updateAdmissionLead(formData: FormData) {
   await requirePermission("manage_admissions");
   const leadId = idSchema.parse(value(formData, "lead_id"));
-  const parsed = parseAdmissionLeadForm(formData);
+  const parsed = parseAdmissionLeadAdministrativeDetails(formData);
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("admission_leads").update(parsed).eq("id", leadId);
+  const { error } = await supabase.rpc("update_admission_lead_administrative_details", {
+    p_lead_id: leadId,
+    p_first_name: parsed.first_name,
+    p_last_name: parsed.last_name,
+    p_email: parsed.email,
+    p_phone: parsed.phone,
+    p_programme: parsed.programme,
+    p_module_interest_ids: parsed.module_interest_ids,
+    p_source: parsed.source,
+    p_last_contacted_on: parsed.last_contacted_on,
+    p_next_action_on: parsed.next_action_on,
+    p_notes: parsed.notes
+  });
   if (error) {
     throw new Error(error.message);
   }

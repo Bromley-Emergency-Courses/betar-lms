@@ -1,6 +1,6 @@
 # Admissions and Applications Workflows Roadmap
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 This document is the durable handoff record for the admissions, application, registration, and student portal work. Keep it updated when branches are merged so new Conductor workspaces created from `origin/main` can pick up the current state without needing prior chat context.
 
@@ -37,7 +37,7 @@ Validated prototypes:
 
 Implementation sequence:
 
-- [ ] Add authoritative source-state projections and workflow guards; remove normal direct stage editing.
+- [x] Add authoritative source-state projections and workflow guards; remove normal direct stage editing.
 - [ ] Add structured correction requests, returning cycles/participants, operational batches, and log-first correspondence foundations.
 - [ ] Build the shared Admissions overview, local navigation, table/query/selection primitives, drawers, and durable batch results.
 - [ ] Build the complete new-student operations workspace and full-record actions.
@@ -292,3 +292,4 @@ Add entries here when meaningful code lands.
 | 2026-08-05 | `maseru` workspace | Added Microsoft Graph support to the admissions email provider after Microsoft 365 security defaults blocked password-based SMTP. The app can now send feature-flagged correspondence through Graph `sendMail`, the standalone `npm run email:test` command auto-selects Graph when Graph env vars are present, and local Graph token validation passed without sending email. Live test recipients, workflow enablement, magic-link Graph delivery, and batch reminder/lapse delivery remain pending. | `npm run lint`; `npm run test`; `npm run build`; Graph token check passed. |
 | 2026-08-05 | `maseru` workspace | Connected Microsoft Graph delivery to live workflow surfaces behind `ADMISSIONS_EMAIL_ENABLED`: staff application invitations and applicant sign-in links now use Supabase-generated magic links sent by the app through Graph; offer/rejection, offer accept/decline confirmations, and offer deadline reminder/lapse correspondence attempt delivery through the shared provider; admissions admins can send preference-window portal links to missing active students from an open module preference window. Production secret deployment and controlled live workflow tests remain pending; registration lapse/reopen and follow-up preference reminder delivery remain future slices. | `npm run lint`; `npm run test`; `npm run build`; `npm audit --omit=dev`. |
 | 2026-08-05 | `maseru` workspace | Added a production database follow-up migration for module catalogue RLS recursion after Vercel logs showed `course_modules`/`module_offerings` infinite-recursion errors and missing `students.person_id` on the live Supabase schema. The new migration replaces cross-referencing module/offering portal policies with equivalent security-definer helper-function policies; production still needs the full pending Supabase migration set applied in order. | `npm run lint`; `npm run test`; `npm run build`. |
+| 2026-08-09 | `12amathew/review-admissions-workflow` | Started the staff UX implementation with a seven-stage new-student source projection, inconsistency and primary-action derivation, guarded/audited staff enquiry administration RPCs, removal of the generic stage control, and authenticated direct-write revocation for admission leads. | `npm run lint`; `npm run test` (20 files, 153 tests); `npm run build`; executable PGlite migration/projection/RPC coverage. |
