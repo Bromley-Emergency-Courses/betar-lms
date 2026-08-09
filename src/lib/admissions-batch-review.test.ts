@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  admissionsBatchPreviewBlockingMessage,
   admissionsBatchReviewRequestSchema,
   batchScopeForSelection,
   newStudentBatchEligibility
@@ -71,5 +72,30 @@ describe("admissions batch review", () => {
     expect(batchScopeForSelection(false, 1)).toBe("one");
     expect(batchScopeForSelection(false, 2)).toBe("selected");
     expect(batchScopeForSelection(true, 500)).toBe("all_matching");
+  });
+
+  it("explains why a zero-eligible invitation batch cannot be queued", () => {
+    expect(admissionsBatchPreviewBlockingMessage({
+      workspace: "new_students",
+      action: "invite_application",
+      scope: "selected",
+      reviewedCount: 2,
+      eligibleCount: 0,
+      excludedCount: 2,
+      targets: [
+        { entity_type: "admission_lead", entity_id: enquiry.admissionLeadId, eligible: false, exclusion_reason: "Email delivery is disabled.", source_snapshot: {} },
+        { entity_type: "admission_lead", entity_id: "22222222-2222-4222-8222-222222222222", eligible: false, exclusion_reason: "Email delivery is disabled.", source_snapshot: {} }
+      ]
+    })).toMatch(/Email delivery is disabled/);
+
+    expect(admissionsBatchPreviewBlockingMessage({
+      workspace: "new_students",
+      action: "close_abandoned",
+      scope: "one",
+      reviewedCount: 1,
+      eligibleCount: 1,
+      excludedCount: 0,
+      targets: [{ entity_type: "admission_lead", entity_id: enquiry.admissionLeadId, eligible: true, source_snapshot: {} }]
+    })).toBeNull();
   });
 });

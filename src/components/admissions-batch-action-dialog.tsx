@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import styles from "@/components/admissions-workspace.module.css";
 import {
+  admissionsBatchPreviewBlockingMessage,
   batchScopeForSelection,
   type AdmissionsBatchPreview,
   type ImplementedNewStudentBatchAction
@@ -148,6 +149,7 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
 
   const matchingTooLarge = (allMatching ? total : selectedIds.length) > 500;
   const representativeTarget = preview?.targets.find((target) => target.eligible);
+  const previewBlockingMessage = preview ? admissionsBatchPreviewBlockingMessage(preview) : null;
   return (
     <>
       <button className={styles.secondaryButton} type="button" onClick={() => open("invite_application")} disabled={matchingTooLarge}>
@@ -210,6 +212,12 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
                       {preview.excludedCount > 8 ? <p>And {preview.excludedCount - 8} more excluded records in the durable results.</p> : null}
                     </div>
                   ) : null}
+                  {previewBlockingMessage ? (
+                    <div className={styles.dialogError} role="alert" id="batch-preview-blocked">
+                      <strong>Batch cannot be queued.</strong>
+                      <p>{previewBlockingMessage}</p>
+                    </div>
+                  ) : null}
                   <p className={styles.dialogHelp}>Eligibility is checked again as each record executes. Newly invalid records will be excluded, not forced through.</p>
                 </div>
               ) : null}
@@ -220,7 +228,9 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
               {!preview ? (
                 <button className={styles.primaryLink} type="button" onClick={review} disabled={busy}>{busy ? "Reviewing…" : "Preview eligible records"}</button>
               ) : (
-                <button className={styles.primaryLink} type="button" onClick={confirm} disabled={busy || preview.eligibleCount === 0}>{busy ? "Queueing…" : actionContent[action].confirm}</button>
+                <button className={styles.primaryLink} type="button" onClick={confirm} disabled={busy || preview.eligibleCount === 0} aria-describedby={previewBlockingMessage ? "batch-preview-blocked" : undefined}>
+                  {busy ? "Queueing…" : preview.eligibleCount === 0 ? "No eligible records" : actionContent[action].confirm}
+                </button>
               )}
             </div>
           </section>

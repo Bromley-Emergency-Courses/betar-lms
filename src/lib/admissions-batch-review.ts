@@ -61,6 +61,19 @@ export interface AdmissionsBatchPreview {
   targets: AdmissionsBatchReviewedTarget[];
 }
 
+export function admissionsBatchPreviewBlockingMessage(preview: AdmissionsBatchPreview): string | null {
+  if (preview.eligibleCount > 0) return null;
+
+  const emailDisabled = preview.action === "invite_application"
+    && preview.targets.length > 0
+    && preview.targets.every((target) => target.exclusion_reason === "Email delivery is disabled.");
+  if (emailDisabled) {
+    return "Email delivery is disabled, so this invitation batch cannot be queued. Enable and configure pilot delivery, then preview the records again.";
+  }
+
+  return "No reviewed records are eligible for this action. Check the exclusion reasons, adjust the selection or filters, then preview again.";
+}
+
 export function newStudentBatchEligibility(
   action: ImplementedNewStudentBatchAction,
   item: StaffNewStudentAdmissionsOperation
