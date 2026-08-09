@@ -19,11 +19,27 @@ import {
   parseRecordStaffApplicationReviewForm,
   parseVerifyApplicationDocumentForm
 } from "@/lib/application-review";
+import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
 import { requirePermission } from "@/lib/auth";
 import { correspondenceEmailFailed, sendCorrespondenceLogEmail } from "@/lib/email-delivery";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
-function reviewRedirect(applicationId: string, result: string): never {
+function admissionIdFromForm(formData: FormData): string | null {
+  const value = String(formData.get("admission_id") ?? "");
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : null;
+}
+
+function revalidateApplicantRecord(formData: FormData) {
+  const admissionId = admissionIdFromForm(formData);
+  revalidatePath("/admissions/new-students");
+  if (admissionId) revalidatePath(`/admissions/new-students/${admissionId}`);
+}
+
+function reviewRedirect(applicationId: string, result: string, formData: FormData): never {
+  const admissionId = admissionIdFromForm(formData);
+  if (admissionsStaffWorkspacesEnabled() && admissionId) {
+    redirect(`/admissions/new-students/${admissionId}?${result}=1#application`);
+  }
   redirect(`/admissions/reviews?application=${applicationId}&${result}=1#application-${applicationId}`);
 }
 
@@ -41,7 +57,7 @@ export async function verifyApplicationDocument(formData: FormData) {
   const parsed = parseVerifyApplicationDocumentForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "document_demo");
+    reviewRedirect(parsed.application_id, "document_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -57,7 +73,8 @@ export async function verifyApplicationDocument(formData: FormData) {
 
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
-  reviewRedirect(parsed.application_id, "document_verified");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "document_verified", formData);
 }
 
 export async function recordStaffApplicationReview(formData: FormData) {
@@ -65,7 +82,7 @@ export async function recordStaffApplicationReview(formData: FormData) {
   const parsed = parseRecordStaffApplicationReviewForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "review_demo");
+    reviewRedirect(parsed.application_id, "review_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -82,7 +99,8 @@ export async function recordStaffApplicationReview(formData: FormData) {
 
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
-  reviewRedirect(parsed.application_id, "review_saved");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "review_saved", formData);
 }
 
 export async function requestApplicationCorrections(formData: FormData) {
@@ -90,7 +108,7 @@ export async function requestApplicationCorrections(formData: FormData) {
   const parsed = parseRequestApplicationCorrectionsForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "correction_demo");
+    reviewRedirect(parsed.application_id, "correction_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -108,8 +126,8 @@ export async function requestApplicationCorrections(formData: FormData) {
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   revalidatePath("/apply/application");
-
-  reviewRedirect(parsed.application_id, "correction_requested");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "correction_requested", formData);
 }
 
 export async function reviewApplicationCorrections(formData: FormData) {
@@ -117,7 +135,7 @@ export async function reviewApplicationCorrections(formData: FormData) {
   const parsed = parseReviewApplicationCorrectionsForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "correction_review_demo");
+    reviewRedirect(parsed.application_id, "correction_review_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -133,7 +151,8 @@ export async function reviewApplicationCorrections(formData: FormData) {
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   revalidatePath("/apply/application");
-  reviewRedirect(parsed.application_id, "correction_reviewed");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "correction_reviewed", formData);
 }
 
 export async function cancelApplicationCorrection(formData: FormData) {
@@ -141,7 +160,7 @@ export async function cancelApplicationCorrection(formData: FormData) {
   const parsed = parseCancelApplicationCorrectionForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "correction_cancel_demo");
+    reviewRedirect(parsed.application_id, "correction_cancel_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -157,7 +176,8 @@ export async function cancelApplicationCorrection(formData: FormData) {
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   revalidatePath("/apply/application");
-  reviewRedirect(parsed.application_id, "correction_cancelled");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "correction_cancelled", formData);
 }
 
 export async function recordApplicationEvidenceOverride(formData: FormData) {
@@ -165,7 +185,7 @@ export async function recordApplicationEvidenceOverride(formData: FormData) {
   const parsed = parseApplicationEvidenceOverrideForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "evidence_override_demo");
+    reviewRedirect(parsed.application_id, "evidence_override_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -180,7 +200,8 @@ export async function recordApplicationEvidenceOverride(formData: FormData) {
 
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
-  reviewRedirect(parsed.application_id, "evidence_override_recorded");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "evidence_override_recorded", formData);
 }
 
 export async function recordApplicationDecision(formData: FormData) {
@@ -188,7 +209,7 @@ export async function recordApplicationDecision(formData: FormData) {
   const parsed = parseRecordApplicationDecisionForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "decision_demo");
+    reviewRedirect(parsed.application_id, "decision_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -205,15 +226,16 @@ export async function recordApplicationDecision(formData: FormData) {
 
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
+  revalidateApplicantRecord(formData);
   const correspondenceLogId = correspondenceLogIdFromRpc(data);
   if (correspondenceLogId) {
     const deliveryResult = await sendCorrespondenceLogEmail(correspondenceLogId);
     if (correspondenceEmailFailed(deliveryResult)) {
-      reviewRedirect(parsed.application_id, "decision_email_failed");
+      reviewRedirect(parsed.application_id, "decision_email_failed", formData);
     }
   }
 
-  reviewRedirect(parsed.application_id, "decision_recorded");
+  reviewRedirect(parsed.application_id, "decision_recorded", formData);
 }
 
 export async function processApplicationOfferDeadlineWorkflow(formData: FormData) {
@@ -281,7 +303,7 @@ export async function convertSubmittedAdmissionsRegistration(formData: FormData)
   const parsed = parseConvertSubmittedAdmissionsRegistrationForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "conversion_demo");
+    reviewRedirect(parsed.application_id, "conversion_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -297,7 +319,8 @@ export async function convertSubmittedAdmissionsRegistration(formData: FormData)
   revalidatePath("/admissions");
   revalidatePath("/students");
   revalidatePath("/portal");
-  reviewRedirect(parsed.application_id, "registration_converted");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "registration_converted", formData);
 }
 
 export async function processAdmissionsRegistrationDeadlineWorkflow(formData: FormData) {
@@ -329,7 +352,7 @@ export async function reopenLapsedAdmissionsRegistration(formData: FormData) {
   const parsed = parseReopenLapsedAdmissionsRegistrationForm(formData);
 
   if (!isSupabaseConfigured()) {
-    reviewRedirect(parsed.application_id, "registration_reopened_demo");
+    reviewRedirect(parsed.application_id, "registration_reopened_demo", formData);
   }
 
   const supabase = await createSupabaseServerClient();
@@ -347,5 +370,6 @@ export async function reopenLapsedAdmissionsRegistration(formData: FormData) {
   revalidatePath("/admissions");
   revalidatePath("/portal");
   revalidatePath("/portal/registration");
-  reviewRedirect(parsed.application_id, "registration_reopened");
+  revalidateApplicantRecord(formData);
+  reviewRedirect(parsed.application_id, "registration_reopened", formData);
 }

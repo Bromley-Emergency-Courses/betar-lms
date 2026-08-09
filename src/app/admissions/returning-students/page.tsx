@@ -9,6 +9,8 @@ import { parseReturningStudentWorkspaceQuery, plainLanguageAdmissionsLabel } fro
 import { getAdmissionsOverviewData, getReturningStudentWorkspacePage } from "@/lib/admissions-workspace-data";
 import { requirePermission } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export default async function ReturningStudentsAdmissionsPage({
   searchParams
 }: {

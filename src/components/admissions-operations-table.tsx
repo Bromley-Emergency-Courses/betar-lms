@@ -79,11 +79,9 @@ function NewStudentDrawer({ item }: { item: StaffNewStudentAdmissionsOperation }
         <p>Offer: <strong>{plainLanguageAdmissionsLabel(item.offerStatus ?? "not_started")}</strong></p>
         <p>Registration: <strong>{plainLanguageAdmissionsLabel(item.registrationStatus ?? "not_started")}</strong></p>
       </section>
-      {item.applicationId ? (
-        <Link className={styles.primaryLink} href={`/admissions/reviews#application-${item.applicationId}`}>
-          Open full application record <ArrowRight size={13} />
-        </Link>
-      ) : null}
+      <Link className={styles.primaryLink} href={`/admissions/new-students/${item.admissionLeadId}`}>
+        Open full admissions record <ArrowRight size={13} />
+      </Link>
     </>
   );
 }

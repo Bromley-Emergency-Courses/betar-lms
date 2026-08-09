@@ -11,6 +11,7 @@ import {
   parseStaffInvitationForm
 } from "@/lib/application-invitations";
 import { parseAdmissionLeadAdministrativeDetails } from "@/lib/admission-lead-administration";
+import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
 import { requirePermission } from "@/lib/auth";
 import { correspondenceEmailFailed } from "@/lib/email-delivery";
 import {
@@ -29,6 +30,13 @@ import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
+}
+
+function admissionLeadRedirect(leadId: string, result: string): never {
+  if (admissionsStaffWorkspacesEnabled()) {
+    redirect(`/admissions/new-students/${leadId}?${result}`);
+  }
+  redirect(`/admissions?mode=edit&${result}`);
 }
 
 function optionalValue(formData: FormData, key: string): string | null {
@@ -497,7 +505,7 @@ export async function createAdmissionLead(formData: FormData) {
   const parsed = parseAdmissionLeadAdministrativeDetails(formData);
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.rpc("record_staff_admission_enquiry", {
+  const { data, error } = await supabase.rpc("record_staff_admission_enquiry", {
     p_first_name: parsed.first_name,
     p_last_name: parsed.last_name,
     p_email: parsed.email,
@@ -514,6 +522,10 @@ export async function createAdmissionLead(formData: FormData) {
   }
 
   revalidatePath("/admissions");
+  revalidatePath("/admissions/new-students");
+  if (admissionsStaffWorkspacesEnabled() && typeof data === "string" && idSchema.safeParse(data).success) {
+    redirect(`/admissions/new-students/${data}?created=1`);
+  }
   redirect("/admissions?mode=edit");
 }
 
@@ -541,14 +553,17 @@ export async function updateAdmissionLead(formData: FormData) {
   }
 
   revalidatePath("/admissions");
-  redirect("/admissions?mode=edit");
+  revalidatePath("/admissions/new-students");
+  revalidatePath(`/admissions/new-students/${leadId}`);
+  admissionLeadRedirect(leadId, "updated=1");
 }
 
 export async function inviteAdmissionLeadToApply(formData: FormData) {
   await requirePermission("manage_admissions");
 
   if (!isSupabaseConfigured()) {
-    redirect("/admissions?mode=edit&invited=demo");
+    const leadId = parseStaffInvitationForm(formData).lead_id;
+    admissionLeadRedirect(leadId, "invited=demo");
   }
 
   const parsed = parseStaffInvitationForm(formData);
@@ -580,16 +595,22 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
 
   if (deliveryResult.status === "disabled") {
     revalidatePath("/admissions");
-    redirect("/admissions?mode=edit&invited=email_disabled");
+    revalidatePath("/admissions/new-students");
+    revalidatePath(`/admissions/new-students/${parsed.lead_id}`);
+    admissionLeadRedirect(parsed.lead_id, "invited=email_disabled");
   }
 
   if (correspondenceEmailFailed(deliveryResult)) {
     revalidatePath("/admissions");
-    redirect("/admissions?mode=edit&invited=email_failed");
+    revalidatePath("/admissions/new-students");
+    revalidatePath(`/admissions/new-students/${parsed.lead_id}`);
+    admissionLeadRedirect(parsed.lead_id, "invited=email_failed");
   }
 
   revalidatePath("/admissions");
-  redirect("/admissions?mode=edit&invited=1");
+  revalidatePath("/admissions/new-students");
+  revalidatePath(`/admissions/new-students/${parsed.lead_id}`);
+  admissionLeadRedirect(parsed.lead_id, "invited=1");
 }
 
 export async function convertAdmissionLeadToStudent(formData: FormData) {
