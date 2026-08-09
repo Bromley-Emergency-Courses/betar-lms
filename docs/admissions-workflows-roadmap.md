@@ -39,7 +39,7 @@ Implementation sequence:
 
 - [x] Add authoritative source-state projections and workflow guards; remove normal direct stage editing.
 - [x] Add structured application correction requests, replacement-evidence history, decision evidence guards, and queued log-first correction notices.
-- [ ] Add returning cycles and participant foundations.
+- [x] Add returning cycles and participant foundations.
 - [ ] Add operational batches and the remaining log-first correspondence foundations.
 - [ ] Build the shared Admissions overview, local navigation, table/query/selection primitives, drawers, and durable batch results.
 - [ ] Build the complete new-student operations workspace and full-record actions.
@@ -172,11 +172,12 @@ Goal: accepted applicants complete registration and become BETAR student records
 
 ## Phase 3: Returning-Student Cycles
 
-Status: `Legacy test foundation implemented; replacement not started`
+Status: `Replacement foundation in progress`
 
 Goal: replace termly Google Forms/email chasing and the test-only module-preference window with the returning-student cycle in `docs/admissions-staff-workflows-implementation-spec.md`.
 
 - [x] Test-only preference-window, portal-submission, capacity, and link-email foundations exist and may inform implementation.
+- [x] Add guarded replacement cycle/participant foundations for the single Published target term, selected active/deferred/interrupted groups, formally awarded-credit eligibility, reasoned individual membership, explicit refresh preview/application, immutable opening snapshots, and advisory planned capacity without changing protected academic data.
 - [ ] Target the single upcoming Published term and use Setup, Collecting responses, Review and confirmation, and Complete phases.
 - [ ] Snapshot an explicit PGCert participant set from chosen active/deferred/interrupted groups plus reasoned individual changes.
 - [ ] Collect one or two unranked provisional selections or an explicit study-break response; reject empty responses.
@@ -297,3 +298,4 @@ Add entries here when meaningful code lands.
 | 2026-08-05 | `maseru` workspace | Added a production database follow-up migration for module catalogue RLS recursion after Vercel logs showed `course_modules`/`module_offerings` infinite-recursion errors and missing `students.person_id` on the live Supabase schema. The new migration replaces cross-referencing module/offering portal policies with equivalent security-definer helper-function policies; production still needs the full pending Supabase migration set applied in order. | `npm run lint`; `npm run test`; `npm run build`. |
 | 2026-08-09 | `12amathew/review-admissions-workflow` | Started the staff UX implementation with a seven-stage new-student source projection, inconsistency and primary-action derivation, guarded/audited staff enquiry administration RPCs, removal of the generic stage control, and authenticated direct-write revocation for admission leads. | `npm run lint`; `npm run test` (20 files, 153 tests); `npm run build`; executable PGlite migration/projection/RPC coverage. |
 | 2026-08-09 | `12amathew/review-admissions-workflow` | Added submitted-application correction and evidence-decision foundations: one active structured request with field/document targets and due dates; immutable application, draft, resubmission, instruction, review, and replaced-document history; guarded applicant saves/uploads/resubmission; staff accept/revise/cancel and reasoned evidence-override actions; queued log-first correction notices; and offer-time guards for active corrections and required evidence. Correction delivery stays disabled until the fake-record pilot allowlist exists; dedicated correction panels remain a later UI slice. | `npm run lint`; `npm run test` (22 files, 159 tests); `npm run build`; executable PGlite correction/upload/review/decision coverage. |
+| 2026-08-09 | `12amathew/review-admissions-workflow` | Added returning-student cycle and participant foundations alongside the untouched legacy preference workflow: one upcoming Published target, guarded Setup/Collecting responses/Review and confirmation phases, selected active/deferred/interrupted bulk groups below 60 formally awarded credits, reasoned individual and additional-study inclusion, explicit eligibility and offering refresh, preserved membership events and opening facts, blocking identity/eligibility projection, advisory planned capacity, and no automatic correspondence on phase changes. | `npm run lint`; `npm run test` (24 files, 163 tests); `npm run build`; executable PGlite eligibility/snapshot/lifecycle/protected-data coverage. |
