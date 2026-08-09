@@ -17,15 +17,24 @@ import { plainLanguageAdmissionsLabel } from "@/lib/admissions-workspace";
 export function AdmissionsRecordSubmitButton({
   children,
   danger = false,
-  disabled = false
+  disabled = false,
+  confirmMessage
 }: {
   children: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  confirmMessage?: string;
 }) {
   const { pending } = useFormStatus();
   return (
-    <button className={danger ? styles.dangerButton : styles.primaryButton} type="submit" disabled={disabled || pending}>
+    <button
+      className={danger ? styles.dangerButton : styles.primaryButton}
+      type="submit"
+      disabled={disabled || pending}
+      onClick={(event) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) event.preventDefault();
+      }}
+    >
       {pending ? "Working…" : children}
     </button>
   );

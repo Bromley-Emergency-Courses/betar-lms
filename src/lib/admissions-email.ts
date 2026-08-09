@@ -5,6 +5,8 @@ export const admissionsEmailTemplateKeys = [
   "application_correction_requested",
   "module_preference_window_opened",
   "offer_issued",
+  "offer_reissued",
+  "offer_withdrawn",
   "rejection",
   "offer_deadline_reminder",
   "offer_lapsed_notice",
@@ -360,6 +362,25 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
           ? `Please sign in to the applicant portal to review and respond to your offer by ${deadline}.`
           : "Please sign in to the applicant portal to review and respond to your offer.",
         portal,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "offer_reissued":
+      text = [
+        intro,
+        `Your BETAR offer${offerReference ? ` (${offerReference})` : ""} has been reissued.`,
+        deadline
+          ? `Please sign in to the applicant portal to review and respond by ${deadline}.`
+          : "Please sign in to the applicant portal to review and respond.",
+        portal,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "offer_withdrawn":
+      text = [
+        intro,
+        `Your BETAR offer${offerReference ? ` (${offerReference})` : ""} has been withdrawn by the admissions team.`,
+        "If you need to discuss this outcome, please reply to this email.",
         "Regards,\nBETAR Admissions"
       ].join("\n\n");
       break;

@@ -170,6 +170,39 @@ describe("admissions correspondence rendering", () => {
     expect(rendered.html).toContain("<p>");
   });
 
+  it("renders a reissued offer with its replacement deadline", () => {
+    const rendered = renderCorrespondenceEmail({
+      templateKey: "offer_reissued",
+      recipientName: "Asha Patel",
+      renderedSubject: "Your BETAR offer has been reissued",
+      appUrl: "https://lms.example.org",
+      metadata: {
+        offer_reference: "BETAR-2026-ABC123",
+        deadline_at: "2026-09-01T12:00:00Z"
+      }
+    });
+
+    expect(rendered.text).toContain("has been reissued");
+    expect(rendered.text).toContain("1 September 2026");
+    expect(rendered.text).toContain("https://lms.example.org/portal");
+  });
+
+  it("renders an offer withdrawal without exposing its internal reason", () => {
+    const rendered = renderCorrespondenceEmail({
+      templateKey: "offer_withdrawn",
+      recipientName: "Asha Patel",
+      renderedSubject: "Your BETAR offer has been withdrawn",
+      metadata: {
+        offer_reference: "BETAR-2026-ABC123",
+        internal_reason: "Sensitive internal context"
+      }
+    });
+
+    expect(rendered.text).toContain("has been withdrawn");
+    expect(rendered.text).toContain("reply to this email");
+    expect(rendered.text).not.toContain("Sensitive internal context");
+  });
+
   it("renders application invitation and preference links with supplied action links", () => {
     const invitation = renderCorrespondenceEmail({
       templateKey: "application_invitation",

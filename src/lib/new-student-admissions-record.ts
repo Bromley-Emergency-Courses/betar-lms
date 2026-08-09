@@ -79,7 +79,19 @@ export interface NewStudentApplicationRecord {
     acceptedAt?: string;
     declinedAt?: string;
     lapsedAt?: string;
+    withdrawnAt?: string;
+    withdrawalReason?: string;
     reminderCount: number;
+    reissueCount: number;
+    lastReissuedAt?: string;
+    reissues: Array<{
+      id: string;
+      previousDeadlineAt: string;
+      previousLapsedAt: string;
+      newDeadlineAt: string;
+      reason: string;
+      reissuedAt: string;
+    }>;
   };
   registration?: {
     id: string;
@@ -155,6 +167,14 @@ export interface NewStudentAdmissionRecord {
   operation: StaffNewStudentAdmissionsOperation;
   lead: NewStudentAdmissionLeadRecord;
   application?: NewStudentApplicationRecord;
+  abandonmentPeriods: Array<{
+    id: string;
+    previousLeadStage: string;
+    reason: string;
+    abandonedAt: string;
+    reopenReason?: string;
+    reopenedAt?: string;
+  }>;
   history: Array<{ id: string; action: string; entityType: string; createdAt: string }>;
   correspondence: Array<{
     id: string;
@@ -279,6 +299,7 @@ function demoRecord(admissionId: string): NewStudentAdmissionRecord {
       correctionRequests: [],
       evidenceOverrides: []
     },
+    abandonmentPeriods: [],
     history: [{ id: "99999999-9999-4999-8999-999999999999", action: "application.submitted", entityType: "application", createdAt: now }],
     correspondence: [],
     email: { enabled: false, mode: "pilot", missing: [] }
@@ -299,12 +320,14 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
   if (!isSupabaseConfigured()) return demoRecord(admissionId);
 
   const supabase = await createSupabaseServerClient();
-  const [operationResult, leadResult] = await Promise.all([
+  const [operationResult, leadResult, abandonmentResult] = await Promise.all([
     supabase.from("staff_new_student_admissions_operations").select("*").eq("admission_lead_id", admissionId).maybeSingle(),
-    supabase.from("admission_leads").select("*").eq("id", admissionId).maybeSingle()
+    supabase.from("admission_leads").select("*").eq("id", admissionId).maybeSingle(),
+    supabase.from("admission_abandonment_periods").select("id, previous_lead_stage, abandonment_reason, abandoned_at, reopen_reason, reopened_at").eq("admission_lead_id", admissionId).order("abandoned_at", { ascending: false })
   ]);
   if (operationResult.error) throw new Error(operationResult.error.message);
   if (leadResult.error) throw new Error(leadResult.error.message);
+  if (abandonmentResult.error) throw new Error(abandonmentResult.error.message);
   if (!operationResult.data || !leadResult.data) return null;
 
   const operation = mapStaffNewStudentAdmissionsOperation(operationResult.data);
@@ -329,9 +352,18 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
     createdAt: String(leadRow.created_at),
     updatedAt: String(leadRow.updated_at)
   };
+  const abandonmentPeriods = (abandonmentResult.data ?? []).map((row) => ({
+    id: String(row.id),
+    previousLeadStage: String(row.previous_lead_stage),
+    reason: String(row.abandonment_reason),
+    abandonedAt: String(row.abandoned_at),
+    reopenReason: optionalString(row.reopen_reason),
+    reopenedAt: optionalString(row.reopened_at)
+  }));
 
   let application: NewStudentApplicationRecord | undefined;
   const entityIds = new Set<string>([lead.id]);
+  abandonmentPeriods.forEach((period) => entityIds.add(period.id));
   if (operation.applicationId) {
     const applicationResult = await supabase.from("applications").select("*").eq("id", operation.applicationId).eq("admission_lead_id", lead.id).maybeSingle();
     if (applicationResult.error) throw new Error(applicationResult.error.message);
@@ -407,6 +439,25 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
       if (decisionRow) entityIds.add(String(decisionRow.id));
       if (offerRow) entityIds.add(String(offerRow.id));
       if (registrationRow) entityIds.add(String(registrationRow.id));
+
+      const [offerReissueResult, offerWithdrawalResult] = offerRow
+        ? await Promise.all([
+            supabase.from("application_offer_reissues").select("id, previous_deadline_at, previous_lapsed_at, new_deadline_at, reason, reissued_at").eq("offer_id", offerRow.id).order("reissued_at", { ascending: false }),
+            supabase.from("application_offer_withdrawals").select("id").eq("offer_id", offerRow.id).maybeSingle()
+          ])
+        : [{ data: [], error: null }, { data: null, error: null }];
+      if (offerReissueResult.error) throw new Error(offerReissueResult.error.message);
+      if (offerWithdrawalResult.error) throw new Error(offerWithdrawalResult.error.message);
+      const offerReissues = (offerReissueResult.data ?? []).map((row) => ({
+        id: String(row.id),
+        previousDeadlineAt: String(row.previous_deadline_at),
+        previousLapsedAt: String(row.previous_lapsed_at),
+        newDeadlineAt: String(row.new_deadline_at),
+        reason: String(row.reason),
+        reissuedAt: String(row.reissued_at)
+      }));
+      offerReissues.forEach((reissue) => entityIds.add(reissue.id));
+      if (offerWithdrawalResult.data) entityIds.add(String(offerWithdrawalResult.data.id));
 
       let requiredDocumentCount = 0;
       let uploadedRequiredDocumentCount = 0;
@@ -505,7 +556,7 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
           id: String(decisionRow.id), outcome: String(decisionRow.outcome) as "offer" | "rejection", reason: optionalString(decisionRow.decision_reason), decidedAt: optionalString(decisionRow.decided_at)
         } : undefined,
         offer: offerRow ? {
-          id: String(offerRow.id), reference: String(offerRow.offer_reference), status: String(offerRow.status), issuedAt: optionalString(offerRow.issued_at), deadlineAt: optionalString(offerRow.deadline_at), acceptedAt: optionalString(offerRow.accepted_at), declinedAt: optionalString(offerRow.declined_at), lapsedAt: optionalString(offerRow.lapsed_at), reminderCount: numberValue(offerRow.deadline_reminder_count)
+          id: String(offerRow.id), reference: String(offerRow.offer_reference), status: String(offerRow.status), issuedAt: optionalString(offerRow.issued_at), deadlineAt: optionalString(offerRow.deadline_at), acceptedAt: optionalString(offerRow.accepted_at), declinedAt: optionalString(offerRow.declined_at), lapsedAt: optionalString(offerRow.lapsed_at), withdrawnAt: optionalString(offerRow.withdrawn_at), withdrawalReason: optionalString(offerRow.withdrawal_reason), reminderCount: numberValue(offerRow.deadline_reminder_count), reissueCount: numberValue(offerRow.reissue_count), lastReissuedAt: optionalString(offerRow.last_reissued_at), reissues: offerReissues
         } : undefined,
         registration: registrationRow ? {
           id: String(registrationRow.id), status: String(registrationRow.status), deadlineAt: optionalString(registrationRow.registration_deadline_at), savedAt: optionalString(registrationRow.saved_at), submittedAt: optionalString(registrationRow.submitted_at), lapsedAt: optionalString(registrationRow.lapsed_at), lapsedReason: optionalString(registrationRow.lapsed_reason), reopenedAt: optionalString(registrationRow.reopened_at), reopenedReason: optionalString(registrationRow.reopened_reason), termsVersion: optionalString(registrationRow.terms_version), termsAcceptedAt: optionalString(registrationRow.terms_accepted_at), moduleConfirmationAccepted: Boolean(registrationRow.module_confirmation_accepted), requiredDocumentCount, uploadedRequiredDocumentCount, studentId: optionalString(registrationRow.student_id), convertedAt: optionalString(registrationRow.converted_at)
@@ -530,6 +581,7 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
     operation,
     lead,
     application,
+    abandonmentPeriods,
     history: (historyResult.data ?? []).map((row) => ({ id: String(row.id), action: String(row.action), entityType: String(row.entity_type), createdAt: String(row.created_at) })),
     correspondence: (correspondenceResult.data ?? []).map((row) => ({ id: String(row.id), templateKey: String(row.template_key), recipientEmail: String(row.recipient_email), deliveryStatus: String(row.delivery_status), subject: String(row.rendered_subject), sentAt: optionalString(row.sent_at), createdAt: String(row.created_at) })),
     email: { enabled: email.enabled, mode: email.mode, missing: email.missing }

@@ -16,6 +16,12 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { inviteAdmissionLeadToApply, updateAdmissionLead } from "@/lib/admin-actions";
 import {
+  abandonNewStudentAdmission,
+  reopenAbandonedNewStudentAdmission,
+  reissueLapsedApplicationOffer,
+  withdrawApplicationOffer
+} from "@/app/admissions/new-students/actions";
+import {
   cancelApplicationCorrection,
   convertSubmittedAdmissionsRegistration,
   recordApplicationDecision,
@@ -49,6 +55,7 @@ import {
   type NewStudentApplicationRecord
 } from "@/lib/new-student-admissions-record";
 import { getNewStudentFullRecordAvailability } from "@/lib/new-student-record-workflow";
+import { newStudentTerminalActionAvailability } from "@/lib/new-student-terminal-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +135,15 @@ const successMessages: Record<string, string> = {
   decision_recorded: "Application decision recorded and correspondence attempted when enabled.",
   registration_reopened: "Registration reopened for applicant resubmission.",
   registration_converted: "Registration converted to a student record and planned enrolments.",
-  updated: "Administrative details updated without changing the journey stage."
+  updated: "Administrative details updated without changing the journey stage.",
+  admission_abandoned: "Admissions record closed as abandoned. It remains available and can be reopened.",
+  admission_abandoned_demo: "Demo admissions record would be closed as abandoned.",
+  abandonment_reopened: "Abandoned admissions record reopened at its previous pre-submission stage.",
+  abandonment_reopened_demo: "Demo admissions record would be reopened.",
+  offer_reissued: "Lapsed offer reissued with its new deadline and correspondence recorded.",
+  offer_reissued_demo: "Demo offer would be reissued with the new deadline.",
+  offer_withdrawn: "Offer withdrawn and the admissions record closed with its history preserved.",
+  offer_withdrawn_demo: "Demo offer would be withdrawn."
 };
 
 function formatDate(value?: string): string {
@@ -159,6 +174,8 @@ function warningMessage(searchParams: Record<string, string | string[] | undefin
   if (searchParams.invited === "email_disabled") return "The invitation workflow record was created, but email delivery is disabled.";
   if (searchParams.invited === "email_failed") return "The invitation workflow record was created, but email delivery failed. The applicant has not been marked as successfully contacted.";
   if (searchParams.decision_email_failed) return "The decision was recorded, but its email delivery failed. The portal remains the source of truth.";
+  if (searchParams.offer_reissue_email_failed) return "The offer was reissued, but its email delivery failed. The portal remains the source of truth.";
+  if (searchParams.offer_withdrawal_email_failed) return "The offer was withdrawn, but its email delivery failed. The withdrawal remains authoritative.";
   return undefined;
 }
 
@@ -412,9 +429,73 @@ function Corrections({ record, application }: { record: NewStudentAdmissionRecor
   );
 }
 
+function AdmissionClosureActions({ record }: { record: NewStudentAdmissionRecord }) {
+  const application = record.application;
+  const availability = newStudentTerminalActionAvailability({
+    journeyStage: record.operation.journeyStage,
+    sourceLeadStage: record.operation.sourceLeadStage,
+    archived: record.lead.archived,
+    convertedStudentId: record.lead.convertedStudentId,
+    applicationStatus: application?.status,
+    hasActiveAbandonment: record.abandonmentPeriods.some((period) => !period.reopenedAt),
+    offerStatus: application?.offer?.status,
+    hasRegistration: Boolean(application?.registration)
+  });
+
+  if (!availability.canAbandon && !availability.canReopenAbandonment && record.abandonmentPeriods.length === 0) return null;
+
+  return (
+    <section className={styles.surface} id="workflow-actions">
+      <div className={styles.sectionHeader}>
+        <div><h3>Pre-submission closure</h3><p>Abandonment closes an enquiry or unsubmitted application without archiving or deleting it.</p></div>
+        <ShieldAlert size={18} aria-hidden="true" />
+      </div>
+      {availability.canAbandon ? (
+        <form action={abandonNewStudentAdmission} className={styles.actionForm}>
+          <input type="hidden" name="admission_id" value={record.lead.id} />
+          <label><span>Reason for closing as abandoned</span><textarea name="reason" required rows={3} maxLength={4000} /></label>
+          <p className={styles.helpText}>This removes the record from active work, preserves its history and allows a deliberate reopening later.</p>
+          <AdmissionsRecordSubmitButton danger confirmMessage="Close this pre-submission admissions record as abandoned? Its history will be preserved and it can be reopened later.">Close as abandoned</AdmissionsRecordSubmitButton>
+        </form>
+      ) : null}
+      {availability.canReopenAbandonment ? (
+        <form action={reopenAbandonedNewStudentAdmission} className={styles.actionForm}>
+          <input type="hidden" name="admission_id" value={record.lead.id} />
+          <label><span>Reason for reopening</span><textarea name="reason" required rows={3} maxLength={4000} /></label>
+          <p className={styles.helpText}>The record returns to the same enquiry or application-invited stage it held before abandonment.</p>
+          <AdmissionsRecordSubmitButton>Reopen admission</AdmissionsRecordSubmitButton>
+        </form>
+      ) : null}
+      {record.abandonmentPeriods.length > 0 ? (
+        <div className={styles.timeline}>
+          {record.abandonmentPeriods.map((period) => (
+            <div className={styles.timelineItem} key={period.id}>
+              <span>{formatDateTime(period.abandonedAt)} · from {plainLanguageAdmissionsLabel(period.previousLeadStage)}</span>
+              <strong>Closed as abandoned</strong>
+              <p>{period.reason}</p>
+              {period.reopenedAt ? <p>Reopened {formatDateTime(period.reopenedAt)}: {period.reopenReason}</p> : <p>Currently closed</p>}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function DecisionOfferRegistration({ record, application }: { record: NewStudentAdmissionRecord; application: NewStudentApplicationRecord }) {
   const availability = actionAvailability(record, application);
+  const terminalAvailability = newStudentTerminalActionAvailability({
+    journeyStage: record.operation.journeyStage,
+    sourceLeadStage: record.operation.sourceLeadStage,
+    archived: record.lead.archived,
+    convertedStudentId: record.lead.convertedStudentId,
+    applicationStatus: application.status,
+    hasActiveAbandonment: record.abandonmentPeriods.some((period) => !period.reopenedAt),
+    offerStatus: application.offer?.status,
+    hasRegistration: Boolean(application.registration)
+  });
   const registration = application.registration;
+  const earliestOfferDeadline = new Date(new Date(record.referenceTime).getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const reopenAccess = canReopenLapsedRegistration(registration ? { registrationStatus: registration.status, leadStage: record.operation.sourceLeadStage, convertedStudentId: registration.studentId ?? record.lead.convertedStudentId } : undefined);
   const conversionAccess = canConvertSubmittedRegistration({
     registrationStatus: registration?.status ?? "not_started",
@@ -468,9 +549,39 @@ function DecisionOfferRegistration({ record, application }: { record: NewStudent
             <div className={styles.fact}><span>Status</span><strong>{plainLanguageAdmissionsLabel(application.offer.status)}</strong></div>
             <div className={styles.fact}><span>Issued</span><strong>{formatDateTime(application.offer.issuedAt)}</strong></div>
             <div className={styles.fact}><span>Deadline</span><strong>{formatDateTime(application.offer.deadlineAt)}</strong></div>
+            {application.offer.withdrawnAt ? <div className={styles.fact}><span>Withdrawn</span><strong>{formatDateTime(application.offer.withdrawnAt)}</strong></div> : null}
+            <div className={styles.fact}><span>Reissues</span><strong>{application.offer.reissueCount}</strong></div>
+            {application.offer.withdrawalReason ? <div className={`${styles.fact} ${styles.fullWidth}`}><span>Withdrawal reason</span><p>{application.offer.withdrawalReason}</p></div> : null}
           </div>
-          {["issued", "lapsed"].includes(application.offer.status) ? (
-            <div className={styles.warningBanner}><ShieldAlert size={16} /><span>{application.offer.status === "lapsed" ? "The workflow recommends reissuing this lapsed offer, but no sanctioned reissue action exists yet." : "Offer withdrawal and individual reminder actions are not yet backed by the replacement workflow."} Direct status editing is intentionally unavailable.</span></div>
+          {terminalAvailability.canReissueOffer ? (
+            <form action={reissueLapsedApplicationOffer} className={styles.actionForm}>
+              <HiddenRecordReferences record={record} application={application} />
+              <input type="hidden" name="offer_id" value={application.offer.id} />
+              <label><span>New response deadline</span><input type="date" name="new_deadline_at" min={earliestOfferDeadline} required /></label>
+              <label><span>Reason for reissue</span><textarea name="reason" required rows={3} maxLength={4000} /></label>
+              <p className={styles.helpText}>Reissue keeps this offer and its prior lapse history, opens it for response again and deliberately attempts applicant correspondence.</p>
+              <AdmissionsRecordSubmitButton confirmMessage="Reissue this offer with the new deadline and attempt applicant correspondence?">Reissue lapsed offer</AdmissionsRecordSubmitButton>
+            </form>
+          ) : null}
+          {terminalAvailability.canWithdrawOffer ? (
+            <form action={withdrawApplicationOffer} className={styles.actionForm}>
+              <HiddenRecordReferences record={record} application={application} />
+              <input type="hidden" name="offer_id" value={application.offer.id} />
+              <label><span>Reason for withdrawing the offer</span><textarea name="reason" required rows={3} maxLength={4000} /></label>
+              <p className={styles.helpText}>Withdrawal is terminal for this admissions record. A later application must use a new admissions record.</p>
+              <AdmissionsRecordSubmitButton danger confirmMessage="Withdraw this offer? This is terminal for the current admissions record and cannot be reopened.">Withdraw offer</AdmissionsRecordSubmitButton>
+            </form>
+          ) : null}
+          {application.offer.reissues.length > 0 ? (
+            <div className={styles.timeline}>
+              {application.offer.reissues.map((reissue) => (
+                <div className={styles.timelineItem} key={reissue.id}>
+                  <span>{formatDateTime(reissue.reissuedAt)} · new deadline {formatDateTime(reissue.newDeadlineAt)}</span>
+                  <strong>Offer reissued</strong>
+                  <p>{reissue.reason}</p>
+                </div>
+              ))}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -591,6 +702,7 @@ export default async function NewStudentAdmissionRecordPage({
           <div className={styles.layout}>
             <div className={styles.main}>
               <AdministrativeDetails record={record} />
+              <AdmissionClosureActions record={record} />
               {application ? <StudyPlan application={application} /> : null}
               {application ? <ApplicationDetails application={application} /> : (
                 <section className={styles.surface} id="application"><div className={styles.sectionHeader}><div><h3>Application</h3><p>No application record exists yet.</p></div></div><div className={styles.empty}>The applicant must claim an invitation and create an application before application details are available.</div></section>
@@ -617,12 +729,13 @@ export default async function NewStudentAdmissionRecordPage({
                     <AdmissionsRecordSubmitButton>Invite applicant</AdmissionsRecordSubmitButton>
                   </form>
                 ) : null}
-                {record.operation.primaryNextAction === "reissue_offer" ? <p className={styles.helpText}>Blocked by the missing sanctioned offer-reissue workflow; direct status editing is not available.</p> : null}
+                {record.operation.primaryNextAction === "reissue_offer" ? <p className={styles.helpText}>Use the reissue action in the offer section to set a new response deadline.</p> : null}
               </section>
               <section className={styles.sideCard}>
                 <h3>Record sections</h3>
                 <nav className={styles.quickNav} aria-label="Applicant record sections">
                   <a href="#administrative-details">Administrative details</a>
+                  {record.abandonmentPeriods.length > 0 || ["enquiry", "application"].includes(record.operation.journeyStage) ? <a href="#workflow-actions">Pre-submission closure</a> : null}
                   <a href="#application">Application</a>
                   {application ? <a href="#study-plan">Study plan</a> : null}
                   {application ? <a href="#evidence">Evidence</a> : null}
