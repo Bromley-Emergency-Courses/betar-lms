@@ -238,9 +238,3 @@ export function parseApplicationCorrectionDocumentUploadForm(formData: FormData)
     response_note: formString(formData, "response_note")
   });
 }
-
-export function correctionRpcResultId(data: unknown, key: "request_id" | "correspondence_log_id"): string | null {
-  if (!data || typeof data !== "object") return null;
-  const value = (data as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : null;
-}

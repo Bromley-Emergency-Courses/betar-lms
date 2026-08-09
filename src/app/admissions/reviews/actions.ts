@@ -1,12 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { applicationMagicLinkRedirectUrl } from "@/lib/application-invitations";
 import { parseRecordApplicationDecisionForm } from "@/lib/application-decisions";
 import {
-  correctionRpcResultId,
   parseApplicationEvidenceOverrideForm,
   parseCancelApplicationCorrectionForm,
   parseRequestApplicationCorrectionsForm,
@@ -24,7 +21,6 @@ import {
 } from "@/lib/application-review";
 import { requirePermission } from "@/lib/auth";
 import { correspondenceEmailFailed, sendCorrespondenceLogEmail } from "@/lib/email-delivery";
-import { generatePortalMagicLinkForCorrespondenceLog } from "@/lib/portal-email";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
 function reviewRedirect(applicationId: string, result: string): never {
@@ -38,13 +34,6 @@ function correspondenceLogIdFromRpc(data: unknown): string | null {
 
   const value = (data as { correspondence_log_id?: unknown }).correspondence_log_id;
   return typeof value === "string" ? value : null;
-}
-
-async function requestOrigin(): Promise<string> {
-  const headerStore = await headers();
-  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host") ?? "localhost:3000";
-  const protocol = headerStore.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${protocol}://${host}`;
 }
 
 export async function verifyApplicationDocument(formData: FormData) {
@@ -105,7 +94,7 @@ export async function requestApplicationCorrections(formData: FormData) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.rpc("request_application_corrections", {
+  const { error } = await supabase.rpc("request_application_corrections", {
     p_application_id: parsed.application_id,
     p_items: parsed.items,
     p_summary: parsed.summary,
@@ -119,24 +108,6 @@ export async function requestApplicationCorrections(formData: FormData) {
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   revalidatePath("/apply/application");
-
-  const correspondenceLogId = correctionRpcResultId(data, "correspondence_log_id");
-  if (correspondenceLogId) {
-    const linkResult = await generatePortalMagicLinkForCorrespondenceLog(
-      correspondenceLogId,
-      applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application")
-    );
-    if (linkResult.status === "failed") {
-      reviewRedirect(parsed.application_id, "correction_email_failed");
-    }
-    const deliveryResult = await sendCorrespondenceLogEmail(
-      correspondenceLogId,
-      linkResult.status === "ready" ? { action_link: linkResult.actionLink } : {}
-    );
-    if (correspondenceEmailFailed(deliveryResult)) {
-      reviewRedirect(parsed.application_id, "correction_email_failed");
-    }
-  }
 
   reviewRedirect(parsed.application_id, "correction_requested");
 }

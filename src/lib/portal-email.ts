@@ -13,11 +13,6 @@ export interface PortalMagicLinkEmailInput {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
-export type CorrespondenceMagicLinkResult =
-  | { status: "ready"; actionLink: string }
-  | { status: "skipped"; reason: "missing_service_role" }
-  | { status: "failed"; error: string };
-
 function actionLinkFromGenerateLinkData(data: unknown): string | null {
   if (!data || typeof data !== "object") {
     return null;
@@ -83,44 +78,4 @@ export async function sendPortalMagicLinkEmail(
     text: rendered.text,
     html: rendered.html || textToHtml(rendered.text)
   });
-}
-
-export async function generatePortalMagicLinkForCorrespondenceLog(
-  correspondenceLogId: string,
-  redirectTo: string
-): Promise<CorrespondenceMagicLinkResult> {
-  if (!isSupabaseServiceRoleConfigured()) {
-    return { status: "skipped", reason: "missing_service_role" };
-  }
-
-  const supabase = createSupabaseServiceRoleClient();
-  const logResult = await supabase
-    .from("correspondence_logs")
-    .select("recipient_email")
-    .eq("id", correspondenceLogId)
-    .maybeSingle();
-
-  if (logResult.error) {
-    return { status: "failed", error: logResult.error.message };
-  }
-  if (!logResult.data) {
-    return { status: "failed", error: "Correspondence log was not found." };
-  }
-
-  const { data, error } = await supabase.auth.admin.generateLink({
-    type: "magiclink",
-    email: String(logResult.data.recipient_email),
-    options: { redirectTo }
-  });
-
-  if (error) {
-    return { status: "failed", error: error.message };
-  }
-
-  const actionLink = actionLinkFromGenerateLinkData(data);
-  if (!actionLink) {
-    return { status: "failed", error: "Supabase did not return a magic link." };
-  }
-
-  return { status: "ready", actionLink };
 }
