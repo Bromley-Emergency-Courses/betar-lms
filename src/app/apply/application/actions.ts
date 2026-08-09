@@ -10,6 +10,11 @@ import {
   parseApplicationDocumentUploadForm,
   validateApplicationDocumentUpload
 } from "@/lib/application-documents";
+import {
+  parseApplicationCorrectionDocumentUploadForm,
+  parseResubmitApplicationCorrectionsForm,
+  parseSaveApplicationCorrectionResponseForm
+} from "@/lib/application-corrections";
 import { parseApplicationDraftForm } from "@/lib/application-drafts";
 import {
   findUnsavedApplicationDraftChanges,
@@ -148,6 +153,69 @@ export async function uploadApplicationDocument(formData: FormData) {
 
   revalidatePath("/apply/application");
   redirect("/apply/application?document=uploaded");
+}
+
+export async function uploadApplicationCorrectionDocument(formData: FormData) {
+  const profile = await requireApplicantProfile("/apply/application");
+  const parsed = parseApplicationCorrectionDocumentUploadForm(formData);
+  const file = formData.get("document");
+
+  if (!(file instanceof File)) {
+    throw new Error("Choose a replacement file to upload.");
+  }
+
+  const definition = getApplicationDocumentSlotDefinition(parsed.slot_key);
+  const validation = validateApplicationDocumentUpload({ file, slotKey: parsed.slot_key });
+  if (!validation.valid) {
+    throw new Error(validation.errors.join(" "));
+  }
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?correction_document=demo");
+  }
+
+  if (!isSupabaseServiceRoleConfigured()) {
+    throw new Error("Supabase service role storage is required for correction document uploads.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const supabaseAdmin = createSupabaseServiceRoleClient();
+  const objectPath = buildApplicationDocumentObjectPath(
+    profile.personId,
+    parsed.application_id,
+    parsed.slot_key,
+    validation.sanitizedFilename,
+    randomUUID()
+  );
+
+  const { error: uploadError } = await supabaseAdmin.storage.from(definition.bucket).upload(objectPath, file, {
+    contentType: validation.contentType,
+    upsert: false
+  });
+
+  if (uploadError) {
+    throw new Error(uploadError.message);
+  }
+
+  const { error: recordError } = await supabase.rpc("record_application_correction_document_upload", {
+    p_item_id: parsed.item_id,
+    p_bucket: definition.bucket,
+    p_object_path: objectPath,
+    p_original_filename: file.name,
+    p_sanitized_filename: validation.sanitizedFilename,
+    p_content_type: validation.contentType,
+    p_size_bytes: file.size,
+    p_response_note: parsed.response_note
+  });
+
+  if (recordError) {
+    await supabaseAdmin.storage.from(definition.bucket).remove([objectPath]);
+    throw new Error(recordError.message);
+  }
+
+  revalidatePath("/apply/application");
+  revalidatePath("/admissions/reviews");
+  redirect("/apply/application?correction_document=uploaded");
 }
 
 export async function submitApplication(formData: FormData) {
@@ -315,4 +383,53 @@ export async function submitApplication(formData: FormData) {
 
   revalidatePath("/apply/application");
   redirect("/apply/application?submitted=1");
+}
+
+export async function saveApplicationCorrectionResponse(formData: FormData) {
+  await requireApplicantProfile("/apply/application");
+  const parsed = parseSaveApplicationCorrectionResponseForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?correction_saved=demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("save_application_correction_response", {
+    p_item_id: parsed.item_id,
+    p_proposed_value: parsed.proposed_value ?? null,
+    p_replacement_managed_file_id: parsed.replacement_managed_file_id,
+    p_response_note: parsed.response_note,
+    p_clear_value: parsed.clear_value
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/apply/application");
+  revalidatePath("/admissions/reviews");
+  redirect("/apply/application?correction_saved=1");
+}
+
+export async function resubmitApplicationCorrections(formData: FormData) {
+  await requireApplicantProfile("/apply/application");
+  const parsed = parseResubmitApplicationCorrectionsForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?correction_submitted=demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("resubmit_application_corrections", {
+    p_request_id: parsed.request_id
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/apply/application");
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  redirect("/apply/application?correction_submitted=1");
 }

@@ -1,8 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { applicationMagicLinkRedirectUrl } from "@/lib/application-invitations";
 import { parseRecordApplicationDecisionForm } from "@/lib/application-decisions";
+import {
+  correctionRpcResultId,
+  parseApplicationEvidenceOverrideForm,
+  parseCancelApplicationCorrectionForm,
+  parseRequestApplicationCorrectionsForm,
+  parseReviewApplicationCorrectionsForm
+} from "@/lib/application-corrections";
 import { parseProcessApplicationOfferDeadlineWorkflowForm } from "@/lib/application-offers";
 import { parseConvertSubmittedAdmissionsRegistrationForm } from "@/lib/admissions-conversion";
 import {
@@ -15,6 +24,7 @@ import {
 } from "@/lib/application-review";
 import { requirePermission } from "@/lib/auth";
 import { correspondenceEmailFailed, sendCorrespondenceLogEmail } from "@/lib/email-delivery";
+import { generatePortalMagicLinkForCorrespondenceLog } from "@/lib/portal-email";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
 function reviewRedirect(applicationId: string, result: string): never {
@@ -28,6 +38,13 @@ function correspondenceLogIdFromRpc(data: unknown): string | null {
 
   const value = (data as { correspondence_log_id?: unknown }).correspondence_log_id;
   return typeof value === "string" ? value : null;
+}
+
+async function requestOrigin(): Promise<string> {
+  const headerStore = await headers();
+  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host") ?? "localhost:3000";
+  const protocol = headerStore.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${protocol}://${host}`;
 }
 
 export async function verifyApplicationDocument(formData: FormData) {
@@ -77,6 +94,122 @@ export async function recordStaffApplicationReview(formData: FormData) {
   revalidatePath("/admissions/reviews");
   revalidatePath("/admissions");
   reviewRedirect(parsed.application_id, "review_saved");
+}
+
+export async function requestApplicationCorrections(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseRequestApplicationCorrectionsForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "correction_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc("request_application_corrections", {
+    p_application_id: parsed.application_id,
+    p_items: parsed.items,
+    p_summary: parsed.summary,
+    p_due_at: parsed.due_at
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  revalidatePath("/apply/application");
+
+  const correspondenceLogId = correctionRpcResultId(data, "correspondence_log_id");
+  if (correspondenceLogId) {
+    const linkResult = await generatePortalMagicLinkForCorrespondenceLog(
+      correspondenceLogId,
+      applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application")
+    );
+    if (linkResult.status === "failed") {
+      reviewRedirect(parsed.application_id, "correction_email_failed");
+    }
+    const deliveryResult = await sendCorrespondenceLogEmail(
+      correspondenceLogId,
+      linkResult.status === "ready" ? { action_link: linkResult.actionLink } : {}
+    );
+    if (correspondenceEmailFailed(deliveryResult)) {
+      reviewRedirect(parsed.application_id, "correction_email_failed");
+    }
+  }
+
+  reviewRedirect(parsed.application_id, "correction_requested");
+}
+
+export async function reviewApplicationCorrections(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseReviewApplicationCorrectionsForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "correction_review_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("review_application_corrections", {
+    p_request_id: parsed.request_id,
+    p_reviews: parsed.reviews
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  revalidatePath("/apply/application");
+  reviewRedirect(parsed.application_id, "correction_reviewed");
+}
+
+export async function cancelApplicationCorrection(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseCancelApplicationCorrectionForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "correction_cancel_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("cancel_application_correction_request", {
+    p_request_id: parsed.request_id,
+    p_reason: parsed.reason
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  revalidatePath("/apply/application");
+  reviewRedirect(parsed.application_id, "correction_cancelled");
+}
+
+export async function recordApplicationEvidenceOverride(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = parseApplicationEvidenceOverrideForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    reviewRedirect(parsed.application_id, "evidence_override_demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("record_application_evidence_override", {
+    p_slot_id: parsed.slot_id,
+    p_reason: parsed.reason
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  reviewRedirect(parsed.application_id, "evidence_override_recorded");
 }
 
 export async function recordApplicationDecision(formData: FormData) {

@@ -195,7 +195,8 @@ async function updateDeliveryStatus(
 }
 
 export async function sendCorrespondenceLogEmail(
-  correspondenceLogId: string
+  correspondenceLogId: string,
+  transientMetadata: JsonRecord = {}
 ): Promise<CorrespondenceEmailDeliveryResult> {
   const emailConfig = getAdmissionsEmailConfig();
   if (!emailConfig.enabled) {
@@ -248,7 +249,7 @@ export async function sendCorrespondenceLogEmail(
     templateKey: row.template_key,
     recipientName: row.recipient_name,
     renderedSubject: row.rendered_subject,
-    metadata: row.metadata
+    metadata: { ...row.metadata, ...transientMetadata }
   });
 
   try {

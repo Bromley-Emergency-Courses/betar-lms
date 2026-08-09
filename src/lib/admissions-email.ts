@@ -2,6 +2,7 @@ import type { JsonRecord, JsonValue } from "@/lib/audit-correspondence";
 
 export const admissionsEmailTemplateKeys = [
   "application_invitation",
+  "application_correction_requested",
   "module_preference_window_opened",
   "offer_issued",
   "rejection",
@@ -132,6 +133,10 @@ function registrationUrl(appUrl: string): string {
   return new URL("/portal/registration", appUrl).toString();
 }
 
+function applicationUrl(appUrl: string): string {
+  return new URL("/apply/application", appUrl).toString();
+}
+
 function htmlEscape(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -222,7 +227,8 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
   const deadline =
     formatDate(metadata.deadline_at) ??
     formatDate(metadata.registration_deadline_at) ??
-    formatDate(metadata.preference_closes_at);
+    formatDate(metadata.preference_closes_at) ??
+    formatDate(metadata.due_at);
   const offerReference = stringMetadata(metadata, "offer_reference");
   const subject = input.renderedSubject.trim();
   const intro = greeting(input.recipientName);
@@ -246,6 +252,18 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
         "You have been invited to complete your BETAR application.",
         "Use the secure link below to sign in and continue your application.",
         stringMetadata(metadata, "action_link") ?? portal,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "application_correction_requested":
+      text = [
+        intro,
+        "We need you to correct specific information in your BETAR application.",
+        deadline
+          ? `Please use the secure link below to review the request and resubmit your corrections by ${deadline}.`
+          : "Please use the secure link below to review the request and resubmit your corrections.",
+        stringMetadata(metadata, "action_link") ?? applicationUrl(appUrl),
+        "The secure application page is the authoritative record of the requested changes.",
         "Regards,\nBETAR Admissions"
       ].join("\n\n");
       break;

@@ -119,6 +119,23 @@ describe("admissions correspondence rendering", () => {
     expect(preferences.text).toContain("20 August 2026");
   });
 
+  it("renders a correction request with its due date and secure application link", () => {
+    const rendered = renderCorrespondenceEmail({
+      templateKey: "application_correction_requested",
+      recipientName: "Asha Patel",
+      renderedSubject: "Action required for your BETAR application",
+      appUrl: "https://lms.example.org",
+      metadata: {
+        action_link: "https://auth.example.test/correction",
+        due_at: "2026-08-23T12:00:00Z"
+      }
+    });
+
+    expect(rendered.text).toContain("23 August 2026");
+    expect(rendered.text).toContain("https://auth.example.test/correction");
+    expect(rendered.text).toContain("authoritative record");
+  });
+
   it("rejects unsupported template keys", () => {
     expect(() =>
       renderCorrespondenceEmail({
