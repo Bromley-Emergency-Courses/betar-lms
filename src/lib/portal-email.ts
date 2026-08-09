@@ -1,7 +1,12 @@
 import "server-only";
 
-import { renderCorrespondenceEmail, type AdmissionsEmailTemplateKey } from "@/lib/admissions-email";
-import { sendDirectAdmissionsEmail, type CorrespondenceEmailDeliveryResult } from "@/lib/email-delivery";
+import {
+  evaluateAdmissionsEmailSafety,
+  getAdmissionsEmailConfig,
+  type AdmissionsEmailTemplateKey,
+  type AdmissionsEmailTestRecordMatch
+} from "@/lib/admissions-email";
+import { sendCorrespondenceLogEmail, type CorrespondenceEmailDeliveryResult } from "@/lib/email-delivery";
 import { createSupabaseServiceRoleClient, isSupabaseServiceRoleConfigured } from "@/lib/supabase-admin";
 
 export interface PortalMagicLinkEmailInput {
@@ -10,7 +15,16 @@ export interface PortalMagicLinkEmailInput {
   subject: string;
   templateKey: AdmissionsEmailTemplateKey;
   redirectTo: string;
+  personId?: string | null;
+  admissionLeadId?: string | null;
+  studentId?: string | null;
   metadata?: Record<string, string | number | boolean | null>;
+}
+
+interface ResolvedPortalRecipient {
+  personId: string;
+  admissionLeadId: string | null;
+  studentId: string | null;
 }
 
 function actionLinkFromGenerateLinkData(data: unknown): string | null {
@@ -27,14 +41,168 @@ function actionLinkFromGenerateLinkData(data: unknown): string | null {
   return typeof actionLink === "string" && actionLink.length > 0 ? actionLink : null;
 }
 
-function textToHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .split("\n\n")
-    .map((paragraph) => `<p>${paragraph.replaceAll("\n", "<br />")}</p>`)
-    .join("\n");
+async function resolvePortalRecipient(
+  input: PortalMagicLinkEmailInput
+): Promise<ResolvedPortalRecipient | null> {
+  if (input.personId && (input.admissionLeadId || input.studentId)) {
+    return {
+      personId: input.personId,
+      admissionLeadId: input.admissionLeadId ?? null,
+      studentId: input.studentId ?? null
+    };
+  }
+
+  const supabase = createSupabaseServiceRoleClient();
+  const identityResult = await supabase
+    .from("person_auth_identities")
+    .select("person_id")
+    .eq("active", true)
+    .eq("actor_type", "applicant")
+    .eq("email", input.email.trim().toLowerCase())
+    .limit(3);
+
+  if (identityResult.error) {
+    throw new Error(identityResult.error.message);
+  }
+
+  const personIds = [...new Set((identityResult.data ?? []).map((row) => String(row.person_id)))];
+  if (personIds.length !== 1) {
+    return null;
+  }
+
+  const leadResult = await supabase
+    .from("admission_leads")
+    .select("id")
+    .eq("person_id", personIds[0])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (leadResult.error) {
+    throw new Error(leadResult.error.message);
+  }
+  if (!leadResult.data) {
+    return null;
+  }
+
+  return {
+    personId: personIds[0],
+    admissionLeadId: String(leadResult.data.id),
+    studentId: null
+  };
+}
+
+async function findOrCreateCorrespondenceLog(
+  input: PortalMagicLinkEmailInput,
+  recipient: ResolvedPortalRecipient
+): Promise<string> {
+  const supabase = createSupabaseServiceRoleClient();
+  const invitationId = input.metadata?.invitation_id;
+
+  if (typeof invitationId === "string" && invitationId.length > 0) {
+    const existingResult = await supabase
+      .from("correspondence_logs")
+      .select("id")
+      .eq("person_id", recipient.personId)
+      .eq("related_entity_type", "application_invitation")
+      .eq("related_entity_id", invitationId)
+      .eq("delivery_status", "queued")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingResult.error) {
+      throw new Error(existingResult.error.message);
+    }
+    if (existingResult.data) {
+      return String(existingResult.data.id);
+    }
+  }
+
+  const relatedEntityType = recipient.studentId ? "student" : "admission_lead";
+  const relatedEntityId = recipient.studentId ?? recipient.admissionLeadId;
+  if (!relatedEntityId) {
+    throw new Error("A related applicant or student record is required for correspondence.");
+  }
+
+  const { data, error } = await supabase
+    .from("correspondence_logs")
+    .insert({
+      person_id: recipient.personId,
+      recipient_email: input.email.trim().toLowerCase(),
+      recipient_name: input.recipientName?.trim() || null,
+      related_entity_type: relatedEntityType,
+      related_entity_id: relatedEntityId,
+      template_key: input.templateKey,
+      template_version: 1,
+      channel: "email",
+      rendered_subject: input.subject.trim(),
+      delivery_status: "queued",
+      metadata: {
+        ...(input.metadata ?? {}),
+        ...(recipient.admissionLeadId ? { admission_lead_id: recipient.admissionLeadId } : {}),
+        ...(recipient.studentId ? { student_id: recipient.studentId } : {})
+      }
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return String(data.id);
+}
+
+async function markMagicLinkGenerationFailed(correspondenceLogId: string, message: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  const { data } = await supabase
+    .from("correspondence_logs")
+    .select("metadata")
+    .eq("id", correspondenceLogId)
+    .maybeSingle();
+  const metadata = data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+    ? data.metadata
+    : {};
+
+  await supabase
+    .from("correspondence_logs")
+    .update({
+      delivery_status: "failed",
+      metadata: {
+        ...metadata,
+        delivery_status: "failed",
+        email_delivery_error: message.slice(0, 500),
+        failed_at: new Date().toISOString()
+      }
+    })
+    .eq("id", correspondenceLogId);
+}
+
+async function suppressMagicLinkAttempt(correspondenceLogId: string, mode: string, reason: string) {
+  const supabase = createSupabaseServiceRoleClient();
+  const { data } = await supabase
+    .from("correspondence_logs")
+    .select("metadata")
+    .eq("id", correspondenceLogId)
+    .maybeSingle();
+  const metadata = data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+    ? data.metadata
+    : {};
+
+  await supabase
+    .from("correspondence_logs")
+    .update({
+      delivery_status: "suppressed",
+      metadata: {
+        ...metadata,
+        delivery_status: "suppressed",
+        email_delivery_mode: mode,
+        email_suppression_reason: reason,
+        suppressed_at: new Date().toISOString()
+      }
+    })
+    .eq("id", correspondenceLogId);
 }
 
 export async function sendPortalMagicLinkEmail(
@@ -42,6 +210,65 @@ export async function sendPortalMagicLinkEmail(
 ): Promise<CorrespondenceEmailDeliveryResult> {
   if (!isSupabaseServiceRoleConfigured()) {
     return { status: "skipped", reason: "missing_service_role" };
+  }
+
+  let recipient: ResolvedPortalRecipient | null;
+  try {
+    recipient = await resolvePortalRecipient(input);
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : "Portal recipient lookup failed." };
+  }
+
+  if (!recipient) {
+    return { status: "suppressed", reason: "missing_related_record" };
+  }
+
+  let correspondenceLogId: string;
+  try {
+    correspondenceLogId = await findOrCreateCorrespondenceLog(input, recipient);
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : "Correspondence attempt could not be created." };
+  }
+
+  const emailConfig = getAdmissionsEmailConfig();
+  if (!emailConfig.enabled) {
+    await suppressMagicLinkAttempt(correspondenceLogId, "disabled", "master_disabled");
+    return { status: "disabled" };
+  }
+
+  if (!emailConfig.config) {
+    return sendCorrespondenceLogEmail(correspondenceLogId);
+  }
+
+  if (emailConfig.mode === "pilot") {
+    const pilotRecordResult = await createSupabaseServiceRoleClient()
+      .from("admissions_email_test_records")
+      .select("person_id, admission_lead_id, student_id")
+      .eq("person_id", recipient.personId)
+      .eq("active", true);
+
+    if (pilotRecordResult.error) {
+      const message = `Pilot recipient verification failed: ${pilotRecordResult.error.message}`;
+      await markMagicLinkGenerationFailed(correspondenceLogId, message);
+      return { status: "failed", error: message };
+    }
+
+    const safety = evaluateAdmissionsEmailSafety({
+      mode: emailConfig.mode,
+      pilotAllowlist: emailConfig.pilotAllowlist,
+      recipient: input.email,
+      identity: {
+        personId: recipient.personId,
+        admissionLeadId: recipient.admissionLeadId,
+        studentId: recipient.studentId
+      },
+      testRecords: (pilotRecordResult.data ?? []) as AdmissionsEmailTestRecordMatch[]
+    });
+
+    if (!safety.allowed) {
+      await suppressMagicLinkAttempt(correspondenceLogId, emailConfig.mode, safety.reason);
+      return { status: "suppressed", reason: safety.reason };
+    }
   }
 
   const supabase = createSupabaseServiceRoleClient();
@@ -54,28 +281,16 @@ export async function sendPortalMagicLinkEmail(
   });
 
   if (error) {
+    await markMagicLinkGenerationFailed(correspondenceLogId, error.message);
     return { status: "failed", error: error.message };
   }
 
   const actionLink = actionLinkFromGenerateLinkData(data);
   if (!actionLink) {
-    return { status: "failed", error: "Supabase did not return a magic link." };
+    const message = "Supabase did not return a magic link.";
+    await markMagicLinkGenerationFailed(correspondenceLogId, message);
+    return { status: "failed", error: message };
   }
 
-  const rendered = renderCorrespondenceEmail({
-    templateKey: input.templateKey,
-    recipientName: input.recipientName,
-    renderedSubject: input.subject,
-    metadata: {
-      ...(input.metadata ?? {}),
-      action_link: actionLink
-    }
-  });
-
-  return sendDirectAdmissionsEmail({
-    to: input.email,
-    subject: rendered.subject,
-    text: rendered.text,
-    html: rendered.html || textToHtml(rendered.text)
-  });
+  return sendCorrespondenceLogEmail(correspondenceLogId, { action_link: actionLink });
 }

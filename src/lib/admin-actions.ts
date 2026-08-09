@@ -567,6 +567,8 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
 
   const deliveryResult = await sendPortalMagicLinkEmail({
     email: data.email,
+    personId: data.person_id,
+    admissionLeadId: data.lead_id,
     subject: "Your BETAR application invitation",
     templateKey: "application_invitation",
     redirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application", data),

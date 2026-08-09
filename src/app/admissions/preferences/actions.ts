@@ -150,11 +150,14 @@ export async function sendModulePreferenceWindowLinks(formData: FormData) {
 
     const deliveryResult = await sendPortalMagicLinkEmail({
       email,
+      personId: String(student.person_id),
+      studentId: String(student.id),
       recipientName: `${String(student.first_name ?? "")} ${String(student.last_name ?? "")}`.trim(),
       subject: String(windowResult.data.title ?? "BETAR module preferences"),
       templateKey: "module_preference_window_opened",
       redirectTo,
       metadata: {
+        student_id: String(student.id),
         preference_window_id: parsed.window_id,
         preference_closes_at: String(windowResult.data.closes_at)
       }

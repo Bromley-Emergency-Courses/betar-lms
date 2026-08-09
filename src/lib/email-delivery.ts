@@ -3,10 +3,13 @@ import "server-only";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import {
+  evaluateAdmissionsEmailSafety,
   getAdmissionsEmailConfig,
   isSupportedAdmissionsTemplateKey,
   renderCorrespondenceEmail,
   type AdmissionsEmailConfig,
+  type AdmissionsEmailRecipientIdentity,
+  type AdmissionsEmailTestRecordMatch,
   type RenderedCorrespondenceEmail
 } from "@/lib/admissions-email";
 import type { CorrespondenceDeliveryStatus, JsonRecord } from "@/lib/audit-correspondence";
@@ -15,24 +18,40 @@ import { createSupabaseServiceRoleClient, isSupabaseServiceRoleConfigured } from
 export type CorrespondenceEmailDeliveryResult =
   | { status: "disabled" }
   | { status: "skipped"; reason: "already_sent" | "unsupported_template" | "missing_service_role" }
+  | {
+      status: "suppressed";
+      reason:
+        | "master_disabled"
+        | "recipient_not_allowlisted"
+        | "missing_related_record"
+        | "related_record_not_marked_fake";
+    }
   | { status: "sent"; providerMessageId: string | null }
   | { status: "failed"; error: string };
 
-export interface DirectAdmissionsEmailInput {
-  to: string;
-  subject: string;
-  text: string;
-  html: string;
-}
-
 interface CorrespondenceLogRow {
   id: string;
+  person_id: string;
   recipient_email: string;
   recipient_name: string | null;
   template_key: string;
   rendered_subject: string;
+  rendered_body: string | null;
   delivery_status: CorrespondenceDeliveryStatus;
   metadata: JsonRecord;
+}
+
+function metadataIdentifier(metadata: JsonRecord, key: "admission_lead_id" | "student_id"): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function correspondenceIdentity(row: CorrespondenceLogRow): AdmissionsEmailRecipientIdentity {
+  return {
+    personId: row.person_id,
+    admissionLeadId: metadataIdentifier(row.metadata, "admission_lead_id"),
+    studentId: metadataIdentifier(row.metadata, "student_id")
+  };
 }
 
 function asJsonRecord(value: unknown): JsonRecord {
@@ -170,13 +189,15 @@ async function updateDeliveryStatus(
   correspondenceLogId: string,
   deliveryStatus: CorrespondenceDeliveryStatus,
   metadata: JsonRecord,
-  providerMessageId?: string | null
+  providerMessageId?: string | null,
+  deliveryProvider?: string | null
 ) {
   const supabase = createSupabaseServiceRoleClient();
   const now = new Date().toISOString();
   const updatePayload: Record<string, unknown> = {
     delivery_status: deliveryStatus,
-    metadata
+    metadata,
+    delivery_provider: deliveryProvider ?? null
   };
 
   if (deliveryStatus === "sent") {
@@ -195,12 +216,10 @@ async function updateDeliveryStatus(
 }
 
 export async function sendCorrespondenceLogEmail(
-  correspondenceLogId: string
+  correspondenceLogId: string,
+  transientMetadata: JsonRecord = {}
 ): Promise<CorrespondenceEmailDeliveryResult> {
   const emailConfig = getAdmissionsEmailConfig();
-  if (!emailConfig.enabled) {
-    return { status: "disabled" };
-  }
 
   if (!isSupabaseServiceRoleConfigured()) {
     return { status: "skipped", reason: "missing_service_role" };
@@ -209,7 +228,7 @@ export async function sendCorrespondenceLogEmail(
   const supabase = createSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from("correspondence_logs")
-    .select("id, recipient_email, recipient_name, template_key, rendered_subject, delivery_status, metadata")
+    .select("id, person_id, recipient_email, recipient_name, template_key, rendered_subject, rendered_body, delivery_status, metadata")
     .eq("id", correspondenceLogId)
     .maybeSingle();
 
@@ -229,8 +248,61 @@ export async function sendCorrespondenceLogEmail(
     return { status: "skipped", reason: "already_sent" };
   }
 
+  if (!emailConfig.enabled) {
+    await updateDeliveryStatus(row.id, "suppressed", {
+      ...row.metadata,
+      delivery_status: "suppressed",
+      email_delivery_mode: "disabled",
+      email_suppression_reason: "master_disabled",
+      suppressed_at: new Date().toISOString()
+    });
+    return { status: "disabled" };
+  }
+
   if (!isSupportedAdmissionsTemplateKey(row.template_key)) {
     return { status: "skipped", reason: "unsupported_template" };
+  }
+
+  let testRecords: AdmissionsEmailTestRecordMatch[] = [];
+  if (emailConfig.mode === "pilot") {
+    const testRecordResult = await supabase
+      .from("admissions_email_test_records")
+      .select("person_id, admission_lead_id, student_id")
+      .eq("person_id", row.person_id)
+      .eq("active", true);
+
+    if (testRecordResult.error) {
+      const message = `Pilot recipient verification failed: ${testRecordResult.error.message}`;
+      await updateDeliveryStatus(row.id, "failed", {
+        ...row.metadata,
+        delivery_status: "failed",
+        email_delivery_mode: "pilot",
+        email_delivery_error: message,
+        failed_at: new Date().toISOString()
+      });
+      return { status: "failed", error: message };
+    }
+
+    testRecords = (testRecordResult.data ?? []) as AdmissionsEmailTestRecordMatch[];
+  }
+
+  const safety = evaluateAdmissionsEmailSafety({
+    mode: emailConfig.mode,
+    pilotAllowlist: emailConfig.pilotAllowlist,
+    recipient: row.recipient_email,
+    identity: correspondenceIdentity(row),
+    testRecords
+  });
+
+  if (!safety.allowed) {
+    await updateDeliveryStatus(row.id, "suppressed", {
+      ...row.metadata,
+      delivery_status: "suppressed",
+      email_delivery_mode: emailConfig.mode,
+      email_suppression_reason: safety.reason,
+      suppressed_at: new Date().toISOString()
+    });
+    return { status: "suppressed", reason: safety.reason };
   }
 
   if (!emailConfig.config) {
@@ -238,7 +310,7 @@ export async function sendCorrespondenceLogEmail(
     await updateDeliveryStatus(row.id, "failed", {
       ...row.metadata,
       delivery_status: "failed",
-      production_email_send_enabled: true,
+      email_delivery_mode: emailConfig.mode,
       email_delivery_error: message
     });
     return { status: "failed", error: message };
@@ -248,7 +320,11 @@ export async function sendCorrespondenceLogEmail(
     templateKey: row.template_key,
     recipientName: row.recipient_name,
     renderedSubject: row.rendered_subject,
-    metadata: row.metadata
+    renderedBody: row.rendered_body,
+    metadata: {
+      ...row.metadata,
+      ...transientMetadata
+    }
   });
 
   try {
@@ -260,11 +336,11 @@ export async function sendCorrespondenceLogEmail(
     await updateDeliveryStatus(row.id, "sent", {
       ...row.metadata,
       delivery_status: "sent",
-      production_email_send_enabled: true,
+      email_delivery_mode: emailConfig.mode,
       provider_message_id: providerMessageId,
       sent_via: emailConfig.config.provider,
       sent_at: new Date().toISOString()
-    }, providerMessageId);
+    }, providerMessageId, emailConfig.config.provider);
 
     return { status: "sent", providerMessageId };
   } catch (error) {
@@ -272,48 +348,19 @@ export async function sendCorrespondenceLogEmail(
     await updateDeliveryStatus(row.id, "failed", {
       ...row.metadata,
       delivery_status: "failed",
-      production_email_send_enabled: true,
+      email_delivery_mode: emailConfig.mode,
       provider_message_id: null,
       email_delivery_error: message,
       failed_at: new Date().toISOString()
-    });
+    }, null, emailConfig.config.provider);
     return { status: "failed", error: message };
   }
 }
 
-export async function sendDirectAdmissionsEmail(input: DirectAdmissionsEmailInput): Promise<CorrespondenceEmailDeliveryResult> {
-  const emailConfig = getAdmissionsEmailConfig();
-  if (!emailConfig.enabled) {
-    return { status: "disabled" };
-  }
-
-  if (!emailConfig.config) {
-    return {
-      status: "failed",
-      error: `Admissions email is enabled but missing env vars: ${emailConfig.missing.join(", ")}`
-    };
-  }
-
-  try {
-    const providerMessageId =
-      emailConfig.config.provider === "graph"
-        ? await sendWithGraph(emailConfig.config, input.to, {
-            subject: input.subject,
-            text: input.text,
-            html: input.html
-          })
-        : await sendWithSmtp(emailConfig.config, input.to, {
-            subject: input.subject,
-            text: input.text,
-            html: input.html
-          });
-
-    return { status: "sent", providerMessageId };
-  } catch (error) {
-    return { status: "failed", error: safeErrorMessage(error) };
-  }
-}
-
 export function correspondenceEmailFailed(result: CorrespondenceEmailDeliveryResult): boolean {
-  return result.status === "failed" || (result.status === "skipped" && result.reason === "missing_service_role");
+  return (
+    result.status === "failed" ||
+    result.status === "suppressed" ||
+    (result.status === "skipped" && result.reason !== "already_sent")
+  );
 }

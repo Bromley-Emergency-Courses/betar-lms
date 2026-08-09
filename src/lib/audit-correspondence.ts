@@ -29,11 +29,16 @@ export interface CorrespondenceLogInsert {
   template_version: number;
   channel: CorrespondenceChannel;
   rendered_subject: string;
+  rendered_body?: string | null;
+  delivery_provider?: string | null;
   provider_message_id?: string | null;
   delivery_status?: CorrespondenceDeliveryStatus;
   bounce_status?: CorrespondenceBounceStatus;
   sent_at?: string | null;
   generated_file_id?: string | null;
+  operational_batch_id?: string | null;
+  operational_batch_target_id?: string | null;
+  attempt_number?: number;
   metadata: JsonRecord;
   created_by_user_id?: string | null;
 }
@@ -111,11 +116,16 @@ export function buildCorrespondenceLogInsert(
     related_entity_type: input.related_entity_type ?? null,
     related_entity_id: input.related_entity_id ?? null,
     template_id: input.template_id ?? null,
+    rendered_body: input.rendered_body ?? null,
+    delivery_provider: input.delivery_provider ?? null,
     provider_message_id: input.provider_message_id ?? null,
     delivery_status: input.delivery_status ?? "queued",
     bounce_status: input.bounce_status ?? "none",
     sent_at: input.sent_at ?? null,
     generated_file_id: input.generated_file_id ?? null,
+    operational_batch_id: input.operational_batch_id ?? null,
+    operational_batch_target_id: input.operational_batch_target_id ?? null,
+    attempt_number: input.attempt_number ?? 1,
     created_by_user_id: input.created_by_user_id ?? null,
     metadata: input.metadata ?? {}
   };

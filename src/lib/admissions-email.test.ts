@@ -1,16 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { getAdmissionsEmailConfig, renderCorrespondenceEmail } from "@/lib/admissions-email";
+import {
+  evaluateAdmissionsEmailSafety,
+  getAdmissionsEmailConfig,
+  parseAdmissionsEmailPilotAllowlist,
+  renderCorrespondenceEmail
+} from "@/lib/admissions-email";
 
 describe("admissions email configuration", () => {
   it("stays disabled until the explicit feature flag is enabled", () => {
-    expect(getAdmissionsEmailConfig({ ADMISSIONS_EMAIL_ENABLED: "false" }).enabled).toBe(false);
+    expect(getAdmissionsEmailConfig({ ADMISSIONS_EMAIL_ENABLED: "false" })).toMatchObject({
+      enabled: false,
+      mode: "disabled",
+      pilotAllowlist: []
+    });
   });
 
-  it("reports missing SMTP settings when enabled", () => {
+  it("defaults enabled delivery to pilot and requires an allowlist", () => {
     expect(getAdmissionsEmailConfig({ ADMISSIONS_EMAIL_ENABLED: "true", ADMISSIONS_EMAIL_PROVIDER: "smtp" })).toEqual({
       enabled: true,
+      mode: "pilot",
       provider: "smtp",
-      missing: ["ADMISSIONS_EMAIL_FROM", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD"]
+      pilotAllowlist: [],
+      missing: [
+        "ADMISSIONS_EMAIL_PILOT_ALLOWLIST",
+        "ADMISSIONS_EMAIL_FROM",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASSWORD"
+      ]
     });
   });
 
@@ -18,6 +36,8 @@ describe("admissions email configuration", () => {
     expect(
       getAdmissionsEmailConfig({
         ADMISSIONS_EMAIL_ENABLED: "true",
+        ADMISSIONS_EMAIL_MODE: "pilot",
+        ADMISSIONS_EMAIL_PILOT_ALLOWLIST: " Owner+Applicant@Example.org ",
         ADMISSIONS_EMAIL_PROVIDER: "smtp",
         ADMISSIONS_EMAIL_FROM: "BETAR Admissions <admissions@example.org>",
         ADMISSIONS_EMAIL_REPLY_TO: "admissions@example.org",
@@ -39,9 +59,15 @@ describe("admissions email configuration", () => {
   });
 
   it("reports missing Microsoft Graph settings when enabled", () => {
-    expect(getAdmissionsEmailConfig({ ADMISSIONS_EMAIL_ENABLED: "true", ADMISSIONS_EMAIL_PROVIDER: "graph" })).toEqual({
+    expect(getAdmissionsEmailConfig({
+      ADMISSIONS_EMAIL_ENABLED: "true",
+      ADMISSIONS_EMAIL_MODE: "live",
+      ADMISSIONS_EMAIL_PROVIDER: "graph"
+    })).toEqual({
       enabled: true,
+      mode: "live",
       provider: "graph",
+      pilotAllowlist: [],
       missing: [
         "MICROSOFT_GRAPH_TENANT_ID",
         "MICROSOFT_GRAPH_CLIENT_ID",
@@ -55,6 +81,7 @@ describe("admissions email configuration", () => {
     expect(
       getAdmissionsEmailConfig({
         ADMISSIONS_EMAIL_ENABLED: "true",
+        ADMISSIONS_EMAIL_MODE: "live",
         ADMISSIONS_EMAIL_PROVIDER: "graph",
         MICROSOFT_GRAPH_TENANT_ID: "tenant-id",
         MICROSOFT_GRAPH_CLIENT_ID: "client-id",
@@ -71,6 +98,54 @@ describe("admissions email configuration", () => {
       senderEmail: "admissions@example.org",
       replyTo: "admissions@example.org"
     });
+  });
+
+  it("normalizes and deduplicates pilot recipients", () => {
+    expect(
+      parseAdmissionsEmailPilotAllowlist(" Owner@Example.org,student@example.org,owner@example.org ")
+    ).toEqual(["owner@example.org", "student@example.org"]);
+  });
+
+  it("requires both an allowlisted address and matching fake related record in pilot mode", () => {
+    const base = {
+      mode: "pilot" as const,
+      pilotAllowlist: ["owner@example.org"],
+      recipient: "OWNER@example.org",
+      identity: {
+        personId: "person-1",
+        admissionLeadId: "lead-1",
+        studentId: null
+      },
+      testRecords: [
+        { person_id: "person-1", admission_lead_id: "lead-1", student_id: null }
+      ]
+    };
+
+    expect(evaluateAdmissionsEmailSafety(base)).toEqual({ allowed: true });
+    expect(
+      evaluateAdmissionsEmailSafety({ ...base, recipient: "genuine@example.org" })
+    ).toEqual({ allowed: false, reason: "recipient_not_allowlisted" });
+    expect(
+      evaluateAdmissionsEmailSafety({ ...base, testRecords: [] })
+    ).toEqual({ allowed: false, reason: "related_record_not_marked_fake" });
+    expect(
+      evaluateAdmissionsEmailSafety({
+        ...base,
+        identity: { personId: "person-1", admissionLeadId: null, studentId: null }
+      })
+    ).toEqual({ allowed: false, reason: "missing_related_record" });
+  });
+
+  it("requires a deliberate live mode to bypass pilot-only checks", () => {
+    expect(
+      evaluateAdmissionsEmailSafety({
+        mode: "live",
+        pilotAllowlist: [],
+        recipient: "genuine@example.org",
+        identity: { personId: null },
+        testRecords: []
+      })
+    ).toEqual({ allowed: true });
   });
 });
 
@@ -134,6 +209,19 @@ describe("admissions correspondence rendering", () => {
     expect(rendered.text).toContain("23 August 2026");
     expect(rendered.text).toContain("https://auth.example.test/correction");
     expect(rendered.text).toContain("authoritative record");
+  });
+
+  it("uses the immutable reviewed body snapshot for operational correspondence", () => {
+    const rendered = renderCorrespondenceEmail({
+      templateKey: "application_invitation",
+      renderedSubject: "Reviewed subject",
+      renderedBody: "Hello Asha,\n\nThis is the exact reviewed message.",
+      metadata: { action_link: "https://should-not-replace-the-snapshot.example.org" }
+    });
+
+    expect(rendered.text).toBe("Hello Asha,\n\nThis is the exact reviewed message.");
+    expect(rendered.html).toContain("This is the exact reviewed message.");
+    expect(rendered.text).not.toContain("should-not-replace");
   });
 
   it("rejects unsupported template keys", () => {
