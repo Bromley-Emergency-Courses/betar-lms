@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "@/components/admissions-workspace.module.css";
 import { AdmissionsBatchActionDialog } from "@/components/admissions-batch-action-dialog";
+import { AdmissionsEmailPilotControls } from "@/components/admissions-email-pilot-controls";
 import {
   newStudentJourneyStageLabels,
   newStudentJourneyStages
@@ -34,6 +35,7 @@ type OperationsTableProps =
       items: StaffReturningStudentAdmissionsOperation[];
       total: number;
       query: ReturningStudentWorkspaceQuery;
+      email: { enabled: boolean; mode: string; missing: string[] };
     };
 
 function formatDate(value?: string): string {
@@ -87,7 +89,13 @@ function NewStudentDrawer({ item }: { item: StaffNewStudentAdmissionsOperation }
   );
 }
 
-function ReturningStudentDrawer({ item }: { item: StaffReturningStudentAdmissionsOperation }) {
+function ReturningStudentDrawer({
+  item,
+  email
+}: {
+  item: StaffReturningStudentAdmissionsOperation;
+  email: { enabled: boolean; mode: string; missing: string[] };
+}) {
   return (
     <>
       <div className={styles.nextAction}>
@@ -120,6 +128,20 @@ function ReturningStudentDrawer({ item }: { item: StaffReturningStudentAdmission
         {item.hasEligibilityChange ? <p><strong>Current eligibility facts differ from the inclusion snapshot.</strong></p> : null}
         {item.blockingReason ? <p><strong>{plainLanguageAdmissionsLabel(item.blockingReason)}</strong></p> : null}
       </section>
+      <section className={styles.drawerSection}>
+        <span>Email pilot safety</span>
+        <AdmissionsEmailPilotControls
+          recordType="returning_student"
+          entityId={item.studentId}
+          displayName={item.studentName}
+          recipientEmail={item.currentEmail}
+          recipientAllowlisted={item.pilotRecipientAllowlisted}
+          emailEnabled={email.enabled}
+          emailMode={email.mode}
+          configurationReady={email.missing.length === 0}
+          testRecord={item.pilotTestRecord}
+        />
+      </section>
     </>
   );
 }
@@ -129,13 +151,15 @@ function RecordDrawer({
   workspace,
   onClose,
   closeButtonRef,
-  drawerRef
+  drawerRef,
+  emailConfig
 }: {
   item: StaffNewStudentAdmissionsOperation | StaffReturningStudentAdmissionsOperation;
   workspace: "new_students" | "returning_students";
   onClose: () => void;
   closeButtonRef: React.RefObject<HTMLButtonElement | null>;
   drawerRef: React.RefObject<HTMLElement | null>;
+  emailConfig?: { enabled: boolean; mode: string; missing: string[] };
 }) {
   const name = workspace === "new_students"
     ? (item as StaffNewStudentAdmissionsOperation).applicantName
@@ -161,7 +185,7 @@ function RecordDrawer({
         <div className={styles.drawerBody}>
           {workspace === "new_students"
             ? <NewStudentDrawer item={item as StaffNewStudentAdmissionsOperation} />
-            : <ReturningStudentDrawer item={item as StaffReturningStudentAdmissionsOperation} />}
+            : <ReturningStudentDrawer item={item as StaffReturningStudentAdmissionsOperation} email={emailConfig ?? { enabled: false, mode: "disabled", missing: [] }} />}
         </div>
       </aside>
     </>
@@ -447,6 +471,7 @@ export function AdmissionsOperationsTable(props: OperationsTableProps) {
           onClose={() => setFocusedId(null)}
           closeButtonRef={closeButtonRef}
           drawerRef={drawerRef}
+          emailConfig={props.workspace === "returning_students" ? props.email : undefined}
         />
       ) : null}
     </>

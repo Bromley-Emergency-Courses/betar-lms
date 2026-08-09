@@ -54,6 +54,7 @@ export default async function ReturningStudentsAdmissionsPage({
           items={page.items}
           total={page.total}
           query={query}
+          email={overview.email}
         />
       </div>
     </AppShell>

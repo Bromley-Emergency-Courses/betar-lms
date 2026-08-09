@@ -4,6 +4,7 @@ import {
   newStudentJourneyStages,
   type StaffNewStudentAdmissionsWorkItem
 } from "@/lib/admissions-staff-workflow";
+import type { AdmissionsEmailPilotTestRecord } from "@/lib/admissions-email-pilot";
 
 export const admissionsWorkspacePageSizes = [25, 50, 100] as const;
 export const admissionsAttentionFilters = ["all", "needs_attention", "ready", "waiting"] as const;
@@ -71,6 +72,8 @@ export interface StaffReturningStudentAdmissionsOperation {
   responseState: "awaiting_response" | "removed";
   needsStaffAttention: boolean;
   primaryNextAction: string;
+  pilotTestRecord?: AdmissionsEmailPilotTestRecord;
+  pilotRecipientAllowlisted: boolean;
 }
 
 const querySchema = z.object({
@@ -198,7 +201,8 @@ export function mapStaffReturningStudentAdmissionsOperation(
     contactState: String(row.contact_state) as StaffReturningStudentAdmissionsOperation["contactState"],
     responseState: String(row.response_state) as StaffReturningStudentAdmissionsOperation["responseState"],
     needsStaffAttention: Boolean(row.needs_staff_attention),
-    primaryNextAction: String(row.primary_next_action)
+    primaryNextAction: String(row.primary_next_action),
+    pilotRecipientAllowlisted: false
   };
 }
 

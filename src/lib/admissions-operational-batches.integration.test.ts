@@ -11,6 +11,10 @@ const executorMigration = readFileSync(
   join(process.cwd(), "supabase/migrations/0041_reviewed_new_student_batch_executor.sql"),
   "utf8"
 );
+const pilotControlsMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/0042_admissions_email_pilot_staff_controls.sql"),
+  "utf8"
+);
 
 const adminId = "11111111-1111-4111-8111-111111111111";
 const personOneId = "20000000-0000-4000-8000-000000000001";
@@ -422,6 +426,7 @@ describe("admissions operational batches and email pilot database workflow", () 
       await db.exec(foundationSchema);
       await db.exec(migration);
       await db.exec(executorMigration);
+      await db.exec(pilotControlsMigration);
       await db.exec(`
         select set_config('request.jwt.claim.sub', '${adminId}', false);
         insert into public.staff_profiles (id) values ('${adminId}');
@@ -431,6 +436,23 @@ describe("admissions operational batches and email pilot database workflow", () 
           id, template_key, version, channel, subject_template, body_template
         ) values ('${templateId}', 'application_invitation', 1, 'email', 'Invitation', 'Body');
       `);
+
+      const pilotMarker = await db.query<{ id: string }>(`
+        select public.mark_fake_admission_lead_for_email_pilot(
+          '${unlinkedLeadId}', 'Unlinked enquiry pilot', 'Controlled applicant journey.'
+        ) as id
+      `);
+      const markedLead = await db.query<{ person_id: string; stage: string; marker_active: boolean; link_audits: number }>(`
+        select lead.person_id, lead.stage, marker.active as marker_active,
+          (select count(*)::integer from public.audit_events
+           where action = 'admission.person_linked_for_email_pilot' and entity_id = lead.id) as link_audits
+        from public.admission_leads lead
+        join public.admissions_email_test_records marker on marker.admission_lead_id = lead.id
+        where lead.id = '${unlinkedLeadId}'
+      `);
+      expect(pilotMarker.rows[0]?.id).toBeTruthy();
+      expect(markedLead.rows[0]).toMatchObject({ stage: "interest", marker_active: true, link_audits: 1 });
+      expect(markedLead.rows[0]?.person_id).toBeTruthy();
 
       const targets = JSON.stringify([{
         entity_type: "admission_lead",
@@ -548,6 +570,11 @@ describe("admissions operational batches and email pilot database workflow", () 
       });
 
       await db.exec("select set_config('request.jwt.claim.sub', '', false)");
+      await expect(db.exec(`
+        select public.mark_fake_admission_lead_for_email_pilot(
+          '${unlinkedLeadId}', 'Unauthorized marker', 'Must be rejected.'
+        )
+      `)).rejects.toThrow("Only admissions admins can mark fake pilot records");
       await expect(db.exec(`
         select public.create_new_student_invitation_operational_batch(
           '60000000-0000-4000-8000-000000000099', 'one', '${targets}'::jsonb, '{}'::jsonb,

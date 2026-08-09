@@ -268,6 +268,94 @@
   resize: vertical;
 }
 
+.pilotControl {
+  display: grid;
+  gap: 12px;
+}
+
+.pilotStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pilotStatusGrid > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.pilotStatusGrid span {
+  color: #748094;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.pilotStatusGrid strong {
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+}
+
+.pilotMarkerDetail {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #a9d8c4;
+  border-radius: 9px;
+  background: #effaf5;
+  color: #176448;
+}
+
+.pilotMarkerDetail div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pilotMarkerDetail p,
+.pilotMarkerDetail small,
+.pilotWarning,
+.formError,
+.formSuccess {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.pilotWarning {
+  color: #8a4b12;
+}
+
+.confirmationCheck {
+  display: flex !important;
+  align-items: flex-start;
+  grid-template-columns: none !important;
+  gap: 8px !important;
+  font-weight: 650 !important;
+  line-height: 1.4;
+}
+
+.confirmationCheck input {
+  width: auto;
+  min-height: 0;
+  margin-top: 2px;
+}
+
+.formError {
+  color: #9a3412;
+}
+
+.formSuccess {
+  color: #176448;
+}
+
 .growField {
   flex: 1 1 260px;
 }

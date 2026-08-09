@@ -37,6 +37,7 @@ import {
   CorrectionReviewForm,
   RestrictedSupportNeedsReveal
 } from "@/components/admissions-record-actions";
+import { AdmissionsEmailPilotControls } from "@/components/admissions-email-pilot-controls";
 import styles from "@/components/admissions-record.module.css";
 import { AdmissionsLocalNavigation } from "@/components/admissions-workspace-shell";
 import workspaceStyles from "@/components/admissions-workspace.module.css";
@@ -686,6 +687,7 @@ export default async function NewStudentAdmissionRecordPage({
             </div>
             <div className={styles.headerPills}>
               <span className={styles.pill}>{newStudentJourneyStageLabels[record.operation.journeyStage]}</span>
+              {record.pilotTestRecord?.active ? <span className={`${styles.pill} ${styles.readyPill}`}><LockKeyhole size={12} /> Pilot test record</span> : null}
               {record.operation.leadingAttentionIndicator ? <span className={`${styles.pill} ${styles.attentionPill}`}><AlertTriangle size={12} /> {plainLanguageAdmissionsLabel(record.operation.leadingAttentionIndicator)}</span> : null}
             </div>
           </header>
@@ -730,6 +732,20 @@ export default async function NewStudentAdmissionRecordPage({
                   </form>
                 ) : null}
                 {record.operation.primaryNextAction === "reissue_offer" ? <p className={styles.helpText}>Use the reissue action in the offer section to set a new response deadline.</p> : null}
+              </section>
+              <section className={styles.sideCard}>
+                <h3>Email pilot safety</h3>
+                <AdmissionsEmailPilotControls
+                  recordType="new_applicant"
+                  entityId={record.lead.id}
+                  displayName={record.operation.applicantName}
+                  recipientEmail={record.lead.email}
+                  recipientAllowlisted={record.email.recipientAllowlisted}
+                  emailEnabled={record.email.enabled}
+                  emailMode={record.email.mode}
+                  configurationReady={record.email.missing.length === 0}
+                  testRecord={record.pilotTestRecord}
+                />
               </section>
               <section className={styles.sideCard}>
                 <h3>Record sections</h3>

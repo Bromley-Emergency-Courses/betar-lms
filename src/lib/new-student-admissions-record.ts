@@ -1,6 +1,10 @@
 import "server-only";
 
-import { getAdmissionsEmailConfig } from "@/lib/admissions-email";
+import { getAdmissionsEmailConfig, isPilotRecipientAllowlisted } from "@/lib/admissions-email";
+import {
+  mapAdmissionsEmailPilotTestRecord,
+  type AdmissionsEmailPilotTestRecord
+} from "@/lib/admissions-email-pilot";
 import {
   mapStaffNewStudentAdmissionsOperation,
   type StaffNewStudentAdmissionsOperation
@@ -185,7 +189,13 @@ export interface NewStudentAdmissionRecord {
     sentAt?: string;
     createdAt: string;
   }>;
-  email: { enabled: boolean; mode: string; missing: string[] };
+  pilotTestRecord?: AdmissionsEmailPilotTestRecord;
+  email: {
+    enabled: boolean;
+    mode: string;
+    missing: string[];
+    recipientAllowlisted: boolean;
+  };
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -302,7 +312,7 @@ function demoRecord(admissionId: string): NewStudentAdmissionRecord {
     abandonmentPeriods: [],
     history: [{ id: "99999999-9999-4999-8999-999999999999", action: "application.submitted", entityType: "application", createdAt: now }],
     correspondence: [],
-    email: { enabled: false, mode: "pilot", missing: [] }
+    email: { enabled: false, mode: "disabled", missing: [], recipientAllowlisted: false }
   };
 }
 
@@ -320,14 +330,16 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
   if (!isSupabaseConfigured()) return demoRecord(admissionId);
 
   const supabase = await createSupabaseServerClient();
-  const [operationResult, leadResult, abandonmentResult] = await Promise.all([
+  const [operationResult, leadResult, abandonmentResult, pilotRecordResult] = await Promise.all([
     supabase.from("staff_new_student_admissions_operations").select("*").eq("admission_lead_id", admissionId).maybeSingle(),
     supabase.from("admission_leads").select("*").eq("id", admissionId).maybeSingle(),
-    supabase.from("admission_abandonment_periods").select("id, previous_lead_stage, abandonment_reason, abandoned_at, reopen_reason, reopened_at").eq("admission_lead_id", admissionId).order("abandoned_at", { ascending: false })
+    supabase.from("admission_abandonment_periods").select("id, previous_lead_stage, abandonment_reason, abandoned_at, reopen_reason, reopened_at").eq("admission_lead_id", admissionId).order("abandoned_at", { ascending: false }),
+    supabase.from("admissions_email_test_records").select("id, record_type, label, reason, active, marked_at, unmarked_at, unmark_reason").eq("admission_lead_id", admissionId).maybeSingle()
   ]);
   if (operationResult.error) throw new Error(operationResult.error.message);
   if (leadResult.error) throw new Error(leadResult.error.message);
   if (abandonmentResult.error) throw new Error(abandonmentResult.error.message);
+  if (pilotRecordResult.error) throw new Error(pilotRecordResult.error.message);
   if (!operationResult.data || !leadResult.data) return null;
 
   const operation = mapStaffNewStudentAdmissionsOperation(operationResult.data);
@@ -582,8 +594,14 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
     lead,
     application,
     abandonmentPeriods,
+    pilotTestRecord: pilotRecordResult.data ? mapAdmissionsEmailPilotTestRecord(asRecord(pilotRecordResult.data)) : undefined,
     history: (historyResult.data ?? []).map((row) => ({ id: String(row.id), action: String(row.action), entityType: String(row.entity_type), createdAt: String(row.created_at) })),
     correspondence: (correspondenceResult.data ?? []).map((row) => ({ id: String(row.id), templateKey: String(row.template_key), recipientEmail: String(row.recipient_email), deliveryStatus: String(row.delivery_status), subject: String(row.rendered_subject), sentAt: optionalString(row.sent_at), createdAt: String(row.created_at) })),
-    email: { enabled: email.enabled, mode: email.mode, missing: email.missing }
+    email: {
+      enabled: email.enabled,
+      mode: email.mode,
+      missing: email.missing,
+      recipientAllowlisted: isPilotRecipientAllowlisted(lead.email, email.pilotAllowlist)
+    }
   };
 }

@@ -1,6 +1,7 @@
 import "server-only";
 
-import { getAdmissionsEmailConfig } from "@/lib/admissions-email";
+import { getAdmissionsEmailConfig, isPilotRecipientAllowlisted } from "@/lib/admissions-email";
+import { mapAdmissionsEmailPilotTestRecord } from "@/lib/admissions-email-pilot";
 import {
   mapStaffNewStudentAdmissionsOperation,
   mapStaffReturningStudentAdmissionsOperation,
@@ -224,7 +225,28 @@ export async function getReturningStudentWorkspacePage(
 
   const { data, error, count } = await request;
   if (error) throw new Error(error.message);
-  return { items: (data ?? []).map((row) => mapStaffReturningStudentAdmissionsOperation(row)), total: count ?? 0 };
+  const items = (data ?? []).map((row) => mapStaffReturningStudentAdmissionsOperation(row));
+  const studentIds = items.map((item) => item.studentId);
+  const pilotResult = studentIds.length > 0
+    ? await supabase
+        .from("admissions_email_test_records")
+        .select("id, record_type, student_id, label, reason, active, marked_at, unmarked_at, unmark_reason")
+        .in("student_id", studentIds)
+    : { data: [], error: null };
+  if (pilotResult.error) throw new Error(pilotResult.error.message);
+  const pilotByStudent = new Map((pilotResult.data ?? []).map((row) => [String(row.student_id), mapAdmissionsEmailPilotTestRecord(record(row))]));
+  const email = getAdmissionsEmailConfig();
+
+  return {
+    items: items.map((item) => ({
+      ...item,
+      pilotTestRecord: pilotByStudent.get(item.studentId),
+      pilotRecipientAllowlisted: item.currentEmail
+        ? isPilotRecipientAllowlisted(item.currentEmail, email.pilotAllowlist)
+        : false
+    })),
+    total: count ?? 0
+  };
 }
 
 function record(value: unknown): Record<string, unknown> {
