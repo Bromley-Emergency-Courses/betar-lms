@@ -521,6 +521,174 @@
   font-size: 11px;
 }
 
+.selectionLimit {
+  max-width: 260px;
+  color: var(--admissions-red);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.dialogBackdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(18 37 40 / 52%);
+}
+
+.reviewDialog {
+  display: grid;
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid #c8d1cc;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 22px 65px rgb(18 37 40 / 28%);
+}
+
+.reviewDialog .drawerHeader {
+  padding: 17px 19px;
+  border-bottom: 1px solid var(--line);
+}
+
+.reviewBody {
+  display: grid;
+  gap: 15px;
+  padding: 18px 19px;
+  overflow-y: auto;
+}
+
+.reviewScope,
+.previewResults,
+.exclusionList {
+  display: grid;
+  gap: 6px;
+}
+
+.reviewScope {
+  padding: 11px 13px;
+  border: 1px solid #d9dfdc;
+  border-radius: 7px;
+  background: #f7f9f7;
+}
+
+.reviewScope span,
+.previewCounts span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reviewFields {
+  display: grid;
+  gap: 11px;
+}
+
+.reviewFields label {
+  display: grid;
+  gap: 5px;
+  color: var(--admissions-navy);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reviewFields input,
+.reviewFields textarea {
+  width: 100%;
+  border: 1px solid #bdc9c3;
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: white;
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 450;
+}
+
+.dialogHelp {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.previewCounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.previewCounts div {
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.previewCounts div:last-child {
+  border-right: 0;
+}
+
+.previewCounts strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 20px;
+}
+
+.exclusionList {
+  padding: 11px 13px;
+  border: 1px solid #e7c8c3;
+  border-radius: 7px;
+  background: #fff7f5;
+}
+
+.exclusionList p {
+  margin: 0;
+  color: #71352f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.dialogError {
+  padding: 10px 12px;
+  border: 1px solid #dba9a3;
+  border-radius: 6px;
+  background: #fff2f0;
+  color: #7c2821;
+  font-size: 12px;
+}
+
+.reviewFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 13px 19px;
+  border-top: 1px solid var(--line);
+  background: #fafbf9;
+}
+
+.batchReviewFact {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.retryAction {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.retryAction span {
+  color: var(--admissions-red);
+  font-size: 11px;
+}
+
 .linkButton {
   border: 0;
   padding: 2px;
@@ -759,6 +927,30 @@
 }
 
 @media (max-width: 760px) {
+  .dialogBackdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .reviewDialog {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .previewCounts {
+    grid-template-columns: 1fr;
+  }
+
+  .previewCounts div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .previewCounts div:last-child {
+    border-bottom: 0;
+  }
+
   .cardMetrics,
   .metrics,
   .batchMetrics {

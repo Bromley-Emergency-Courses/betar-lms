@@ -257,6 +257,18 @@ describe("admissions correspondence rendering", () => {
     expect(rendered.text).not.toContain("should-not-replace");
   });
 
+  it("injects a transient magic link only into an explicit reviewed placeholder", () => {
+    const rendered = renderCorrespondenceEmail({
+      templateKey: "application_invitation",
+      renderedSubject: "Reviewed invitation",
+      renderedBody: "Continue securely:\n{{action_link}}",
+      metadata: { action_link: "https://auth.example.test/one-time-token" }
+    });
+
+    expect(rendered.text).toContain("https://auth.example.test/one-time-token");
+    expect(rendered.text).not.toContain("{{action_link}}");
+  });
+
   it("rejects unsupported template keys", () => {
     expect(() =>
       renderCorrespondenceEmail({

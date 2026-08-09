@@ -348,7 +348,8 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
   const intro = greeting(input.recipientName);
 
   if (input.renderedBody?.trim()) {
-    const text = input.renderedBody.trim();
+    const actionLink = stringMetadata(metadata, "action_link");
+    const text = input.renderedBody.trim().replaceAll("{{action_link}}", actionLink ?? "[secure link unavailable]");
     return { subject, text, html: textToHtml(text) };
   }
 

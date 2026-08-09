@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { AdmissionsBatchRefresh } from "@/components/admissions-batch-refresh";
+import { AdmissionsBatchRetry } from "@/components/admissions-batch-retry";
 import { AdmissionsLocalNavigation } from "@/components/admissions-workspace-shell";
 import styles from "@/components/admissions-workspace.module.css";
 import { AppShell } from "@/components/app-shell";
@@ -68,10 +69,12 @@ export default async function AdmissionsBatchPage({
         <section className={styles.batchSummary}>
           <div className={styles.resultHeader}>
             <div><h2>Progress</h2><p>Progress and per-record results remain available across navigation and refresh.</p></div>
-            <AdmissionsBatchRefresh active={["queued", "running"].includes(batch.status)} status={plainLanguageAdmissionsLabel(batch.status)} completed={completed} total={batch.reviewedCount} />
+            <AdmissionsBatchRefresh batchId={batch.id} active={["queued", "running"].includes(batch.status)} status={plainLanguageAdmissionsLabel(batch.status)} completed={completed} total={batch.reviewedCount} />
           </div>
           <div className={styles.progressTrack} aria-hidden="true"><div className={styles.progressFill} style={{ width: `${progress}%` }} /></div>
           <div className={styles.batchMeta}><span>{progress}% complete</span><span>Last progress {formatDateTime(batch.lastProgressAt)}</span>{batch.retryOfBatchId ? <span>Retry of {batch.retryOfBatchId.slice(0, 8)}</span> : null}</div>
+          {batch.renderedSubject ? <p className={styles.batchReviewFact}><strong>Reviewed subject:</strong> {batch.renderedSubject}</p> : null}
+          {batch.actionReason ? <p className={styles.batchReviewFact}><strong>Action reason:</strong> {batch.actionReason}</p> : null}
         </section>
 
         <div className={styles.batchMetrics}>
@@ -81,6 +84,7 @@ export default async function AdmissionsBatchPage({
           <div className={`${styles.batchMetric} ${styles.alertMetric}`}><span>Failed</span><strong>{batch.failedCount}</strong></div>
           <div className={styles.batchMetric}><span>Excluded</span><strong>{batch.excludedCount}</strong></div>
         </div>
+        {batch.status === "completed" && batch.failedCount > 0 ? <AdmissionsBatchRetry batchId={batch.id} failedCount={batch.failedCount} /> : null}
 
         <section className={styles.surface}>
           <div className={styles.surfaceHeader}><div><h2>Per-record results</h2><p>{result.total} result{result.total === 1 ? "" : "s"} in this view</p></div></div>

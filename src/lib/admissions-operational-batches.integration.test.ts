@@ -7,6 +7,10 @@ const migration = readFileSync(
   join(process.cwd(), "supabase/migrations/0038_operational_batches_email_pilot.sql"),
   "utf8"
 );
+const executorMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/0041_reviewed_new_student_batch_executor.sql"),
+  "utf8"
+);
 
 const adminId = "11111111-1111-4111-8111-111111111111";
 const personOneId = "20000000-0000-4000-8000-000000000001";
@@ -55,10 +59,11 @@ as $$
 $$;
 
 create table public.persons (
-  id uuid primary key,
+  id uuid primary key default gen_random_uuid(),
   first_name text not null,
   last_name text not null,
-  email text not null
+  email text not null,
+  phone text
 );
 
 create table public.students (
@@ -78,9 +83,19 @@ create table public.admission_leads (
   first_name text not null,
   last_name text not null,
   email text not null,
+  phone text,
   stage text not null default 'interest',
+  programme text not null default 'pgcert',
+  converted_student_id uuid references public.students(id),
   archived boolean not null default false,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.applications (
+  id uuid primary key default gen_random_uuid(),
+  admission_lead_id uuid not null references public.admission_leads(id),
+  status text not null default 'draft'
 );
 
 create table public.returning_student_cycle_participants (
@@ -392,6 +407,200 @@ describe("admissions operational batches and email pilot database workflow", () 
         `)
       ).rejects.toThrow(/permission denied/i);
       await db.exec("reset role");
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("queues reviewed invitations for unlinked enquiries and recovers interrupted targets", async () => {
+    const db = new PGlite();
+    const unlinkedLeadId = "30000000-0000-4000-8000-000000000010";
+    const invitationRequestKey = "60000000-0000-4000-8000-000000000010";
+    const closeRequestKey = "60000000-0000-4000-8000-000000000011";
+
+    try {
+      await db.exec(foundationSchema);
+      await db.exec(migration);
+      await db.exec(executorMigration);
+      await db.exec(`
+        select set_config('request.jwt.claim.sub', '${adminId}', false);
+        insert into public.staff_profiles (id) values ('${adminId}');
+        insert into public.admission_leads (id, first_name, last_name, email)
+        values ('${unlinkedLeadId}', 'Unlinked', 'Enquiry', 'unlinked@example.test');
+        insert into public.correspondence_templates (
+          id, template_key, version, channel, subject_template, body_template
+        ) values ('${templateId}', 'application_invitation', 1, 'email', 'Invitation', 'Body');
+      `);
+
+      const targets = JSON.stringify([{
+        entity_type: "admission_lead",
+        entity_id: unlinkedLeadId,
+        person_id: null,
+        recipient_email: "unlinked@example.test",
+        recipient_name: "Unlinked Enquiry",
+        eligible: true,
+        source_snapshot: { journey_stage: "enquiry", source_lead_stage: "interest" }
+      }]).replaceAll("'", "''");
+      const created = await db.query<{ id: string }>(`
+        select public.create_new_student_invitation_operational_batch(
+          '${invitationRequestKey}', 'one', '${targets}'::jsonb, '{}'::jsonb,
+          'Your BETAR application invitation',
+          'Continue securely: {{action_link}}'
+        ) as id
+      `);
+      const batchId = created.rows[0]?.id;
+
+      const queued = await db.query<{
+        person_id: string;
+        status: string;
+        queued_count: number;
+        correspondence_count: number;
+      }>(`
+        select lead.person_id, target.status::text, batch.queued_count,
+          (select count(*)::integer from public.correspondence_logs where operational_batch_id = batch.id) as correspondence_count
+        from public.admissions_operational_batches batch
+        join public.admissions_operational_batch_targets target on target.batch_id = batch.id
+        join public.admission_leads lead on lead.id = target.entity_id
+        where batch.id = '${batchId}'
+      `);
+      expect(queued.rows[0]).toMatchObject({ status: "queued", queued_count: 1, correspondence_count: 0 });
+      expect(queued.rows[0]?.person_id).toBeTruthy();
+
+      const claimed = await db.query<{ target_id: string }>(`
+        select target_id from public.claim_admissions_operational_batch_targets('${batchId}', 1)
+      `);
+      const targetId = claimed.rows[0]?.target_id;
+      const correspondenceId = "50000000-0000-4000-8000-000000000010";
+      await db.exec(`
+        insert into public.correspondence_logs (
+          id, person_id, recipient_email, recipient_name, related_entity_type, related_entity_id,
+          template_id, template_key, template_version, channel, rendered_subject, delivery_status
+        ) values (
+          '${correspondenceId}', '${queued.rows[0]?.person_id}', 'unlinked@example.test', 'Unlinked Enquiry',
+          'application_invitation', '70000000-0000-4000-8000-000000000010',
+          '${templateId}', 'application_invitation', 1, 'email', 'Initial subject', 'queued'
+        );
+        select public.link_invitation_operational_batch_target(
+          '${targetId}', '${correspondenceId}', '${queued.rows[0]?.person_id}',
+          'unlinked@example.test', 'Unlinked Enquiry'
+        );
+      `);
+      const linked = await db.query<{ body: string; operational_batch_target_id: string }>(`
+        select rendered_body as body, operational_batch_target_id
+        from public.correspondence_logs where id = '${correspondenceId}'
+      `);
+      expect(linked.rows[0]).toEqual({
+        body: "Continue securely: {{action_link}}",
+        operational_batch_target_id: targetId
+      });
+
+      await db.exec(`
+        update public.admissions_operational_batch_targets
+        set last_progress_at = now() - interval '10 minutes'
+        where id = '${targetId}';
+      `);
+      const recovered = await db.query<{ count: number }>(`
+        select public.requeue_stale_admissions_operational_batch_targets(
+          '${batchId}', now() - interval '5 minutes'
+        ) as count
+      `);
+      expect(recovered.rows[0]?.count).toBe(1);
+
+      const closeTargets = JSON.stringify([{
+        entity_type: "admission_lead",
+        entity_id: unlinkedLeadId,
+        person_id: queued.rows[0]?.person_id,
+        eligible: true,
+        source_snapshot: { journey_stage: "enquiry", source_lead_stage: "interest" }
+      }]).replaceAll("'", "''");
+      const closeBatch = await db.query<{ id: string }>(`
+        select public.create_reasoned_admissions_operational_batch(
+          '${closeRequestKey}', 'new_students', 'close_abandoned', 'one',
+          '${closeTargets}'::jsonb, '{}'::jsonb, 'Applicant is not proceeding this intake.'
+        ) as id
+      `);
+      const reason = await db.query<{ action_reason: string }>(`
+        select action_reason from public.admissions_operational_batches where id = '${closeBatch.rows[0]?.id}'
+      `);
+      expect(reason.rows[0]?.action_reason).toBe("Applicant is not proceeding this intake.");
+
+      const failedCloseTarget = await db.query<{ target_id: string }>(`
+        select target_id from public.claim_admissions_operational_batch_targets('${closeBatch.rows[0]?.id}', 1)
+      `);
+      await db.exec(`
+        select public.finish_admissions_operational_batch_target(
+          '${failedCloseTarget.rows[0]?.target_id}', 'failed', 'Temporary executor failure.'
+        )
+      `);
+      const retryBatch = await db.query<{ id: string }>(`
+        select public.retry_failed_reviewed_admissions_operational_batch(
+          '${closeBatch.rows[0]?.id}', '60000000-0000-4000-8000-000000000012'
+        ) as id
+      `);
+      const retryReason = await db.query<{ action_reason: string; target_count: number }>(`
+        select batch.action_reason,
+          (select count(*)::integer from public.admissions_operational_batch_targets where batch_id = batch.id) as target_count
+        from public.admissions_operational_batches batch where id = '${retryBatch.rows[0]?.id}'
+      `);
+      expect(retryReason.rows[0]).toEqual({
+        action_reason: "Applicant is not proceeding this intake.",
+        target_count: 1
+      });
+
+      await db.exec("select set_config('request.jwt.claim.sub', '', false)");
+      await expect(db.exec(`
+        select public.create_new_student_invitation_operational_batch(
+          '60000000-0000-4000-8000-000000000099', 'one', '${targets}'::jsonb, '{}'::jsonb,
+          'Invitation', 'Continue: {{action_link}}'
+        )
+      `)).rejects.toThrow("Only admissions admins can create invitation batches");
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("durably enqueues the 500-record acceptance batch without expanding its scope", async () => {
+    const db = new PGlite();
+    const leads = Array.from({ length: 500 }, (_, index) => ({
+      id: `80000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      email: `scale-${index + 1}@example.test`
+    }));
+
+    try {
+      await db.exec(foundationSchema);
+      await db.exec(migration);
+      await db.exec(executorMigration);
+      await db.exec(`
+        select set_config('request.jwt.claim.sub', '${adminId}', false);
+        insert into public.staff_profiles (id) values ('${adminId}');
+        insert into public.admission_leads (id, first_name, last_name, email) values
+        ${leads.map((lead, index) => `('${lead.id}', 'Scale', 'Applicant ${index + 1}', '${lead.email}')`).join(",\n")};
+      `);
+
+      const targets = JSON.stringify(leads.map((lead, index) => ({
+        entity_type: "admission_lead",
+        entity_id: lead.id,
+        person_id: null,
+        recipient_name: `Scale Applicant ${index + 1}`,
+        eligible: true,
+        source_snapshot: { journey_stage: "enquiry", source_lead_stage: "interest" }
+      }))).replaceAll("'", "''");
+      const startedAt = performance.now();
+      const batch = await db.query<{ id: string }>(`
+        select public.create_reasoned_admissions_operational_batch(
+          '60000000-0000-4000-8000-000000000500', 'new_students', 'close_abandoned',
+          'all_matching', '${targets}'::jsonb, '{"stage":"enquiry"}'::jsonb,
+          'Applicant is not proceeding this intake.'
+        ) as id
+      `);
+
+      const queued = await db.query<{ reviewed_count: number; queued_count: number; target_count: number }>(`
+        select batch.reviewed_count, batch.queued_count,
+          (select count(*)::integer from public.admissions_operational_batch_targets where batch_id = batch.id) as target_count
+        from public.admissions_operational_batches batch where id = '${batch.rows[0]?.id}'
+      `);
+      expect(queued.rows[0]).toEqual({ reviewed_count: 500, queued_count: 500, target_count: 500 });
+      expect(performance.now() - startedAt).toBeLessThan(2000);
     } finally {
       await db.close();
     }

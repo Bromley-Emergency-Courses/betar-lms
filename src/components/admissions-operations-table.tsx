@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "@/components/admissions-workspace.module.css";
+import { AdmissionsBatchActionDialog } from "@/components/admissions-batch-action-dialog";
 import {
   newStudentJourneyStageLabels,
   newStudentJourneyStages
@@ -363,6 +364,14 @@ export function AdmissionsOperationsTable(props: OperationsTableProps) {
               <p>{allMatching ? "Scope: all eligible records matching the current visible filters." : "Scope: explicitly selected records across visited pages."}</p>
             </div>
             <div className={styles.selectionActions}>
+              {props.workspace === "new_students" ? (
+                <AdmissionsBatchActionDialog
+                  selectedIds={[...selectedIds]}
+                  allMatching={allMatching}
+                  total={props.total}
+                  filters={{ search: props.query.search, attention: props.query.attention, stage: props.query.stage }}
+                />
+              ) : null}
               {!allMatching && selectedIds.size < props.total ? (
                 <button className={styles.linkButton} onClick={() => setSelection({ queryKey: materialQueryKey, ids: new Set(), allMatching: true })} type="button">
                   Select all {props.total} matching

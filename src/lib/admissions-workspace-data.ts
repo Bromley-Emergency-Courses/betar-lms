@@ -55,6 +55,7 @@ export interface AdmissionsBatchDetail {
   reviewedFilters: Record<string, unknown>;
   templateKey?: string;
   renderedSubject?: string;
+  actionReason?: string;
   retryOfBatchId?: string;
   rootBatchId?: string;
   queuedCount: number;
@@ -285,6 +286,7 @@ export async function getAdmissionsBatchDetail(
       reviewedFilters: record(batchRow.reviewed_filters),
       templateKey: optionalString(batchRow.correspondence_template_key),
       renderedSubject: optionalString(batchRow.rendered_subject),
+      actionReason: optionalString(batchRow.action_reason),
       retryOfBatchId: optionalString(batchRow.retry_of_batch_id),
       rootBatchId: optionalString(batchRow.root_batch_id),
       queuedCount: Number(batchRow.queued_count),
