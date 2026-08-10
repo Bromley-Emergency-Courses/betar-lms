@@ -11,6 +11,10 @@ const terminalActionsMigration = readFileSync(
   join(process.cwd(), "supabase/migrations/0040_new_student_terminal_offer_actions.sql"),
   "utf8"
 );
+const closedStagePriorityMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/0046_prioritize_closed_admissions_stage.sql"),
+  "utf8"
+);
 
 const foundationSchema = `
 create schema auth;
@@ -396,6 +400,8 @@ describe("staff new-student workflow database projection", () => {
     const actorId = "11111111-1111-4111-8111-111111111111";
     const personId = "22222222-2222-4222-8222-222222222222";
     const enquiryId = "33333333-3333-4333-8333-333333333333";
+    const draftPersonId = "33333333-3333-4333-8333-333333333334";
+    const draftApplicationId = "33333333-3333-4333-8333-333333333335";
     const offerLeadId = "44444444-4444-4444-8444-444444444444";
     const applicationId = "55555555-5555-4555-8555-555555555555";
     const decisionId = "66666666-6666-4666-8666-666666666666";
@@ -405,14 +411,26 @@ describe("staff new-student workflow database projection", () => {
       await db.exec(foundationSchema);
       await db.exec(migration);
       await db.exec(terminalActionsMigration);
+      await db.exec(closedStagePriorityMigration);
       await db.query("insert into public.staff_profiles (id) values ($1)", [actorId]);
       await db.query("select set_config('request.jwt.claim.sub', $1, false)", [actorId]);
 
-      await db.query(
-        `insert into public.admission_leads (id, first_name, last_name, email)
-         values ($1, 'Pre', 'Submission', 'pre@example.test')`,
-        [enquiryId]
-      );
+      await db.exec(`
+        insert into public.persons (id, first_name, last_name, email)
+        values ('${draftPersonId}', 'Pre', 'Submission', 'pre@example.test');
+        insert into public.admission_leads (
+          id, person_id, first_name, last_name, email, stage, application_invited_at
+        ) values (
+          '${enquiryId}', '${draftPersonId}', 'Pre', 'Submission', 'pre@example.test',
+          'application_invited', now()
+        );
+        insert into public.applications (
+          id, admission_lead_id, person_id, first_name, last_name, email, status
+        ) values (
+          '${draftApplicationId}', '${enquiryId}', '${draftPersonId}',
+          'Pre', 'Submission', 'pre@example.test', 'draft'
+        );
+      `);
       await db.query(
         "select public.abandon_new_student_admission($1, 'Applicant is not proceeding this intake')",
         [enquiryId]
@@ -439,8 +457,8 @@ describe("staff new-student workflow database projection", () => {
          where lead.id = $1`,
         [enquiryId]
       );
-      expect(reopened.rows[0]?.stage).toBe("interest");
-      expect(reopened.rows[0]?.journey_stage).toBe("enquiry");
+      expect(reopened.rows[0]?.stage).toBe("application_invited");
+      expect(reopened.rows[0]?.journey_stage).toBe("application");
       expect(reopened.rows[0]?.reopened_at).not.toBeNull();
 
       await db.exec(`
