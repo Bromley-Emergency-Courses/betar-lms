@@ -1,6 +1,12 @@
 import { CheckCircle2, FileText, LockKeyhole, ShieldCheck, Upload } from "lucide-react";
 import { Field, FormGrid } from "@/components/forms";
-import { saveApplicationDraft, uploadApplicationDocument } from "@/app/apply/application/actions";
+import {
+  resubmitApplicationCorrections,
+  saveApplicationDraft,
+  uploadApplicationCorrectionDocument,
+  uploadApplicationDocument
+} from "@/app/apply/application/actions";
+import { ApplicationCorrectionFieldResponse } from "@/app/apply/application/application-correction-field-response";
 import { ApplicationSubmitControls } from "@/app/apply/application/application-submit-controls";
 import {
   StudyPlanFields,
@@ -12,6 +18,11 @@ import {
   type ApplicationDocumentSlotKey,
   type ApplicationDocumentVerificationStatus
 } from "@/lib/application-documents";
+import {
+  applicationCorrectionFieldKeys,
+  applicationCorrectionFieldLabel,
+  type ApplicationCorrectionFieldKey
+} from "@/lib/application-corrections";
 import { applicationDeclarationText } from "@/lib/application-submit";
 import { requireApplicantProfile, type PortalProfile } from "@/lib/portal-auth";
 import { getAppData } from "@/lib/seed";
@@ -96,6 +107,30 @@ interface ApplicationDocumentSlotSummary {
   verificationStatus: ApplicationDocumentVerificationStatus;
 }
 
+interface ApplicantCorrectionItemSummary {
+  id: string;
+  targetType: "application_field" | "document_slot";
+  targetKey: string;
+  instructions: string;
+  status: "open" | "resubmitted" | "accepted";
+  baselineValue: string | number | boolean | null;
+  proposedValue: string | number | boolean | null;
+  replacementManagedFileId?: string;
+  responseNote?: string;
+  savedAt?: string;
+}
+
+interface ApplicantCorrectionRequestSummary {
+  id: string;
+  applicationId: string;
+  status: "open" | "resubmitted";
+  summary?: string;
+  dueAt: string;
+  requestedAt: string;
+  revisionNumber: number;
+  items: ApplicantCorrectionItemSummary[];
+}
+
 type ApplicationDraftRow = {
   id: string;
   admission_lead_id: string;
@@ -164,6 +199,29 @@ type ApplicationDocumentSlotRow = {
   size_bytes: number | null;
   uploaded_at: string | null;
   verification_status: ApplicationDocumentVerificationStatus;
+};
+
+type ApplicantCorrectionRequestRow = {
+  id: string;
+  application_id: string;
+  status: "open" | "resubmitted";
+  summary: string | null;
+  due_at: string;
+  requested_at: string;
+  revision_number: number;
+};
+
+type ApplicantCorrectionItemRow = {
+  id: string;
+  target_type: "application_field" | "document_slot";
+  target_key: string;
+  instructions: string;
+  status: "open" | "resubmitted" | "accepted";
+  baseline_value: string | number | boolean | null;
+  proposed_value: string | number | boolean | null;
+  replacement_managed_file_id: string | null;
+  applicant_response_note: string | null;
+  applicant_saved_at: string | null;
 };
 
 function optionalString(value: string | null | undefined): string | undefined {
@@ -242,6 +300,7 @@ async function getApplicantApplicationContext(personId: string): Promise<{
   invitations: ApplicantInvitationSummary[];
   draft?: ApplicationDraftSummary;
   documentSlots: ApplicationDocumentSlotSummary[];
+  correctionRequest?: ApplicantCorrectionRequestSummary;
   terms: ApplicationTermOption[];
   offerings: ApplicationOfferingOption[];
 }> {
@@ -268,6 +327,7 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       ],
       draft: undefined,
       documentSlots: [],
+      correctionRequest: undefined,
       terms,
       offerings: data.offerings
         .map((offering) => ({ offering, courseModule: activeModulesById.get(offering.moduleId) }))
@@ -401,8 +461,9 @@ async function getApplicantApplicationContext(personId: string): Promise<{
 
   let draft: ApplicationDraftSummary | undefined;
   let documentSlots: ApplicationDocumentSlotSummary[] = [];
+  let correctionRequest: ApplicantCorrectionRequestSummary | undefined;
   if (selectedDraftRow) {
-    const [choiceResult, supportNeedsResult, documentSlotResult] = await Promise.all([
+    const [choiceResult, supportNeedsResult, documentSlotResult, correctionRequestResult] = await Promise.all([
       supabase
         .from("application_module_offering_choices")
         .select("offering_id")
@@ -419,7 +480,15 @@ async function getApplicantApplicationContext(personId: string): Promise<{
           "slot_key, label, required, managed_file_id, original_filename, sanitized_filename, content_type, size_bytes, uploaded_at, verification_status"
         )
         .eq("application_id", selectedDraftRow.id)
-        .order("required", { ascending: false })
+        .order("required", { ascending: false }),
+      supabase
+        .from("application_correction_requests")
+        .select("id, application_id, status, summary, due_at, requested_at, revision_number")
+        .eq("application_id", selectedDraftRow.id)
+        .in("status", ["open", "resubmitted"])
+        .order("requested_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<ApplicantCorrectionRequestRow>()
     ]);
 
     if (choiceResult.error) {
@@ -430,6 +499,9 @@ async function getApplicantApplicationContext(personId: string): Promise<{
     }
     if (documentSlotResult.error) {
       throw new Error(documentSlotResult.error.message);
+    }
+    if (correctionRequestResult.error) {
+      throw new Error(correctionRequestResult.error.message);
     }
 
     draft = mapApplicationDraft(
@@ -449,12 +521,47 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       uploadedAt: optionalString(row.uploaded_at),
       verificationStatus: row.verification_status
     }));
+
+    if (correctionRequestResult.data) {
+      const requestRow = correctionRequestResult.data;
+      const correctionItemResult = await supabase
+        .from("application_correction_items")
+        .select("id, target_type, target_key, instructions, status, baseline_value, proposed_value, replacement_managed_file_id, applicant_response_note, applicant_saved_at")
+        .eq("request_id", requestRow.id)
+        .order("created_at");
+      if (correctionItemResult.error) {
+        throw new Error(correctionItemResult.error.message);
+      }
+
+      correctionRequest = {
+        id: requestRow.id,
+        applicationId: requestRow.application_id,
+        status: requestRow.status,
+        summary: optionalString(requestRow.summary),
+        dueAt: requestRow.due_at,
+        requestedAt: requestRow.requested_at,
+        revisionNumber: requestRow.revision_number,
+        items: ((correctionItemResult.data ?? []) as ApplicantCorrectionItemRow[]).map((row) => ({
+          id: row.id,
+          targetType: row.target_type,
+          targetKey: row.target_key,
+          instructions: row.instructions,
+          status: row.status,
+          baselineValue: row.baseline_value,
+          proposedValue: row.proposed_value,
+          replacementManagedFileId: optionalString(row.replacement_managed_file_id),
+          responseNote: optionalString(row.applicant_response_note),
+          savedAt: optionalString(row.applicant_saved_at)
+        }))
+      };
+    }
   }
 
   return {
     invitations,
     draft,
     documentSlots,
+    correctionRequest,
     terms: (termResult.data ?? []).map((row) => ({
       id: String(row.id),
       name: String(row.name),
@@ -495,7 +602,13 @@ function ApplicationSection({
   );
 }
 
-function ApplicationSubmittedPanel({ draft }: { draft: ApplicationDraftSummary }) {
+function ApplicationSubmittedPanel({
+  draft,
+  hasActiveCorrections
+}: {
+  draft: ApplicationDraftSummary;
+  hasActiveCorrections: boolean;
+}) {
   return (
     <div className="apply-form-panel application-draft-form">
       <div className="section-header">
@@ -510,12 +623,141 @@ function ApplicationSubmittedPanel({ draft }: { draft: ApplicationDraftSummary }
         </div>
       </div>
       <div className="application-preview-box">
-        <strong>Locked for admissions review</strong>
+        <strong>{hasActiveCorrections ? "Original submission preserved" : "Locked for admissions review"}</strong>
         <p className="muted small">
-          Programme: {draft.programme === "pgcert" ? "PGCert" : "Microcredential"} · selected first-term offerings:{" "}
-          {draft.selectedOfferingIds.length}
+          {hasActiveCorrections
+            ? "Only the specific corrections requested by admissions can be changed below."
+            : `Programme: ${draft.programme === "pgcert" ? "PGCert" : "Microcredential"} · selected first-term offerings: ${draft.selectedOfferingIds.length}`}
         </p>
       </div>
+    </div>
+  );
+}
+
+function isApplicationCorrectionFieldKey(value: string): value is ApplicationCorrectionFieldKey {
+  return applicationCorrectionFieldKeys.some((key) => key === value);
+}
+
+function displayCorrectionValue(value: string | number | boolean | null): string {
+  if (value === null || value === "") return "Not previously provided";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value).replaceAll("_", " ");
+}
+
+function ApplicationCorrectionPanel({
+  request
+}: {
+  request: ApplicantCorrectionRequestSummary;
+}) {
+  const editable = request.status === "open";
+  const unresolvedItems = request.items.filter((item) => item.status !== "accepted");
+  const addressedItems = unresolvedItems.filter((item) =>
+    item.targetType === "document_slot" ? Boolean(item.replacementManagedFileId) : Boolean(item.savedAt)
+  );
+  const allAddressed = unresolvedItems.length > 0 && addressedItems.length === unresolvedItems.length;
+
+  return (
+    <div className="apply-form-panel application-draft-form application-correction-panel">
+      <div className="section-header">
+        <div>
+          <h2>{editable ? "Admissions needs more information" : "Corrections sent to admissions"}</h2>
+          <p>
+            {editable
+              ? `Address each requested item and resubmit by ${new Date(request.dueAt).toLocaleDateString("en-GB")}.`
+              : "Your responses are locked while admissions reviews them. If another change is needed, this section will reopen."}
+          </p>
+        </div>
+        <div className="icon-box">
+          {editable ? <FileText size={18} /> : <ShieldCheck size={18} />}
+        </div>
+      </div>
+
+      {request.summary ? <div className="application-preview-box"><strong>Admissions summary</strong><p className="muted small">{request.summary}</p></div> : null}
+
+      <div className="application-document-list">
+        {request.items.map((item, index) => {
+          const fieldKey = item.targetType === "application_field" && isApplicationCorrectionFieldKey(item.targetKey)
+            ? item.targetKey
+            : null;
+          const documentDefinition = item.targetType === "document_slot"
+            ? applicationDocumentSlotDefinitions.find((definition) => definition.key === item.targetKey)
+            : undefined;
+          const itemEditable = editable && item.status !== "accepted";
+          const itemAddressed = item.status === "accepted"
+            || (item.targetType === "document_slot" ? Boolean(item.replacementManagedFileId) : Boolean(item.savedAt));
+
+          return (
+            <article className="application-document-slot" key={item.id}>
+              <div>
+                <div className="application-document-slot-heading">
+                  <strong>
+                    {index + 1}. {fieldKey
+                      ? applicationCorrectionFieldLabel(fieldKey)
+                      : documentDefinition?.label ?? item.targetKey.replaceAll("_", " ")}
+                  </strong>
+                  <span>{item.status === "accepted" ? "Accepted" : itemAddressed ? "Response saved" : "Action required"}</span>
+                </div>
+                <p>{item.instructions}</p>
+                {fieldKey ? <p className="muted small">Previously submitted: {displayCorrectionValue(item.baselineValue)}</p> : null}
+                {item.savedAt ? <p className="muted small">Last saved {new Date(item.savedAt).toLocaleString("en-GB")}</p> : null}
+              </div>
+
+              {itemEditable && fieldKey ? (
+                <ApplicationCorrectionFieldResponse
+                  itemId={item.id}
+                  fieldKey={fieldKey}
+                  initialValue={item.savedAt ? item.proposedValue : item.baselineValue}
+                  initialCleared={Boolean(item.savedAt) && item.proposedValue === null}
+                  responseNote={item.responseNote}
+                />
+              ) : null}
+
+              {itemEditable && documentDefinition ? (
+                <form className="application-correction-response-form" action={uploadApplicationCorrectionDocument}>
+                  <input type="hidden" name="application_id" value={request.applicationId} />
+                  <input type="hidden" name="item_id" value={item.id} />
+                  <input type="hidden" name="slot_key" value={documentDefinition.key} />
+                  <label>
+                    <span>{item.replacementManagedFileId ? "Replace the saved file" : "Replacement document"}</span>
+                    <input
+                      className="input"
+                      name="document"
+                      type="file"
+                      accept={documentDefinition.acceptedExtensions.join(",")}
+                      required
+                    />
+                  </label>
+                  <p className="muted small">
+                    PDF is recommended. Maximum {Math.floor(documentDefinition.maxBytes / 1024 / 1024)} MB for this document.
+                  </p>
+                  <label>
+                    <span>Note to admissions (optional)</span>
+                    <textarea className="textarea" name="response_note" rows={2} maxLength={2000} defaultValue={item.responseNote} />
+                  </label>
+                  <button className="button secondary" type="submit">
+                    <Upload size={16} /> {item.replacementManagedFileId ? "Upload another replacement" : "Upload replacement"}
+                  </button>
+                </form>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+
+      {editable ? (
+        <div className="application-actions">
+          <div className="application-preview-box">
+            <strong>{allAddressed ? "Ready to resubmit" : `${addressedItems.length} of ${unresolvedItems.length} requested items addressed`}</strong>
+            <p className="muted small">Save or upload a response for every requested item before sending the corrections back to admissions.</p>
+          </div>
+          <form action={resubmitApplicationCorrections}>
+            <input type="hidden" name="request_id" value={request.id} />
+            <button className="button primary apply-submit" type="submit" disabled={!allAddressed}>
+              <ShieldCheck size={16} /> Resubmit corrections
+            </button>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -877,11 +1119,29 @@ function ApplicationDraftForm({
 export default async function ApplicationAccessPage({
   searchParams
 }: {
-  searchParams: Promise<{ saved?: string; submitted?: string; document?: string; submit_error?: string }>;
+  searchParams: Promise<{
+    saved?: string;
+    submitted?: string;
+    document?: string;
+    submit_error?: string;
+    correction_saved?: string;
+    correction_document?: string;
+    correction_submitted?: string;
+    correction_error?: string;
+  }>;
 }) {
   const profile = await requireApplicantProfile("/apply/application");
-  const { saved, submitted, document, submit_error: submitError } = await searchParams;
-  const { invitations, draft, documentSlots, terms, offerings } = await getApplicantApplicationContext(profile.personId);
+  const {
+    saved,
+    submitted,
+    document,
+    submit_error: submitError,
+    correction_saved: correctionSaved,
+    correction_document: correctionDocument,
+    correction_submitted: correctionSubmitted,
+    correction_error: correctionError
+  } = await searchParams;
+  const { invitations, draft, documentSlots, correctionRequest, terms, offerings } = await getApplicantApplicationContext(profile.personId);
   const latestInvitation = invitations[0];
   const claimedInvitation =
     invitations.find((invitation) => invitation.status === "claimed" && invitation.admissionLeadId === draft?.admissionLeadId) ??
@@ -953,6 +1213,44 @@ export default async function ApplicationAccessPage({
           </div>
         ) : null}
 
+        {correctionSaved || correctionDocument ? (
+          <div className="apply-success" role="status">
+            <CheckCircle2 size={22} />
+            <div>
+              <h2>Correction response saved</h2>
+              <p>{correctionDocument ? "Your replacement evidence has been saved. Address every remaining item, then resubmit the corrections." : "Your corrected information has been saved. Address every remaining item, then resubmit the corrections."}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {correctionSubmitted ? (
+          <div className="apply-success" role="status">
+            <CheckCircle2 size={22} />
+            <div>
+              <h2>Corrections resubmitted</h2>
+              <p>Your responses are now locked and have been returned to admissions for review.</p>
+            </div>
+          </div>
+        ) : null}
+
+        {correctionError ? (
+          <div className="apply-error" role="alert">
+            <LockKeyhole size={22} />
+            <div>
+              <h2>Correction response not saved</h2>
+              <p>
+                {correctionError === "invalid_file"
+                  ? "Choose one of the accepted file types within the stated size limit. Converting the document to PDF may help."
+                  : correctionError === "incomplete"
+                    ? "Address and save every requested item before resubmitting."
+                    : correctionError === "invalid_response"
+                      ? "Enter a corrected value or deliberately clear an optional value."
+                      : "The correction response could not be saved. Please try again or contact admissions."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="apply-form-panel">
           <div className="section-header">
             <div>
@@ -981,7 +1279,8 @@ export default async function ApplicationAccessPage({
 
         {draft?.status === "submitted" ? (
           <>
-            <ApplicationSubmittedPanel draft={draft} />
+            {correctionRequest ? <ApplicationCorrectionPanel request={correctionRequest} /> : null}
+            <ApplicationSubmittedPanel draft={draft} hasActiveCorrections={Boolean(correctionRequest)} />
             <ApplicationDocumentSlotsPanel applicationId={draft.id} documentSlots={documentSlots} editable={false} />
           </>
         ) : claimedInvitation ? (

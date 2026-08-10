@@ -403,6 +403,19 @@ textarea {
   align-items: center;
 }
 
+.application-correction-panel {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+}
+
+.application-correction-response-form {
+  display: grid;
+  gap: 10px;
+}
+
+.application-correction-response-form .button {
+  justify-self: start;
+}
+
 .offer-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

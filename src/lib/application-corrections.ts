@@ -44,6 +44,55 @@ export const applicationCorrectionFieldKeys = [
   "evidence_summary"
 ] as const;
 
+export type ApplicationCorrectionFieldKey = (typeof applicationCorrectionFieldKeys)[number];
+
+const applicationCorrectionFieldLabels: Record<ApplicationCorrectionFieldKey, string> = {
+  title: "Title",
+  first_name: "First name",
+  middle_names: "Middle names",
+  last_name: "Last name",
+  preferred_name: "Preferred name",
+  previous_surname: "Previous surname",
+  date_of_birth: "Date of birth",
+  previous_study_detail: "Previous BETAR/university study",
+  partner_student_id: "Partner/university student ID",
+  email: "Email",
+  phone: "Phone",
+  address_line_1: "Address line 1",
+  address_line_2: "Address line 2",
+  city: "City/town",
+  postcode: "Postcode",
+  country: "Country",
+  clinical_role: "Current clinical role",
+  employer: "Employer/organisation",
+  department_specialty: "Department/specialty",
+  professional_registration_body: "Registration body",
+  professional_registration_number: "Registration number",
+  highest_qualification: "Qualification title/level",
+  qualification_awarding_body: "Awarding body",
+  qualification_year: "Award year",
+  qualification_result: "Result/classification",
+  qualification_country: "Country awarded",
+  work_experience: "Relevant clinical experience",
+  nationality: "Nationality",
+  country_of_birth: "Country of birth",
+  country_of_residence: "Country of ordinary residence",
+  needs_visa_check: "Needs visa/right-to-study check",
+  visa_notes: "Visa/right-to-study notes",
+  funding_source: "Expected funding source",
+  funding_organisation: "Funding organisation",
+  funding_contact: "Funding contact",
+  pocus_previous_experience: "Previous experience in POCUS",
+  pocus_motivation: "Motivation to enrol",
+  pocus_case_improved_management: "Case where POCUS improved clinical management",
+  pocus_limitations_case: "Case where POCUS limitations were recognised",
+  evidence_summary: "Evidence summary"
+};
+
+export function applicationCorrectionFieldLabel(key: ApplicationCorrectionFieldKey): string {
+  return applicationCorrectionFieldLabels[key];
+}
+
 export const applicationCorrectionRequestStatuses = ["open", "resubmitted", "resolved", "cancelled"] as const;
 export const applicationCorrectionReviewOutcomes = ["accepted", "revise"] as const;
 

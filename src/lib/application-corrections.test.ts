@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  applicationCorrectionFieldLabel,
   parseApplicationCorrectionDocumentUploadForm,
   parseApplicationEvidenceOverrideForm,
   parseCancelApplicationCorrectionForm,
@@ -129,5 +130,24 @@ describe("application corrections", () => {
     expect(actions).toContain("correspondenceLogId,");
     expect(actions).toContain('templateKey: "application_correction_requested"');
     expect(actions).toContain('applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application")');
+  });
+
+  it("renders active correction requests as targeted applicant responses instead of unlocking the submission", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/apply/application/page.tsx"), "utf8");
+    const fieldResponse = readFileSync(
+      join(process.cwd(), "src/app/apply/application/application-correction-field-response.tsx"),
+      "utf8"
+    );
+
+    expect(applicationCorrectionFieldLabel("professional_registration_number")).toBe("Registration number");
+    expect(page).toContain('from("application_correction_requests")');
+    expect(page).toContain('from("application_correction_items")');
+    expect(page).toContain("<ApplicationCorrectionPanel request={correctionRequest} />");
+    expect(page).toContain("uploadApplicationCorrectionDocument");
+    expect(page).toContain("resubmitApplicationCorrections");
+    expect(page).toContain("Only the specific corrections requested by admissions can be changed below.");
+    expect(fieldResponse).toContain("saveApplicationCorrectionResponse");
+    expect(fieldResponse).toContain('name="proposed_value_json"');
+    expect(fieldResponse).toContain('name="clear_value"');
   });
 });

@@ -157,17 +157,22 @@ export async function uploadApplicationDocument(formData: FormData) {
 
 export async function uploadApplicationCorrectionDocument(formData: FormData) {
   const profile = await requireApplicantProfile("/apply/application");
-  const parsed = parseApplicationCorrectionDocumentUploadForm(formData);
+  let parsed;
+  try {
+    parsed = parseApplicationCorrectionDocumentUploadForm(formData);
+  } catch {
+    redirect("/apply/application?correction_error=invalid_upload");
+  }
   const file = formData.get("document");
 
   if (!(file instanceof File)) {
-    throw new Error("Choose a replacement file to upload.");
+    redirect("/apply/application?correction_error=invalid_upload");
   }
 
   const definition = getApplicationDocumentSlotDefinition(parsed.slot_key);
   const validation = validateApplicationDocumentUpload({ file, slotKey: parsed.slot_key });
   if (!validation.valid) {
-    throw new Error(validation.errors.join(" "));
+    redirect("/apply/application?correction_error=invalid_file");
   }
 
   if (!isSupabaseConfigured()) {
@@ -194,7 +199,7 @@ export async function uploadApplicationCorrectionDocument(formData: FormData) {
   });
 
   if (uploadError) {
-    throw new Error(uploadError.message);
+    redirect("/apply/application?correction_error=upload_failed");
   }
 
   const { error: recordError } = await supabase.rpc("record_application_correction_document_upload", {
@@ -210,7 +215,7 @@ export async function uploadApplicationCorrectionDocument(formData: FormData) {
 
   if (recordError) {
     await supabaseAdmin.storage.from(definition.bucket).remove([objectPath]);
-    throw new Error(recordError.message);
+    redirect("/apply/application?correction_error=upload_failed");
   }
 
   revalidatePath("/apply/application");
@@ -392,7 +397,12 @@ export async function submitApplication(formData: FormData) {
 
 export async function saveApplicationCorrectionResponse(formData: FormData) {
   await requireApplicantProfile("/apply/application");
-  const parsed = parseSaveApplicationCorrectionResponseForm(formData);
+  let parsed;
+  try {
+    parsed = parseSaveApplicationCorrectionResponseForm(formData);
+  } catch {
+    redirect("/apply/application?correction_error=invalid_response");
+  }
 
   if (!isSupabaseConfigured()) {
     redirect("/apply/application?correction_saved=demo");
@@ -408,7 +418,7 @@ export async function saveApplicationCorrectionResponse(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(error.message);
+    redirect("/apply/application?correction_error=save_failed");
   }
 
   revalidatePath("/apply/application");
@@ -418,7 +428,12 @@ export async function saveApplicationCorrectionResponse(formData: FormData) {
 
 export async function resubmitApplicationCorrections(formData: FormData) {
   await requireApplicantProfile("/apply/application");
-  const parsed = parseResubmitApplicationCorrectionsForm(formData);
+  let parsed;
+  try {
+    parsed = parseResubmitApplicationCorrectionsForm(formData);
+  } catch {
+    redirect("/apply/application?correction_error=invalid_request");
+  }
 
   if (!isSupabaseConfigured()) {
     redirect("/apply/application?correction_submitted=demo");
@@ -430,7 +445,8 @@ export async function resubmitApplicationCorrections(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(error.message);
+    const code = error.message.includes("Every correction item must be addressed") ? "incomplete" : "resubmit_failed";
+    redirect(`/apply/application?correction_error=${code}`);
   }
 
   revalidatePath("/apply/application");
