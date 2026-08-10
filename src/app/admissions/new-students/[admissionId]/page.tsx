@@ -423,6 +423,13 @@ function Corrections({ record, application }: { record: NewStudentAdmissionRecor
                 <span>{item.targetType === "document_slot" ? "Evidence" : "Field"} · {fieldLabels[item.targetKey] ?? plainLanguageAdmissionsLabel(item.targetKey)}</span>
                 <p>{item.instructions}</p>
                 <p>Status: <strong>{plainLanguageAdmissionsLabel(item.status)}</strong> · {item.submittedVersions.length} submitted version{item.submittedVersions.length === 1 ? "" : "s"}</p>
+                {item.applicantResponseNote ? <p>Applicant note: {item.applicantResponseNote}</p> : null}
+                {item.replacementManagedFileId ? (
+                  <div className={styles.buttonRow}>
+                    <strong>{item.replacementFilename ?? "Replacement evidence"}</strong>
+                    <DocumentOpenButton fileId={item.replacementManagedFileId} label="Open replacement" />
+                  </div>
+                ) : null}
               </div>
             ))}
             {request.cancellationReason ? <p>Cancellation reason: {request.cancellationReason}</p> : null}

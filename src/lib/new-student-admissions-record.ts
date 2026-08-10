@@ -172,6 +172,9 @@ export interface NewStudentCorrectionRequest {
     baselineValue?: unknown;
     proposedValue?: unknown;
     replacementManagedFileId?: string;
+    replacementFilename?: string;
+    replacementContentType?: string;
+    replacementSizeBytes?: number;
     applicantResponseNote?: string;
     staffReviewNote?: string;
     submittedVersions: Array<{
@@ -462,6 +465,19 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
       if (itemVersionResult.error) throw new Error(itemVersionResult.error.message);
       const itemRows = (itemResult.data ?? []).map(asRecord);
       const itemVersions = (itemVersionResult.data ?? []).map(asRecord);
+      const replacementFileIds = itemRows
+        .map((item) => optionalString(item.replacement_managed_file_id))
+        .filter((id): id is string => Boolean(id));
+      const replacementFileResult = replacementFileIds.length > 0
+        ? await supabase
+            .from("managed_files")
+            .select("id, original_filename, sanitized_filename, content_type, size_bytes")
+            .in("id", replacementFileIds)
+        : { data: [], error: null };
+      if (replacementFileResult.error) throw new Error(replacementFileResult.error.message);
+      const replacementFileById = new Map(
+        (replacementFileResult.data ?? []).map((file) => [String(file.id), asRecord(file)])
+      );
 
       const decisionRow = decisionResult.data ? asRecord(decisionResult.data) : undefined;
       const offerRow = offerResult.data ? asRecord(offerResult.data) : undefined;
@@ -583,25 +599,34 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
           resolvedAt: optionalString(request.resolved_at),
           cancelledAt: optionalString(request.cancelled_at),
           cancellationReason: optionalString(request.cancellation_reason),
-          items: itemRows.filter((item) => item.request_id === request.id).map((item) => ({
-            id: String(item.id),
-            targetType: String(item.target_type) as "application_field" | "document_slot",
-            targetKey: String(item.target_key),
-            instructions: String(item.instructions),
-            status: String(item.status) as "open" | "resubmitted" | "accepted",
-            baselineValue: item.baseline_value,
-            proposedValue: item.proposed_value,
-            replacementManagedFileId: optionalString(item.replacement_managed_file_id),
-            applicantResponseNote: optionalString(item.applicant_response_note),
-            staffReviewNote: optionalString(item.staff_review_note),
-            submittedVersions: itemVersions.filter((version) => version.item_id === item.id).map((version) => ({
-              revisionNumber: numberValue(version.revision_number),
-              staffOutcome: optionalString(version.staff_outcome) as "accepted" | "revise" | undefined,
-              staffReviewNote: optionalString(version.staff_review_note),
-              submittedAt: String(version.submitted_at),
-              reviewedAt: optionalString(version.reviewed_at)
-            }))
-          }))
+          items: itemRows.filter((item) => item.request_id === request.id).map((item) => {
+            const replacementManagedFileId = optionalString(item.replacement_managed_file_id);
+            const replacementFile = replacementManagedFileId ? replacementFileById.get(replacementManagedFileId) : undefined;
+            return {
+              id: String(item.id),
+              targetType: String(item.target_type) as "application_field" | "document_slot",
+              targetKey: String(item.target_key),
+              instructions: String(item.instructions),
+              status: String(item.status) as "open" | "resubmitted" | "accepted",
+              baselineValue: item.baseline_value,
+              proposedValue: item.proposed_value,
+              replacementManagedFileId,
+              replacementFilename: replacementFile
+                ? optionalString(replacementFile.original_filename) ?? optionalString(replacementFile.sanitized_filename)
+                : undefined,
+              replacementContentType: replacementFile ? optionalString(replacementFile.content_type) : undefined,
+              replacementSizeBytes: replacementFile?.size_bytes == null ? undefined : numberValue(replacementFile.size_bytes),
+              applicantResponseNote: optionalString(item.applicant_response_note),
+              staffReviewNote: optionalString(item.staff_review_note),
+              submittedVersions: itemVersions.filter((version) => version.item_id === item.id).map((version) => ({
+                revisionNumber: numberValue(version.revision_number),
+                staffOutcome: optionalString(version.staff_outcome) as "accepted" | "revise" | undefined,
+                staffReviewNote: optionalString(version.staff_review_note),
+                submittedAt: String(version.submitted_at),
+                reviewedAt: optionalString(version.reviewed_at)
+              }))
+            };
+          })
         })),
         evidenceOverrides: (overrideResult.data ?? []).map((row) => ({
           id: String(row.id), slotId: String(row.slot_id), reason: String(row.reason), recordedAt: String(row.recorded_at), revokedAt: optionalString(row.revoked_at)

@@ -11,6 +11,7 @@ import {
   requestApplicationCorrections,
   reviewApplicationCorrections
 } from "@/app/admissions/reviews/actions";
+import { DocumentOpenButton } from "@/app/admissions/reviews/document-open-button";
 import styles from "@/components/admissions-record.module.css";
 import { plainLanguageAdmissionsLabel } from "@/lib/admissions-workspace";
 
@@ -184,7 +185,15 @@ export function CorrectionReviewForm({
   admissionId: string;
   applicationId: string;
   requestId: string;
-  items: Array<{ id: string; targetKey: string; instructions: string; applicantResponseNote?: string; proposedValue?: unknown; replacementManagedFileId?: string }>;
+  items: Array<{
+    id: string;
+    targetKey: string;
+    instructions: string;
+    applicantResponseNote?: string;
+    proposedValue?: unknown;
+    replacementManagedFileId?: string;
+    replacementFilename?: string;
+  }>;
 }) {
   const [reviews, setReviews] = useState(() => items.map((item) => ({ item_id: item.id, outcome: "accepted" as "accepted" | "revise", review_note: "" })));
   return (
@@ -200,6 +209,12 @@ export function CorrectionReviewForm({
               <strong>{plainLanguageAdmissionsLabel(item.targetKey)}</strong>
               <p>{item.instructions}</p>
               <p><span>Applicant response:</span> {item.applicantResponseNote ?? (item.replacementManagedFileId ? "Replacement evidence supplied" : String(item.proposedValue ?? "No response recorded"))}</p>
+              {item.replacementManagedFileId ? (
+                <div className={styles.buttonRow}>
+                  <span>{item.replacementFilename ?? "Replacement evidence"}</span>
+                  <DocumentOpenButton fileId={item.replacementManagedFileId} label="Open replacement" />
+                </div>
+              ) : null}
             </div>
             <label>
               <span>Outcome</span>

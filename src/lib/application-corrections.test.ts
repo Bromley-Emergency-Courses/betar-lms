@@ -150,4 +150,18 @@ describe("application corrections", () => {
     expect(fieldResponse).toContain('name="proposed_value_json"');
     expect(fieldResponse).toContain('name="clear_value"');
   });
+
+  it("lets staff securely open replacement evidence from correction history and review", () => {
+    const recordLoader = readFileSync(join(process.cwd(), "src/lib/new-student-admissions-record.ts"), "utf8");
+    const recordPage = readFileSync(
+      join(process.cwd(), "src/app/admissions/new-students/[admissionId]/page.tsx"),
+      "utf8"
+    );
+    const reviewForm = readFileSync(join(process.cwd(), "src/components/admissions-record-actions.tsx"), "utf8");
+
+    expect(recordLoader).toContain('.from("managed_files")');
+    expect(recordLoader).toContain("replacementFilename:");
+    expect(recordPage).toContain('label="Open replacement"');
+    expect(reviewForm).toContain('<DocumentOpenButton fileId={item.replacementManagedFileId} label="Open replacement" />');
+  });
 });
