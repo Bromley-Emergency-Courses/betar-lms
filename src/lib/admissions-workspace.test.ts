@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mapStaffNewStudentAdmissionsOperation,
   mapStaffReturningStudentAdmissionsOperation,
   parseNewStudentWorkspaceQuery,
   parseReturningStudentWorkspaceQuery,
@@ -27,6 +28,69 @@ describe("admissions workspace query state", () => {
       status: "deferred",
       attention: "all"
     });
+  });
+});
+
+describe("new-student duplicate mapping", () => {
+  it("makes abandonment the recommended action for the later open record", () => {
+    const mapped = mapStaffNewStudentAdmissionsOperation({
+      admission_lead_id: "11111111-1111-4111-8111-111111111111",
+      first_name: "Asha",
+      last_name: "Applicant",
+      email: "asha@example.test",
+      programme: "pgcert",
+      source_lead_stage: "interest",
+      journey_stage: "enquiry",
+      has_data_inconsistency: false,
+      attention_indicators: [],
+      primary_next_action: "invite_applicant",
+      last_activity_at: "2026-08-10T10:00:00Z",
+      created_at: "2026-08-10T10:00:00Z",
+      applicant_name: "Asha Applicant",
+      needs_staff_attention: true,
+      is_ready_to_progress: false,
+      is_awaiting_applicant: false,
+      leading_attention_indicator: "duplicate_email",
+      has_open_email_duplicate: true,
+      duplicate_open_admission_lead_id: "22222222-2222-4222-8222-222222222222",
+      duplicate_open_applicant_name: "Earlier Applicant",
+      duplicate_open_journey_stage: "application"
+    });
+
+    expect(mapped).toMatchObject({
+      hasOpenEmailDuplicate: true,
+      primaryNextAction: "abandon_duplicate",
+      duplicateOpenApplicantName: "Earlier Applicant",
+      leadingAttentionIndicator: "duplicate_email"
+    });
+  });
+
+  it("warns on a progressed historical duplicate without replacing its genuine next action", () => {
+    const mapped = mapStaffNewStudentAdmissionsOperation({
+      admission_lead_id: "11111111-1111-4111-8111-111111111111",
+      first_name: "Asha",
+      last_name: "Applicant",
+      email: "asha@example.test",
+      programme: "pgcert",
+      source_lead_stage: "submitted",
+      journey_stage: "review",
+      application_status: "submitted",
+      has_data_inconsistency: false,
+      attention_indicators: ["ready_for_decision"],
+      primary_next_action: "record_decision",
+      last_activity_at: "2026-08-10T10:00:00Z",
+      created_at: "2026-08-10T10:00:00Z",
+      applicant_name: "Asha Applicant",
+      needs_staff_attention: true,
+      is_ready_to_progress: false,
+      is_awaiting_applicant: false,
+      leading_attention_indicator: "duplicate_email",
+      has_open_email_duplicate: true,
+      duplicate_open_admission_lead_id: "22222222-2222-4222-8222-222222222222"
+    });
+
+    expect(mapped.primaryNextAction).toBe("record_decision");
+    expect(mapped.hasOpenEmailDuplicate).toBe(true);
   });
 });
 

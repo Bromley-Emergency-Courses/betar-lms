@@ -256,6 +256,7 @@ function demoRecord(admissionId: string): NewStudentAdmissionRecord {
       lastActivityAt: now,
       createdAt: now,
       applicantName: "Amara Lewis",
+      hasOpenEmailDuplicate: false,
       needsStaffAttention: true,
       isReadyToProgress: false,
       isAwaitingApplicant: false,

@@ -105,6 +105,8 @@ export async function resolveAdmissionsBatchPreview(input: unknown): Promise<Adm
         source_lead_stage: item.sourceLeadStage,
         application_id: item.applicationId ?? null,
         application_status: item.applicationStatus ?? null,
+        has_open_email_duplicate: item.hasOpenEmailDuplicate,
+        duplicate_open_admission_lead_id: item.duplicateOpenAdmissionLeadId ?? null,
         recipient_email: request.action === "invite_application" ? item.email : null
       }
     });

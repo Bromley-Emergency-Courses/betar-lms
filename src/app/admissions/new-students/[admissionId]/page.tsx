@@ -731,7 +731,7 @@ export default async function NewStudentAdmissionRecordPage({
   const message = resultMessage(query);
   const warning = warningMessage(query);
   const application = record.application;
-  const canInvite = actionAvailability(record, application).canInvite;
+  const canInvite = actionAvailability(record, application).canInvite && !record.operation.hasOpenEmailDuplicate;
 
   return (
     <AppShell title="New-student admission" subtitle="Complete applicant record and guarded workflow actions">
@@ -754,6 +754,29 @@ export default async function NewStudentAdmissionRecordPage({
           {warning ? <div className={styles.warningBanner} role="status"><AlertTriangle size={16} /> {warning}</div> : null}
           <div className={styles.emailBanner}><LockKeyhole size={16} /><span>Email mode: <strong>{plainLanguageAdmissionsLabel(record.email.mode)}</strong>. Delivery is {record.email.enabled ? "enabled under server-side recipient controls" : "disabled"}; workflow records remain authoritative.</span></div>
           {record.operation.hasDataInconsistency ? <div className={styles.warningBanner}><AlertTriangle size={16} /><span>Data inconsistency—repair required. Ordinary progression is blocked and no direct stage override is available.</span></div> : null}
+          {record.operation.hasOpenEmailDuplicate ? (
+            <div className={styles.warningBanner}>
+              <AlertTriangle size={16} />
+              <div className={styles.duplicateWarningContent}>
+                <div>
+                  <strong>Duplicate email—do not invite this record.</strong>
+                  <p>
+                    The normalized email matches the earlier open admissions record for {record.operation.duplicateOpenApplicantName ?? "this applicant"}.
+                    {record.operation.duplicateOpenAdmissionLeadId ? (
+                      <> <Link className={styles.textLink} href={`/admissions/new-students/${record.operation.duplicateOpenAdmissionLeadId}`}>Open the earlier record</Link>.</>
+                    ) : null}
+                  </p>
+                </div>
+                {record.operation.primaryNextAction === "abandon_duplicate" ? (
+                  <form action={abandonNewStudentAdmission} className={styles.inlineAction}>
+                    <input type="hidden" name="admission_id" value={record.lead.id} />
+                    <input type="hidden" name="reason" value="Duplicate applicant: normalized email matches an earlier open admissions record." />
+                    <AdmissionsRecordSubmitButton danger confirmMessage="Abandon this admissions record as a duplicate? Its history will be preserved.">Abandon as duplicate</AdmissionsRecordSubmitButton>
+                  </form>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div className={styles.summaryGrid}>
             <div className={styles.summaryCard}><span>Stage</span><strong>{newStudentJourneyStageLabels[record.operation.journeyStage]}</strong></div>
             <div className={styles.summaryCard}><span>Programme</span><strong>{record.lead.programme === "pgcert" ? "PGCert" : "Microcredential"}</strong></div>

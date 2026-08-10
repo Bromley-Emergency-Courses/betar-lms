@@ -31,6 +31,10 @@ export interface ReturningStudentWorkspaceQuery extends AdmissionsWorkspaceQuery
 
 export interface StaffNewStudentAdmissionsOperation extends StaffNewStudentAdmissionsWorkItem {
   applicantName: string;
+  hasOpenEmailDuplicate: boolean;
+  duplicateOpenAdmissionLeadId?: string;
+  duplicateOpenApplicantName?: string;
+  duplicateOpenJourneyStage?: string;
   needsStaffAttention: boolean;
   isReadyToProgress: boolean;
   isAwaitingApplicant: boolean;
@@ -147,9 +151,20 @@ function optionalString(value: unknown): string | undefined {
 export function mapStaffNewStudentAdmissionsOperation(
   row: Record<string, unknown>
 ): StaffNewStudentAdmissionsOperation {
+  const workItem = mapStaffNewStudentAdmissionsWorkItem(row);
+  const hasOpenEmailDuplicate = Boolean(row.has_open_email_duplicate);
+  const duplicateCanBeAbandoned = hasOpenEmailDuplicate
+    && ["enquiry", "application"].includes(workItem.journeyStage)
+    && ["interest", "application_invited"].includes(workItem.sourceLeadStage)
+    && workItem.applicationStatus !== "submitted";
   return {
-    ...mapStaffNewStudentAdmissionsWorkItem(row),
+    ...workItem,
+    primaryNextAction: duplicateCanBeAbandoned ? "abandon_duplicate" : workItem.primaryNextAction,
     applicantName: String(row.applicant_name),
+    hasOpenEmailDuplicate,
+    duplicateOpenAdmissionLeadId: optionalString(row.duplicate_open_admission_lead_id),
+    duplicateOpenApplicantName: optionalString(row.duplicate_open_applicant_name),
+    duplicateOpenJourneyStage: optionalString(row.duplicate_open_journey_stage),
     needsStaffAttention: Boolean(row.needs_staff_attention),
     isReadyToProgress: Boolean(row.is_ready_to_progress),
     isAwaitingApplicant: Boolean(row.is_awaiting_applicant),

@@ -22,6 +22,7 @@ export const newStudentJourneyStageLabels: Record<NewStudentJourneyStage, string
 
 export const newStudentPrimaryActions = [
   "repair_inconsistency",
+  "abandon_duplicate",
   "invite_applicant",
   "await_application_submission",
   "review_application",

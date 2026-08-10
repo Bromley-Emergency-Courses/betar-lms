@@ -85,6 +85,9 @@ export function newStudentBatchEligibility(
   }
 
   if (action === "invite_application") {
+    if (item.hasOpenEmailDuplicate) {
+      return { eligible: false, reason: "Duplicate email matches an earlier open admissions record. Review and abandon the duplicate first." };
+    }
     if (!["interest", "application_invited"].includes(item.sourceLeadStage)) {
       return { eligible: false, reason: "Only an enquiry or existing application invitation can be invited." };
     }

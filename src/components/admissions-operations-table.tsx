@@ -71,10 +71,17 @@ function NewStudentDrawer({ item }: { item: StaffNewStudentAdmissionsOperation }
       <section className={styles.drawerSection}>
         <span>Attention</span>
         <div className={styles.pillRow}>
-          {item.attentionIndicators.length > 0
+          {item.hasOpenEmailDuplicate
+            ? <span className={`${styles.pill} ${styles.pillAttention}`}>Duplicate email</span>
+            : item.attentionIndicators.length > 0
             ? item.attentionIndicators.map((indicator) => <span className={statusClass(indicator)} key={indicator}>{plainLanguageAdmissionsLabel(indicator)}</span>)
             : <span className={styles.pill}>No current indicator</span>}
         </div>
+        {item.hasOpenEmailDuplicate && item.duplicateOpenAdmissionLeadId ? (
+          <p>
+            Matches the earlier open record for {item.duplicateOpenApplicantName ?? "this email"}. Review that record before abandoning this duplicate.
+          </p>
+        ) : null}
       </section>
       <section className={styles.drawerSection}>
         <span>Authoritative workflow state</span>

@@ -21,6 +21,7 @@ const enquiry = {
   lastActivityAt: "2026-08-09T12:00:00Z",
   createdAt: "2026-08-09T12:00:00Z",
   applicantName: "Asha Patel",
+  hasOpenEmailDuplicate: false,
   needsStaffAttention: false,
   isReadyToProgress: false,
   isAwaitingApplicant: false
@@ -42,6 +43,18 @@ describe("admissions batch review", () => {
     expect(newStudentBatchEligibility("invite_application", { ...enquiry, hasDataInconsistency: true })).toEqual({
       eligible: false,
       reason: "Data inconsistency must be repaired before this action."
+    });
+  });
+
+  it("blocks invitations for the later record when an earlier matching admission is open", () => {
+    expect(newStudentBatchEligibility("invite_application", {
+      ...enquiry,
+      hasOpenEmailDuplicate: true,
+      duplicateOpenAdmissionLeadId: "22222222-2222-4222-8222-222222222222",
+      primaryNextAction: "abandon_duplicate"
+    })).toEqual({
+      eligible: false,
+      reason: "Duplicate email matches an earlier open admissions record. Review and abandon the duplicate first."
     });
   });
 
