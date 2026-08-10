@@ -7,6 +7,7 @@ import {
   type AdmissionsEmailTestRecordMatch
 } from "@/lib/admissions-email";
 import { sendCorrespondenceLogEmail, type CorrespondenceEmailDeliveryResult } from "@/lib/email-delivery";
+import { portalMagicLinkCallbackUrl } from "@/lib/portal-magic-link";
 import { createSupabaseServiceRoleClient, isSupabaseServiceRoleConfigured } from "@/lib/supabase-admin";
 
 export interface PortalMagicLinkEmailInput {
@@ -25,20 +26,6 @@ interface ResolvedPortalRecipient {
   personId: string;
   admissionLeadId: string | null;
   studentId: string | null;
-}
-
-function actionLinkFromGenerateLinkData(data: unknown): string | null {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
-
-  const properties = (data as { properties?: unknown }).properties;
-  if (!properties || typeof properties !== "object") {
-    return null;
-  }
-
-  const actionLink = (properties as { action_link?: unknown }).action_link;
-  return typeof actionLink === "string" && actionLink.length > 0 ? actionLink : null;
 }
 
 async function resolvePortalRecipient(
@@ -285,9 +272,9 @@ export async function sendPortalMagicLinkEmail(
     return { status: "failed", error: error.message };
   }
 
-  const actionLink = actionLinkFromGenerateLinkData(data);
+  const actionLink = portalMagicLinkCallbackUrl(data, input.redirectTo);
   if (!actionLink) {
-    const message = "Supabase did not return a magic link.";
+    const message = "Supabase did not return valid magic-link verification details.";
     await markMagicLinkGenerationFailed(correspondenceLogId, message);
     return { status: "failed", error: message };
   }
