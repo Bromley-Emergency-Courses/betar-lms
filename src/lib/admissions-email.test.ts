@@ -208,6 +208,7 @@ describe("admissions correspondence rendering", () => {
       templateKey: "application_invitation",
       recipientName: "Applicant",
       renderedSubject: "Your BETAR application invitation",
+      appUrl: "https://lms.example.org",
       metadata: {
         action_link: "https://auth.example.test/invite"
       }
@@ -223,6 +224,9 @@ describe("admissions correspondence rendering", () => {
     });
 
     expect(invitation.text).toContain("https://auth.example.test/invite");
+    expect(invitation.text).toContain("https://lms.example.org/apply/login");
+    expect(invitation.html).toContain('href="https://lms.example.org/apply/login"');
+    expect(invitation.html).not.toContain('href="https://lms.example.org/apply/login."');
     expect(preferences.text).toContain("https://auth.example.test/preferences");
     expect(preferences.text).toContain("20 August 2026");
   });
@@ -261,12 +265,17 @@ describe("admissions correspondence rendering", () => {
     const rendered = renderCorrespondenceEmail({
       templateKey: "application_invitation",
       renderedSubject: "Reviewed invitation",
-      renderedBody: "Continue securely:\n{{action_link}}",
+      renderedBody: "Continue securely:\n{{action_link}}\n\nThis link is single-use. Return later at {{applicant_login_link}}.",
+      appUrl: "http://localhost:3000",
       metadata: { action_link: "https://auth.example.test/one-time-token" }
     });
 
     expect(rendered.text).toContain("https://auth.example.test/one-time-token");
+    expect(rendered.text).toContain("http://localhost:3000/apply/login");
     expect(rendered.text).not.toContain("{{action_link}}");
+    expect(rendered.text).not.toContain("{{applicant_login_link}}");
+    expect(rendered.html).toContain('href="http://localhost:3000/apply/login"');
+    expect(rendered.html).not.toContain('href="http://localhost:3000/apply/login."');
   });
 
   it("rejects unsupported template keys", () => {

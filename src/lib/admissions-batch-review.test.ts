@@ -64,8 +64,14 @@ describe("admissions batch review", () => {
       ...base,
       action: "invite_application",
       rendered_subject: "Your BETAR application invitation",
-      rendered_body: "Use this secure link: {{action_link}}"
+      rendered_body: "Use this secure link: {{action_link}}\n\nReturn later: {{applicant_login_link}}"
     }).success).toBe(true);
+    expect(admissionsBatchReviewRequestSchema.safeParse({
+      ...base,
+      action: "invite_application",
+      rendered_subject: "Your BETAR application invitation",
+      rendered_body: "Use this secure link: {{action_link}}"
+    }).success).toBe(false);
   });
 
   it("derives one, selected and all-matching scopes explicitly", () => {

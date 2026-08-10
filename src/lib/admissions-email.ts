@@ -252,10 +252,40 @@ function htmlEscape(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+function htmlEscapeWithLinks(value: string): string {
+  const urlPattern = /https?:\/\/[^\s<>]+/g;
+  let html = "";
+  let cursor = 0;
+
+  for (const match of value.matchAll(urlPattern)) {
+    const matchedUrl = match[0];
+    const matchIndex = match.index;
+    const url = matchedUrl.replace(/[.,;:!?]+$/, "");
+    const trailingPunctuation = matchedUrl.slice(url.length);
+
+    html += htmlEscape(value.slice(cursor, matchIndex));
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        const escapedUrl = htmlEscape(url);
+        html += `<a href="${escapedUrl}">${escapedUrl}</a>`;
+      } else {
+        html += htmlEscape(url);
+      }
+    } catch {
+      html += htmlEscape(url);
+    }
+    html += htmlEscape(trailingPunctuation);
+    cursor = matchIndex + matchedUrl.length;
+  }
+
+  return html + htmlEscape(value.slice(cursor));
+}
+
 function textToHtml(text: string): string {
   return text
     .split("\n\n")
-    .map((paragraph) => `<p>${paragraph.split("\n").map(htmlEscape).join("<br />")}</p>`)
+    .map((paragraph) => `<p>${paragraph.split("\n").map(htmlEscapeWithLinks).join("<br />")}</p>`)
     .join("\n");
 }
 
@@ -353,7 +383,10 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
 
   if (input.renderedBody?.trim()) {
     const actionLink = stringMetadata(metadata, "action_link");
-    const text = input.renderedBody.trim().replaceAll("{{action_link}}", actionLink ?? "[secure link unavailable]");
+    const text = input.renderedBody
+      .trim()
+      .replaceAll("{{action_link}}", actionLink ?? "[secure link unavailable]")
+      .replaceAll("{{applicant_login_link}}", applicantLoginUrl(appUrl));
     return { subject, text, html: textToHtml(text) };
   }
 

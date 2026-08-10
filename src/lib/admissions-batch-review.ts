@@ -35,6 +35,8 @@ export const admissionsBatchReviewRequestSchema = z.object({
     context.addIssue({ code: "custom", message: "Invitation batches require a reviewed subject and message.", path: ["rendered_body"] });
   } else if (request.action === "invite_application" && !request.rendered_body?.includes("{{action_link}}")) {
     context.addIssue({ code: "custom", message: "Invitation messages must include the secure {{action_link}} placeholder.", path: ["rendered_body"] });
+  } else if (request.action === "invite_application" && !request.rendered_body?.includes("{{applicant_login_link}}")) {
+    context.addIssue({ code: "custom", message: "Invitation messages must include the return-access {{applicant_login_link}} placeholder.", path: ["rendered_body"] });
   }
 });
 

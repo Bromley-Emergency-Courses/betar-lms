@@ -40,7 +40,7 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
   const [preview, setPreview] = useState<AdmissionsBatchPreview | null>(null);
   const [reason, setReason] = useState("");
   const [subject, setSubject] = useState("Your BETAR application invitation");
-  const [body, setBody] = useState("You have been invited to complete your BETAR application.\n\nUse this secure link to sign in and continue:\n{{action_link}}\n\nRegards,\nBETAR Admissions");
+  const [body, setBody] = useState("You have been invited to complete your BETAR application.\n\nUse this secure link to sign in and continue:\n{{action_link}}\n\nThis link is single-use. To return later, request a fresh sign-in link at {{applicant_login_link}}.\n\nRegards,\nBETAR Admissions");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scope = batchScopeForSelection(allMatching, selectedIds.length);
@@ -181,7 +181,7 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
                 <div className={styles.reviewFields}>
                   <label><span>Email subject</span><input value={subject} onChange={(event) => { setSubject(event.target.value); setPreview(null); }} maxLength={300} /></label>
                   <label><span>Reviewed message</span><textarea value={body} onChange={(event) => { setBody(event.target.value); setPreview(null); }} rows={8} maxLength={12000} /></label>
-                  <p className={styles.dialogHelp}>Keep <code>{"{{action_link}}"}</code> in the message. The secure link is generated only during delivery and is never stored in the batch snapshot.</p>
+                  <p className={styles.dialogHelp}>Keep <code>{"{{action_link}}"}</code> and <code>{"{{applicant_login_link}}"}</code> in the message. The secure link is generated only during delivery and is never stored in the batch snapshot.</p>
                 </div>
               ) : (
                 <div className={styles.reviewFields}>
