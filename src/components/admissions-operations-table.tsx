@@ -67,6 +67,7 @@ function NewStudentDrawer({ item }: { item: StaffNewStudentAdmissionsOperation }
         <div className={styles.fact}><span>Programme</span><strong>{item.programme === "pgcert" ? "PGCert" : "Microcredential"}</strong></div>
         <div className={styles.fact}><span>Last activity</span><strong>{formatDate(item.lastActivityAt)}</strong></div>
         <div className={styles.fact}><span>Current deadline</span><strong>{formatDate(item.currentDeadlineAt)}</strong></div>
+        <div className={styles.fact}><span>Application deadline state</span><strong>{plainLanguageAdmissionsLabel(item.applicationDeadlineState)}</strong></div>
       </div>
       <section className={styles.drawerSection}>
         <span>Attention</span>
@@ -433,7 +434,7 @@ export function AdmissionsOperationsTable(props: OperationsTableProps) {
                       <td><span className={styles.pill}>{newStudentJourneyStageLabels[row.journeyStage]}</span></td>
                       <td><div className={styles.detailCell}><strong>{row.programme === "pgcert" ? "PGCert" : "Microcredential"}</strong><small>{row.targetTermId ? `Term ${row.targetTermId.slice(0, 8)}` : "Intake not selected"}</small></div></td>
                       <td>{row.leadingAttentionIndicator ? <span className={`${styles.pill} ${styles.pillAttention}`}>{plainLanguageAdmissionsLabel(row.leadingAttentionIndicator)}</span> : <span className={styles.pill}>No indicator</span>}</td>
-                      <td><div className={styles.detailCell}><strong>{formatDate(row.currentDeadlineAt)}</strong><small>Activity {formatDate(row.lastActivityAt)}</small></div></td>
+                      <td><div className={styles.detailCell}><strong>{formatDate(row.currentDeadlineAt)}</strong><small>{row.journeyStage === "application" ? `${plainLanguageAdmissionsLabel(row.applicationDeadlineState)} · ` : ""}Activity {formatDate(row.lastActivityAt)}</small></div></td>
                       <td><strong>{plainLanguageAdmissionsLabel(row.primaryNextAction)}</strong></td>
                       <td><button className={styles.smallButton} onClick={(event) => openDrawer(row.admissionLeadId, event.currentTarget)} type="button">Open <ArrowRight size={11} /></button></td>
                     </tr>

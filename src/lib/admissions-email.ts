@@ -2,6 +2,7 @@ import type { JsonRecord, JsonValue } from "@/lib/audit-correspondence";
 
 export const admissionsEmailTemplateKeys = [
   "application_invitation",
+  "application_submission_reminder",
   "application_correction_requested",
   "module_preference_window_opened",
   "offer_issued",
@@ -373,6 +374,7 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
   const portal = portalUrl(appUrl);
   const registration = registrationUrl(appUrl);
   const deadline =
+    formatDate(metadata.application_deadline_at) ??
     formatDate(metadata.deadline_at) ??
     formatDate(metadata.registration_deadline_at) ??
     formatDate(metadata.preference_closes_at) ??
@@ -383,10 +385,20 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
 
   if (input.renderedBody?.trim()) {
     const actionLink = stringMetadata(metadata, "action_link");
+    const deadlineState = stringMetadata(metadata, "application_deadline_state");
+    const deadlineGuidance = deadlineState === "overdue"
+      ? deadline
+        ? `The application deadline was ${deadline}. If you still wish to apply, please contact BETAR Admissions; staff can extend the cohort deadline.`
+        : "The application deadline has passed. If you still wish to apply, please contact BETAR Admissions."
+      : deadline
+        ? `Please complete and submit your application by ${deadline}.`
+        : "Please complete and submit your application as soon as possible.";
     const text = input.renderedBody
       .trim()
       .replaceAll("{{action_link}}", actionLink ?? "[secure link unavailable]")
-      .replaceAll("{{applicant_login_link}}", applicantLoginUrl(appUrl));
+      .replaceAll("{{applicant_login_link}}", applicantLoginUrl(appUrl))
+      .replaceAll("{{application_deadline}}", deadline ?? "the published application deadline")
+      .replaceAll("{{deadline_guidance}}", deadlineGuidance);
     return { subject, text, html: textToHtml(text) };
   }
 
@@ -426,9 +438,24 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
       text = [
         intro,
         "You have been invited to complete your BETAR application.",
+        deadline
+          ? `Please complete and submit your application by ${deadline}.`
+          : "Please complete your application as soon as possible.",
         "Use the secure link below to sign in and continue your application.",
         stringMetadata(metadata, "action_link") ?? portal,
         `This link is single-use. To return later, request a fresh sign-in link at ${applicantLoginUrl(appUrl)}.`,
+        "Regards,\nBETAR Admissions"
+      ].join("\n\n");
+      break;
+    case "application_submission_reminder":
+      text = [
+        intro,
+        "Our records show that your BETAR application has not yet been submitted.",
+        deadline
+          ? `Please complete and submit your application by ${deadline}.`
+          : "Please complete and submit your application as soon as possible.",
+        `Request a fresh secure sign-in link at ${applicantLoginUrl(appUrl)}.`,
+        "If you have already contacted the admissions team about your application, please disregard this reminder.",
         "Regards,\nBETAR Admissions"
       ].join("\n\n");
       break;

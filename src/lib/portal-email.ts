@@ -188,6 +188,27 @@ async function markMagicLinkGenerationFailed(correspondenceLogId: string, messag
     .eq("id", correspondenceLogId);
 }
 
+async function mergeCorrespondenceMetadata(
+  correspondenceLogId: string,
+  metadata: Record<string, string | number | boolean | null>
+) {
+  const supabase = createSupabaseServiceRoleClient();
+  const { data, error } = await supabase
+    .from("correspondence_logs")
+    .select("metadata")
+    .eq("id", correspondenceLogId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const existing = data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+    ? data.metadata
+    : {};
+  const updateResult = await supabase
+    .from("correspondence_logs")
+    .update({ metadata: { ...existing, ...metadata } })
+    .eq("id", correspondenceLogId);
+  if (updateResult.error) throw new Error(updateResult.error.message);
+}
+
 async function suppressMagicLinkAttempt(correspondenceLogId: string, mode: string, reason: string) {
   const supabase = createSupabaseServiceRoleClient();
   const { data } = await supabase
@@ -235,6 +256,7 @@ export async function sendPortalMagicLinkEmail(
   let correspondenceLogId: string;
   try {
     correspondenceLogId = await findOrCreateCorrespondenceLog(input, recipient);
+    if (input.metadata) await mergeCorrespondenceMetadata(correspondenceLogId, input.metadata);
   } catch (error) {
     return { status: "failed", error: error instanceof Error ? error.message : "Correspondence attempt could not be created." };
   }
@@ -301,5 +323,5 @@ export async function sendPortalMagicLinkEmail(
     return { status: "failed", error: message };
   }
 
-  return sendCorrespondenceLogEmail(correspondenceLogId, { action_link: actionLink });
+  return sendCorrespondenceLogEmail(correspondenceLogId, { ...(input.metadata ?? {}), action_link: actionLink });
 }

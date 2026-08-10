@@ -8,9 +8,10 @@ import { AdmissionsLocalNavigation } from "@/components/admissions-workspace-she
 import styles from "@/components/admissions-workspace.module.css";
 import { AppShell } from "@/components/app-shell";
 import { createAdmissionLead } from "@/lib/admin-actions";
+import { setNewStudentApplicationDeadline } from "@/app/admissions/new-students/actions";
 import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
 import { parseNewStudentWorkspaceQuery } from "@/lib/admissions-workspace";
-import { getAdmissionsOverviewData, getNewStudentWorkspacePage } from "@/lib/admissions-workspace-data";
+import { getAdmissionsOverviewData, getNewStudentApplicationDeadlineConfiguration, getNewStudentWorkspacePage } from "@/lib/admissions-workspace-data";
 import { requirePermission } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +27,14 @@ export default async function NewStudentsAdmissionsPage({
   const params = await searchParams;
   const query = parseNewStudentWorkspaceQuery(params);
   const showNewEnquiry = params.new === "1";
-  const [overview, page] = await Promise.all([
+  const [overview, page, deadline] = await Promise.all([
     getAdmissionsOverviewData(),
-    getNewStudentWorkspacePage(query)
+    getNewStudentWorkspacePage(query),
+    getNewStudentApplicationDeadlineConfiguration()
   ]);
+  const deadlineDate = deadline.applicationDeadlineAt
+    ? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(deadline.applicationDeadlineAt))
+    : "";
 
   return (
     <AppShell title="New-student admissions" subtitle="Enquiry through application, offer, registration and conversion">
@@ -51,6 +56,29 @@ export default async function NewStudentsAdmissionsPage({
             </Link>
           </div>
         </div>
+        {params.deadline_updated ? <div className={recordStyles.successBanner} role="status"><CircleCheck size={16} /> Application deadline updated.</div> : null}
+        {params.deadline_error ? <div className={recordStyles.warningBanner} role="alert"><AlertTriangle size={16} /> {params.deadline_error === "after_term_start" ? "Choose a deadline before the target term starts." : params.deadline_error === "no_published_term" ? "Publish the target term before setting its application deadline." : params.deadline_error === "invalid" ? "Choose a valid application deadline date." : "The application deadline could not be updated. Please try again."}</div> : null}
+        <section className={recordStyles.surface} aria-labelledby="application-deadline-title">
+          <div className={recordStyles.sectionHeader}>
+            <div>
+              <h3 id="application-deadline-title">Application deadline</h3>
+              <p>One hard submission deadline for all new applicants to the published target term.</p>
+            </div>
+            <span className={deadline.state === "overdue" ? `${recordStyles.pill} ${recordStyles.attentionPill}` : recordStyles.pill}>
+              {deadline.state === "open" ? "Open" : deadline.state === "overdue" ? "Passed" : deadline.state === "no_published_term" ? "No published term" : "Not configured"}
+            </span>
+          </div>
+          {deadline.targetTermName ? (
+            <form action={setNewStudentApplicationDeadline} className={recordStyles.actionForm}>
+              <div className={recordStyles.twoColumns}>
+                <div className={recordStyles.fact}><span>Target term</span><strong>{deadline.targetTermName}</strong><p>Starts {new Date(`${deadline.targetTermStartsOn}T12:00:00Z`).toLocaleDateString("en-GB")}</p></div>
+                <label><span>Applications must be submitted by</span><input type="date" name="application_deadline" defaultValue={deadlineDate} max={deadline.targetTermStartsOn ? new Date(new Date(`${deadline.targetTermStartsOn}T12:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10) : undefined} required /></label>
+              </div>
+              <p className={recordStyles.helpText}>After 23:59 UK time on this date, final submission and new invitations are blocked. Saving drafts and staff changes to this cohort deadline remain available.</p>
+              <AdmissionsRecordSubmitButton confirmMessage="Update the cohort-wide application deadline? This changes submission access for every unsubmitted applicant.">{deadline.applicationDeadlineAt ? "Update deadline" : "Set deadline"}</AdmissionsRecordSubmitButton>
+            </form>
+          ) : <p className={recordStyles.empty}>Publish the target term before setting the new-student application deadline.</p>}
+        </section>
         {showNewEnquiry ? (
           <section className={recordStyles.surface} aria-labelledby="new-enquiry-title">
             <div className={recordStyles.sectionHeader}>

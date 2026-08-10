@@ -150,6 +150,24 @@ describe("admissions email configuration", () => {
 });
 
 describe("admissions correspondence rendering", () => {
+  it("renders application reminders with cohort deadline guidance and stable login access", () => {
+    const rendered = renderCorrespondenceEmail({
+      templateKey: "application_submission_reminder",
+      recipientName: "Asha Applicant",
+      renderedSubject: "Reminder to complete your BETAR application",
+      renderedBody: "{{deadline_guidance}}\n\nContinue at {{applicant_login_link}}",
+      metadata: {
+        application_deadline_at: "2026-08-31T22:59:59.999Z",
+        application_deadline_state: "due"
+      },
+      appUrl: "https://betar.example"
+    });
+
+    expect(rendered.text).toContain("Please complete and submit your application by 31 August 2026.");
+    expect(rendered.text).toContain("https://betar.example/apply/login");
+    expect(rendered.text).not.toContain("{{deadline_guidance}}");
+  });
+
   it("renders offer email content with portal URL and deadline", () => {
     const rendered = renderCorrespondenceEmail({
       templateKey: "offer_issued",
@@ -210,7 +228,8 @@ describe("admissions correspondence rendering", () => {
       renderedSubject: "Your BETAR application invitation",
       appUrl: "https://lms.example.org",
       metadata: {
-        action_link: "https://auth.example.test/invite"
+        action_link: "https://auth.example.test/invite",
+        application_deadline_at: "2026-08-31T22:59:59.999Z"
       }
     });
     const preferences = renderCorrespondenceEmail({
@@ -224,6 +243,7 @@ describe("admissions correspondence rendering", () => {
     });
 
     expect(invitation.text).toContain("https://auth.example.test/invite");
+    expect(invitation.text).toContain("31 August 2026");
     expect(invitation.text).toContain("https://lms.example.org/apply/login");
     expect(invitation.html).toContain('href="https://lms.example.org/apply/login"');
     expect(invitation.html).not.toContain('href="https://lms.example.org/apply/login."');

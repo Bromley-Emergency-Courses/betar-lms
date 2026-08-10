@@ -580,6 +580,16 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
     throw new Error("Application invitation response was not valid.");
   }
 
+  const deadlineResult = await supabase
+    .from("terms")
+    .select("id, application_deadline_at")
+    .eq("status", "published")
+    .maybeSingle();
+  if (deadlineResult.error) throw new Error(deadlineResult.error.message);
+  if (!deadlineResult.data?.application_deadline_at) {
+    throw new Error("The published target term application deadline is not configured.");
+  }
+
   const deliveryResult = await sendPortalMagicLinkEmail({
     email: data.email,
     personId: data.person_id,
@@ -589,7 +599,10 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
     redirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application", data),
     metadata: {
       admission_lead_id: data.lead_id,
-      invitation_id: data.invitation_id
+      invitation_id: data.invitation_id,
+      application_target_term_id: String(deadlineResult.data.id),
+      application_deadline_at: String(deadlineResult.data.application_deadline_at),
+      application_deadline_state: "due"
     }
   });
 

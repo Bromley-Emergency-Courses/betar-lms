@@ -62,7 +62,7 @@ export async function resolveAdmissionsBatchPreview(input: unknown): Promise<Adm
 
   const personIds = orderedOperations.flatMap((item) => item?.personId ? [item.personId] : []);
   let testRecords: AdmissionsEmailTestRecordMatch[] = [];
-  if (request.action === "invite_application" && personIds.length > 0) {
+  if (["invite_application", "send_reminder"].includes(request.action) && personIds.length > 0) {
     const testRecordResult = await supabase
       .from("admissions_email_test_records")
       .select("person_id, admission_lead_id, student_id")
@@ -79,7 +79,7 @@ export async function resolveAdmissionsBatchPreview(input: unknown): Promise<Adm
     const workflowEligibility = newStudentBatchEligibility(request.action, item);
     let exclusionReason = workflowEligibility.eligible ? null : workflowEligibility.reason;
 
-    if (!exclusionReason && request.action === "invite_application") {
+    if (!exclusionReason && ["invite_application", "send_reminder"].includes(request.action)) {
       const safety = evaluateAdmissionsEmailSafety({
         mode: emailConfig.mode,
         pilotAllowlist: emailConfig.pilotAllowlist,
@@ -94,7 +94,7 @@ export async function resolveAdmissionsBatchPreview(input: unknown): Promise<Adm
       entity_type: "admission_lead",
       entity_id: item.admissionLeadId,
       person_id: item.personId ?? null,
-      recipient_email: request.action === "invite_application" ? item.email : null,
+      recipient_email: ["invite_application", "send_reminder"].includes(request.action) ? item.email : null,
       recipient_name: item.applicantName,
       eligible: !exclusionReason,
       exclusion_reason: exclusionReason,
@@ -107,7 +107,10 @@ export async function resolveAdmissionsBatchPreview(input: unknown): Promise<Adm
         application_status: item.applicationStatus ?? null,
         has_open_email_duplicate: item.hasOpenEmailDuplicate,
         duplicate_open_admission_lead_id: item.duplicateOpenAdmissionLeadId ?? null,
-        recipient_email: request.action === "invite_application" ? item.email : null
+        application_deadline_at: item.applicationDeadlineAt ?? null,
+        application_deadline_state: item.applicationDeadlineState,
+        application_target_term_id: item.applicationTargetTermId ?? null,
+        recipient_email: ["invite_application", "send_reminder"].includes(request.action) ? item.email : null
       }
     });
   }

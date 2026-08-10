@@ -22,6 +22,8 @@ const enquiry = {
   createdAt: "2026-08-09T12:00:00Z",
   applicantName: "Asha Patel",
   hasOpenEmailDuplicate: false,
+  applicationDeadlineState: "due",
+  applicationReminderEligible: false,
   needsStaffAttention: false,
   isReadyToProgress: false,
   isAwaitingApplicant: false
@@ -58,6 +60,23 @@ describe("admissions batch review", () => {
     });
   });
 
+  it("allows reminders only for invited unsubmitted applicants in the configured cohort", () => {
+    const remindable = {
+      ...enquiry,
+      sourceLeadStage: "application_invited",
+      journeyStage: "application" as const,
+      personId: "33333333-3333-4333-8333-333333333333",
+      applicationDeadlineAt: "2026-08-31T22:59:59.999Z",
+      applicationDeadlineState: "due" as const,
+      applicationReminderEligible: true
+    };
+    expect(newStudentBatchEligibility("send_reminder", remindable)).toEqual({ eligible: true });
+    expect(newStudentBatchEligibility("send_reminder", { ...remindable, applicationReminderEligible: false })).toEqual({
+      eligible: false,
+      reason: "Only invited applicants with an unsubmitted application and configured cohort deadline can be reminded."
+    });
+  });
+
   it("requires reviewed message content or a reason as appropriate", () => {
     const base = {
       workspace: "new_students",
@@ -72,12 +91,18 @@ describe("admissions batch review", () => {
       rendered_subject: "Your BETAR application invitation",
       rendered_body: "This message forgot its secure link."
     }).success).toBe(false);
+    expect(admissionsBatchReviewRequestSchema.safeParse({
+      ...base,
+      action: "send_reminder",
+      rendered_subject: "Reminder to complete your BETAR application",
+      rendered_body: "{{deadline_guidance}}\n\nContinue at {{applicant_login_link}}"
+    }).success).toBe(true);
     expect(admissionsBatchReviewRequestSchema.safeParse({ ...base, action: "close_abandoned" }).success).toBe(false);
     expect(admissionsBatchReviewRequestSchema.safeParse({
       ...base,
       action: "invite_application",
       rendered_subject: "Your BETAR application invitation",
-      rendered_body: "Use this secure link: {{action_link}}\n\nReturn later: {{applicant_login_link}}"
+      rendered_body: "Submit by {{application_deadline}}. Use this secure link: {{action_link}}\n\nReturn later: {{applicant_login_link}}"
     }).success).toBe(true);
     expect(admissionsBatchReviewRequestSchema.safeParse({
       ...base,

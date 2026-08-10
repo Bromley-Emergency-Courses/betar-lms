@@ -1,6 +1,6 @@
 "use client";
 
-import { ArchiveX, MailPlus, X } from "lucide-react";
+import { ArchiveX, BellRing, MailPlus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import styles from "@/components/admissions-workspace.module.css";
@@ -24,12 +24,22 @@ const actionContent = {
     description: "Issue or replace application access and deliberately attempt one email per eligible applicant.",
     confirm: "Queue invitation batch"
   },
+  send_reminder: {
+    title: "Remind applicants",
+    description: "Contact invited applicants whose applications have not been submitted, using the current cohort deadline.",
+    confirm: "Queue reminder batch"
+  },
   close_abandoned: {
     title: "Close as abandoned",
     description: "Close eligible enquiries and unsubmitted applications without archiving or deleting them.",
     confirm: "Queue abandonment batch"
   }
 } satisfies Record<ImplementedNewStudentBatchAction, { title: string; description: string; confirm: string }>;
+
+const invitationSubject = "Your BETAR application invitation";
+const invitationBody = "You have been invited to complete your BETAR application.\n\nPlease submit your application by {{application_deadline}}.\n\nUse this secure link to sign in and continue:\n{{action_link}}\n\nThis link is single-use. To return later, request a fresh sign-in link at {{applicant_login_link}}.\n\nRegards,\nBETAR Admissions";
+const reminderSubject = "Reminder to complete your BETAR application";
+const reminderBody = "Our records show that your BETAR application has not yet been submitted.\n\n{{deadline_guidance}}\n\nTo continue your application, request a fresh secure sign-in link at:\n{{applicant_login_link}}\n\nIf you have already contacted the admissions team about your application, please disregard this reminder.\n\nRegards,\nBETAR Admissions";
 
 export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, filters }: AdmissionsBatchActionDialogProps) {
   const router = useRouter();
@@ -39,8 +49,8 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
   const [action, setAction] = useState<ImplementedNewStudentBatchAction | null>(null);
   const [preview, setPreview] = useState<AdmissionsBatchPreview | null>(null);
   const [reason, setReason] = useState("");
-  const [subject, setSubject] = useState("Your BETAR application invitation");
-  const [body, setBody] = useState("You have been invited to complete your BETAR application.\n\nUse this secure link to sign in and continue:\n{{action_link}}\n\nThis link is single-use. To return later, request a fresh sign-in link at {{applicant_login_link}}.\n\nRegards,\nBETAR Admissions");
+  const [subject, setSubject] = useState(invitationSubject);
+  const [body, setBody] = useState(invitationBody);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scope = batchScopeForSelection(allMatching, selectedIds.length);
@@ -89,8 +99,8 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
       selected_ids: allMatching ? [] : selectedIds,
       filters,
       action_reason: action === "close_abandoned" ? reason : null,
-      rendered_subject: action === "invite_application" ? subject : null,
-      rendered_body: action === "invite_application" ? body : null,
+      rendered_subject: action && ["invite_application", "send_reminder"].includes(action) ? subject : null,
+      rendered_body: action && ["invite_application", "send_reminder"].includes(action) ? body : null,
       request_key: requestKey
     };
   }
@@ -101,6 +111,13 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
     setPreview(null);
     setError(null);
     setReason("");
+    if (nextAction === "invite_application") {
+      setSubject(invitationSubject);
+      setBody(invitationBody);
+    } else if (nextAction === "send_reminder") {
+      setSubject(reminderSubject);
+      setBody(reminderBody);
+    }
   }
 
   function close() {
@@ -155,6 +172,9 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
       <button className={styles.secondaryButton} type="button" onClick={() => open("invite_application")} disabled={matchingTooLarge}>
         <MailPlus size={13} /> Invite to apply
       </button>
+      <button className={styles.secondaryButton} type="button" onClick={() => open("send_reminder")} disabled={matchingTooLarge}>
+        <BellRing size={13} /> Send application reminder
+      </button>
       <button className={styles.secondaryButton} type="button" onClick={() => open("close_abandoned")} disabled={matchingTooLarge}>
         <ArchiveX size={13} /> Close as abandoned
       </button>
@@ -177,11 +197,15 @@ export function AdmissionsBatchActionDialog({ selectedIds, allMatching, total, f
                 <span>Reviewed scope</span>
                 <strong>{allMatching ? `All ${total} records matching the visible filters` : `${selectedIds.length} explicitly selected record${selectedIds.length === 1 ? "" : "s"}`}</strong>
               </div>
-              {action === "invite_application" ? (
+              {["invite_application", "send_reminder"].includes(action) ? (
                 <div className={styles.reviewFields}>
                   <label><span>Email subject</span><input value={subject} onChange={(event) => { setSubject(event.target.value); setPreview(null); }} maxLength={300} /></label>
                   <label><span>Reviewed message</span><textarea value={body} onChange={(event) => { setBody(event.target.value); setPreview(null); }} rows={8} maxLength={12000} /></label>
-                  <p className={styles.dialogHelp}>Keep <code>{"{{action_link}}"}</code> and <code>{"{{applicant_login_link}}"}</code> in the message. The secure link is generated only during delivery and is never stored in the batch snapshot.</p>
+                  <p className={styles.dialogHelp}>
+                    {action === "invite_application"
+                      ? <>Keep <code>{"{{application_deadline}}"}</code>, <code>{"{{action_link}}"}</code> and <code>{"{{applicant_login_link}}"}</code>. The secure invitation link is generated only during delivery.</>
+                      : <>Keep <code>{"{{deadline_guidance}}"}</code> and <code>{"{{applicant_login_link}}"}</code>. The login page lets each applicant request a fresh one-time sign-in link.</>}
+                  </p>
                 </div>
               ) : (
                 <div className={styles.reviewFields}>

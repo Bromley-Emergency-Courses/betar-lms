@@ -731,7 +731,9 @@ export default async function NewStudentAdmissionRecordPage({
   const message = resultMessage(query);
   const warning = warningMessage(query);
   const application = record.application;
-  const canInvite = actionAvailability(record, application).canInvite && !record.operation.hasOpenEmailDuplicate;
+  const canInvite = actionAvailability(record, application).canInvite
+    && !record.operation.hasOpenEmailDuplicate
+    && record.operation.applicationDeadlineState === "due";
 
   return (
     <AppShell title="New-student admission" subtitle="Complete applicant record and guarded workflow actions">
@@ -754,6 +756,9 @@ export default async function NewStudentAdmissionRecordPage({
           {warning ? <div className={styles.warningBanner} role="status"><AlertTriangle size={16} /> {warning}</div> : null}
           <div className={styles.emailBanner}><LockKeyhole size={16} /><span>Email mode: <strong>{plainLanguageAdmissionsLabel(record.email.mode)}</strong>. Delivery is {record.email.enabled ? "enabled under server-side recipient controls" : "disabled"}; workflow records remain authoritative.</span></div>
           {record.operation.hasDataInconsistency ? <div className={styles.warningBanner}><AlertTriangle size={16} /><span>Data inconsistency—repair required. Ordinary progression is blocked and no direct stage override is available.</span></div> : null}
+          {["not_configured", "overdue"].includes(record.operation.applicationDeadlineState) && ["enquiry", "application"].includes(record.operation.journeyStage) ? (
+            <div className={styles.warningBanner}><CalendarClock size={16} /><span>{record.operation.applicationDeadlineState === "overdue" ? "The cohort application deadline has passed." : "The cohort application deadline is not configured."} <Link className={styles.textLink} href="/admissions/new-students">Update the deadline</Link> before issuing another invitation.</span></div>
+          ) : null}
           {record.operation.hasOpenEmailDuplicate ? (
             <div className={styles.warningBanner}>
               <AlertTriangle size={16} />

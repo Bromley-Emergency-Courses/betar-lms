@@ -28,6 +28,8 @@ const supportNeedsReferenceSchema = z.object({
   application_id: z.string().uuid()
 });
 
+const applicationDeadlineSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 function revalidateAdmission(admissionId: string, offerChanged = false) {
   revalidatePath("/admissions");
   revalidatePath("/admissions/new-students");
@@ -59,6 +61,32 @@ export async function abandonNewStudentAdmission(formData: FormData) {
 
   revalidateAdmission(parsed.admission_id);
   admissionRedirect(parsed.admission_id, "admission_abandoned");
+}
+
+export async function setNewStudentApplicationDeadline(formData: FormData) {
+  await requirePermission("manage_admissions");
+  const parsed = applicationDeadlineSchema.safeParse(String(formData.get("application_deadline") ?? ""));
+  if (!parsed.success) redirect("/admissions/new-students?deadline_error=invalid");
+  const deadline = parsed.data;
+  if (!isSupabaseConfigured()) redirect("/admissions/new-students?deadline_updated=demo");
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("set_published_term_application_deadline", {
+    p_deadline_date: deadline
+  });
+  if (error) {
+    const code = error.message.includes("before the target term starts")
+      ? "after_term_start"
+      : error.message.includes("published target term")
+        ? "no_published_term"
+        : "failed";
+    redirect(`/admissions/new-students?deadline_error=${code}`);
+  }
+
+  revalidatePath("/admissions");
+  revalidatePath("/admissions/new-students");
+  revalidatePath("/apply/application");
+  redirect("/admissions/new-students?deadline_updated=1");
 }
 
 export async function reopenAbandonedNewStudentAdmission(formData: FormData) {

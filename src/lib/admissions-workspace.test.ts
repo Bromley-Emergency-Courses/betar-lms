@@ -52,6 +52,8 @@ describe("new-student duplicate mapping", () => {
       is_awaiting_applicant: false,
       leading_attention_indicator: "duplicate_email",
       has_open_email_duplicate: true,
+      application_deadline_state: "due",
+      application_reminder_eligible: false,
       duplicate_open_admission_lead_id: "22222222-2222-4222-8222-222222222222",
       duplicate_open_applicant_name: "Earlier Applicant",
       duplicate_open_journey_stage: "application"
@@ -86,6 +88,8 @@ describe("new-student duplicate mapping", () => {
       is_awaiting_applicant: false,
       leading_attention_indicator: "duplicate_email",
       has_open_email_duplicate: true,
+      application_deadline_state: "submitted",
+      application_reminder_eligible: false,
       duplicate_open_admission_lead_id: "22222222-2222-4222-8222-222222222222"
     });
 

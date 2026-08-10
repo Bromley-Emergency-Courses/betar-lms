@@ -34,6 +34,19 @@ export async function POST(request: Request) {
           p_rendered_subject: input.rendered_subject,
           p_rendered_body: input.rendered_body
         })
+      : input.action === "send_reminder"
+        ? await supabase.rpc("create_admissions_operational_batch", {
+            p_request_key: input.request_key,
+            p_workspace: input.workspace,
+            p_action: input.action,
+            p_scope: input.scope,
+            p_targets: preview.targets,
+            p_reviewed_filters: reviewedFiltersFromBatchRequest(input),
+            p_template_key: "application_submission_reminder",
+            p_template_version: 1,
+            p_rendered_subject: input.rendered_subject,
+            p_rendered_body: input.rendered_body
+          })
       : await supabase.rpc("create_reasoned_admissions_operational_batch", {
           p_request_key: input.request_key,
           p_workspace: input.workspace,

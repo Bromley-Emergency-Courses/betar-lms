@@ -17,6 +17,35 @@ export interface AdmissionsWorkspacePage<T> {
   total: number;
 }
 
+export interface NewStudentApplicationDeadlineConfiguration {
+  targetTermId?: string;
+  targetTermName?: string;
+  targetTermStartsOn?: string;
+  applicationDeadlineAt?: string;
+  state: "no_published_term" | "not_configured" | "open" | "overdue";
+}
+
+export async function getNewStudentApplicationDeadlineConfiguration(): Promise<NewStudentApplicationDeadlineConfiguration> {
+  if (!isSupabaseConfigured()) return { state: "not_configured" };
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("terms")
+    .select("id, name, starts_on, application_deadline_at")
+    .eq("status", "published")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return { state: "no_published_term" };
+  const deadline = typeof data.application_deadline_at === "string" ? data.application_deadline_at : undefined;
+  return {
+    targetTermId: String(data.id),
+    targetTermName: String(data.name),
+    targetTermStartsOn: String(data.starts_on),
+    applicationDeadlineAt: deadline,
+    state: !deadline ? "not_configured" : new Date(deadline).getTime() < Date.now() ? "overdue" : "open"
+  };
+}
+
 export interface AdmissionsOverviewData {
   newStudents: {
     active: number;

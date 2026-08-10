@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, LockKeyhole, ShieldCheck, Upload } from "lucide-react";
+import { CheckCircle2, Clock3, FileText, LockKeyhole, ShieldCheck, Upload } from "lucide-react";
 import { Field, FormGrid } from "@/components/forms";
 import {
   resubmitApplicationCorrections,
@@ -303,6 +303,8 @@ async function getApplicantApplicationContext(personId: string): Promise<{
   correctionRequest?: ApplicantCorrectionRequestSummary;
   terms: ApplicationTermOption[];
   offerings: ApplicationOfferingOption[];
+  applicationDeadlineAt?: string;
+  applicationDeadlinePassed: boolean;
 }> {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -329,6 +331,8 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       documentSlots: [],
       correctionRequest: undefined,
       terms,
+      applicationDeadlineAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      applicationDeadlinePassed: false,
       offerings: data.offerings
         .map((offering) => ({ offering, courseModule: activeModulesById.get(offering.moduleId) }))
         .filter(({ offering, courseModule }) => courseModule && termIds.has(offering.termId))
@@ -410,7 +414,7 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       .order("last_saved_at", { ascending: false }),
     supabase
       .from("terms")
-      .select("id, name, starts_on")
+      .select("id, name, starts_on, application_deadline_at")
       .in("status", ["published", "active"])
       .gte("starts_on", today)
       .order("starts_on"),
@@ -557,11 +561,19 @@ async function getApplicantApplicationContext(personId: string): Promise<{
     }
   }
 
+  const applicationDeadlineAt = (() => {
+    const deadlineTerm = (termResult.data ?? []).find((row) => String(row.id) === draft?.intendedStartTermId)
+      ?? (termResult.data ?? [])[0];
+    return deadlineTerm?.application_deadline_at ? String(deadlineTerm.application_deadline_at) : undefined;
+  })();
+
   return {
     invitations,
     draft,
     documentSlots,
     correctionRequest,
+    applicationDeadlineAt,
+    applicationDeadlinePassed: Boolean(applicationDeadlineAt && new Date(applicationDeadlineAt).getTime() < Date.now()),
     terms: (termResult.data ?? []).map((row) => ({
       id: String(row.id),
       name: String(row.name),
@@ -849,13 +861,17 @@ function ApplicationDraftForm({
   draft,
   profile,
   terms,
-  offerings
+  offerings,
+  applicationDeadlineAt,
+  applicationDeadlinePassed
 }: {
   admissionLeadId: string;
   draft?: ApplicationDraftSummary;
   profile: PortalProfile;
   terms: ApplicationTermOption[];
   offerings: ApplicationOfferingOption[];
+  applicationDeadlineAt?: string;
+  applicationDeadlinePassed: boolean;
 }) {
   const firstName = draft?.firstName ?? profile.person.firstName;
   const lastName = draft?.lastName ?? profile.person.lastName;
@@ -1110,7 +1126,12 @@ function ApplicationDraftForm({
             maxLength={2000}
           />
         </Field>
-        <ApplicationSubmitControls applicationId={draft?.id} declarationText={applicationDeclarationText} />
+        <ApplicationSubmitControls
+          applicationId={draft?.id}
+          declarationText={applicationDeclarationText}
+          applicationDeadlineAt={applicationDeadlineAt}
+          applicationDeadlinePassed={applicationDeadlinePassed}
+        />
       </ApplicationSection>
     </form>
   );
@@ -1141,7 +1162,7 @@ export default async function ApplicationAccessPage({
     correction_submitted: correctionSubmitted,
     correction_error: correctionError
   } = await searchParams;
-  const { invitations, draft, documentSlots, correctionRequest, terms, offerings } = await getApplicantApplicationContext(profile.personId);
+  const { invitations, draft, documentSlots, correctionRequest, terms, offerings, applicationDeadlineAt, applicationDeadlinePassed } = await getApplicantApplicationContext(profile.personId);
   const latestInvitation = invitations[0];
   const claimedInvitation =
     invitations.find((invitation) => invitation.status === "claimed" && invitation.admissionLeadId === draft?.admissionLeadId) ??
@@ -1181,6 +1202,8 @@ export default async function ApplicationAccessPage({
                   ? "Save your latest changes before submitting."
                   : submitError === "study_plan"
                     ? "Choose a current published start term and one or two available module offerings."
+                    : submitError === "deadline"
+                      ? "The cohort application deadline has passed or is not configured. Your draft is still saved; contact admissions if you need the deadline extended."
                     : submitError === "incomplete"
                       ? "Complete every field marked with a red asterisk and upload both required evidence documents."
                       : "The application could not be submitted. Your saved draft is unchanged; please try again or contact admissions."}
@@ -1251,6 +1274,22 @@ export default async function ApplicationAccessPage({
           </div>
         ) : null}
 
+        {draft?.status !== "submitted" ? (
+          <div className={applicationDeadlinePassed ? "apply-error" : "apply-success"} role="status">
+            <Clock3 size={22} />
+            <div>
+              <h2>{applicationDeadlinePassed ? "Application deadline passed" : "Application deadline"}</h2>
+              <p>
+                {applicationDeadlineAt
+                  ? applicationDeadlinePassed
+                    ? `The deadline was ${new Date(applicationDeadlineAt).toLocaleString("en-GB")}. You can continue saving your draft, but final submission is blocked until admissions extends the cohort deadline.`
+                    : `Submit your completed application by ${new Date(applicationDeadlineAt).toLocaleString("en-GB")}.`
+                  : "Admissions has not yet configured the application deadline. You can save a draft, but final submission is unavailable."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="apply-form-panel">
           <div className="section-header">
             <div>
@@ -1291,6 +1330,8 @@ export default async function ApplicationAccessPage({
               profile={profile}
               terms={terms}
               offerings={offerings}
+              applicationDeadlineAt={applicationDeadlineAt}
+              applicationDeadlinePassed={applicationDeadlinePassed}
             />
             {draft ? (
               <ApplicationDocumentSlotsPanel applicationId={draft.id} documentSlots={documentSlots} editable />

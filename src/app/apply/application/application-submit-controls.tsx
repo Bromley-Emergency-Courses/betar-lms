@@ -6,13 +6,18 @@ import { submitApplication } from "@/app/apply/application/actions";
 
 export function ApplicationSubmitControls({
   applicationId,
-  declarationText
+  declarationText,
+  applicationDeadlineAt,
+  applicationDeadlinePassed
 }: {
   applicationId?: string;
   declarationText: string;
+  applicationDeadlineAt?: string;
+  applicationDeadlinePassed: boolean;
 }) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const controlsRef = useRef<HTMLDivElement>(null);
+  const deadlinePassed = !applicationDeadlineAt || applicationDeadlinePassed;
 
   useEffect(() => {
     const form = controlsRef.current?.closest("form");
@@ -50,12 +55,13 @@ export function ApplicationSubmitControls({
                 Save your latest changes before submitting.
               </p>
             ) : null}
+            {deadlinePassed ? <p className="muted small" role="status">Final submission is unavailable until admissions sets or extends the cohort deadline. You can still save this draft.</p> : null}
             <div className="application-submit-form">
               <input type="hidden" name="application_id" value={applicationId} />
               <label className="check-option inline-check">
-                <input name="declaration_accepted" type="checkbox" required disabled={hasUnsavedChanges} /> I accept this declaration
+                <input name="declaration_accepted" type="checkbox" required disabled={hasUnsavedChanges || deadlinePassed} /> I accept this declaration
               </label>
-              <button className="button primary apply-submit" formAction={submitApplication} disabled={hasUnsavedChanges}>
+              <button className="button primary apply-submit" formAction={submitApplication} disabled={hasUnsavedChanges || deadlinePassed}>
                 <ShieldCheck size={16} />
                 Submit application
               </button>

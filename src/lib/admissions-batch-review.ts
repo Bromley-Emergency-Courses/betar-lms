@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { StaffNewStudentAdmissionsOperation } from "@/lib/admissions-workspace";
 
-export const implementedNewStudentBatchActions = ["invite_application", "close_abandoned"] as const;
+export const implementedNewStudentBatchActions = ["invite_application", "send_reminder", "close_abandoned"] as const;
 export type ImplementedNewStudentBatchAction = (typeof implementedNewStudentBatchActions)[number];
 
 export const admissionsBatchReviewRequestSchema = z.object({
@@ -31,12 +31,16 @@ export const admissionsBatchReviewRequestSchema = z.object({
   if (request.action === "close_abandoned" && !request.action_reason) {
     context.addIssue({ code: "custom", message: "Closing admissions records requires a reason.", path: ["action_reason"] });
   }
-  if (request.action === "invite_application" && (!request.rendered_subject || !request.rendered_body)) {
-    context.addIssue({ code: "custom", message: "Invitation batches require a reviewed subject and message.", path: ["rendered_body"] });
+  if (["invite_application", "send_reminder"].includes(request.action) && (!request.rendered_subject || !request.rendered_body)) {
+    context.addIssue({ code: "custom", message: "Email batches require a reviewed subject and message.", path: ["rendered_body"] });
   } else if (request.action === "invite_application" && !request.rendered_body?.includes("{{action_link}}")) {
     context.addIssue({ code: "custom", message: "Invitation messages must include the secure {{action_link}} placeholder.", path: ["rendered_body"] });
-  } else if (request.action === "invite_application" && !request.rendered_body?.includes("{{applicant_login_link}}")) {
-    context.addIssue({ code: "custom", message: "Invitation messages must include the return-access {{applicant_login_link}} placeholder.", path: ["rendered_body"] });
+  } else if (request.action === "invite_application" && !request.rendered_body?.includes("{{application_deadline}}")) {
+    context.addIssue({ code: "custom", message: "Invitation messages must include the {{application_deadline}} placeholder.", path: ["rendered_body"] });
+  } else if (["invite_application", "send_reminder"].includes(request.action) && !request.rendered_body?.includes("{{applicant_login_link}}")) {
+    context.addIssue({ code: "custom", message: "Applicant emails must include the {{applicant_login_link}} placeholder.", path: ["rendered_body"] });
+  } else if (request.action === "send_reminder" && !request.rendered_body?.includes("{{deadline_guidance}}")) {
+    context.addIssue({ code: "custom", message: "Application reminders must include the {{deadline_guidance}} placeholder.", path: ["rendered_body"] });
   }
 });
 
@@ -66,7 +70,7 @@ export interface AdmissionsBatchPreview {
 export function admissionsBatchPreviewBlockingMessage(preview: AdmissionsBatchPreview): string | null {
   if (preview.eligibleCount > 0) return null;
 
-  const emailDisabled = preview.action === "invite_application"
+  const emailDisabled = ["invite_application", "send_reminder"].includes(preview.action)
     && preview.targets.length > 0
     && preview.targets.every((target) => target.exclusion_reason === "Email delivery is disabled.");
   if (emailDisabled) {
@@ -88,11 +92,24 @@ export function newStudentBatchEligibility(
     if (item.hasOpenEmailDuplicate) {
       return { eligible: false, reason: "Duplicate email matches an earlier open admissions record. Review and abandon the duplicate first." };
     }
+    if (item.applicationDeadlineState === "not_configured") {
+      return { eligible: false, reason: "Set the cohort application deadline before inviting applicants." };
+    }
+    if (item.applicationDeadlineState === "overdue") {
+      return { eligible: false, reason: "The cohort application deadline has passed. Extend it before inviting applicants." };
+    }
     if (!["interest", "application_invited"].includes(item.sourceLeadStage)) {
       return { eligible: false, reason: "Only an enquiry or existing application invitation can be invited." };
     }
     if (!["enquiry", "application"].includes(item.journeyStage) || item.applicationStatus === "submitted") {
       return { eligible: false, reason: "The application has progressed beyond invitation or access." };
+    }
+    return { eligible: true };
+  }
+
+  if (action === "send_reminder") {
+    if (!item.applicationReminderEligible) {
+      return { eligible: false, reason: "Only invited applicants with an unsubmitted application and configured cohort deadline can be reminded." };
     }
     return { eligible: true };
   }

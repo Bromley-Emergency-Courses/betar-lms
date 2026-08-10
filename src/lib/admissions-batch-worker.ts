@@ -2,6 +2,7 @@ import "server-only";
 
 import { applicationMagicLinkRedirectUrl, isIssuedApplicationInvitation } from "@/lib/application-invitations";
 import { resolveAdmissionsBatchPreview } from "@/lib/admissions-batch-review-data";
+import { sendCorrespondenceLogEmail } from "@/lib/email-delivery";
 import { sendPortalMagicLinkEmail } from "@/lib/portal-email";
 import { createSupabaseServerClient } from "@/lib/supabase";
 
@@ -9,6 +10,7 @@ interface ClaimedBatchTarget {
   target_id: string;
   batch_action: string;
   entity_id: string;
+  correspondence_log_id?: string | null;
 }
 
 function deliveryOutcome(result: Awaited<ReturnType<typeof sendPortalMagicLinkEmail>>) {
@@ -88,7 +90,17 @@ async function executeInvitationTarget(target: ClaimedBatchTarget, batch: Record
     redirectTo: applicationMagicLinkRedirectUrl(origin, "/apply/application", invitation),
     personId: invitation.person_id,
     admissionLeadId: invitation.lead_id,
-    metadata: { admission_lead_id: invitation.lead_id, invitation_id: invitation.invitation_id }
+    metadata: {
+      admission_lead_id: invitation.lead_id,
+      invitation_id: invitation.invitation_id,
+      application_target_term_id: typeof reviewed.source_snapshot.application_target_term_id === "string"
+        ? reviewed.source_snapshot.application_target_term_id
+        : null,
+      application_deadline_at: typeof reviewed.source_snapshot.application_deadline_at === "string"
+        ? reviewed.source_snapshot.application_deadline_at
+        : null,
+      application_deadline_state: "due"
+    }
   });
   const outcome = deliveryOutcome(delivery);
   await finishTarget(target.target_id, outcome.status, outcome.reason);
@@ -119,9 +131,45 @@ async function executeAbandonmentTarget(target: ClaimedBatchTarget, batch: Recor
   await finishTarget(target.target_id, "succeeded", null);
 }
 
+async function executeApplicationReminderTarget(target: ClaimedBatchTarget, batch: Record<string, unknown>) {
+  const preview = await resolveAdmissionsBatchPreview({
+    workspace: "new_students",
+    action: "send_reminder",
+    scope: "one",
+    selected_ids: [target.entity_id],
+    filters: { search: "", attention: "all", stage: "all" },
+    rendered_subject: String(batch.rendered_subject),
+    rendered_body: String(batch.rendered_body)
+  });
+  const reviewed = preview.targets[0];
+  if (!reviewed?.eligible) {
+    await finishTarget(target.target_id, "excluded", reviewed?.exclusion_reason ?? "The application is no longer eligible for a reminder.");
+    return;
+  }
+  let correspondenceLogId = target.correspondence_log_id ?? null;
+  if (!correspondenceLogId) {
+    const supabase = await createSupabaseServerClient();
+    const logResult = await supabase
+      .from("correspondence_logs")
+      .select("id")
+      .eq("operational_batch_target_id", target.target_id)
+      .order("attempt_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (logResult.error) throw new Error(logResult.error.message);
+    correspondenceLogId = logResult.data ? String(logResult.data.id) : null;
+  }
+  if (!correspondenceLogId) throw new Error("The queued application reminder correspondence was not found.");
+
+  const delivery = await sendCorrespondenceLogEmail(correspondenceLogId);
+  const outcome = deliveryOutcome(delivery);
+  await finishTarget(target.target_id, outcome.status, outcome.reason);
+}
+
 async function executeTarget(target: ClaimedBatchTarget, batch: Record<string, unknown>, origin: string) {
   try {
     if (target.batch_action === "invite_application") await executeInvitationTarget(target, batch, origin);
+    else if (target.batch_action === "send_reminder") await executeApplicationReminderTarget(target, batch);
     else if (target.batch_action === "close_abandoned") await executeAbandonmentTarget(target, batch);
     else await finishTarget(target.target_id, "excluded", "This batch action is not available in the current executor.");
   } catch (error) {
@@ -143,7 +191,7 @@ export async function processAdmissionsOperationalBatch(batchId: string, origin:
     .maybeSingle();
   if (batchResult.error || !batchResult.data || !["queued", "running"].includes(String(batchResult.data.status))) return;
   const batch = batchResult.data as Record<string, unknown>;
-  if (!["invite_application", "close_abandoned"].includes(String(batch.action))) return;
+  if (!["invite_application", "send_reminder", "close_abandoned"].includes(String(batch.action))) return;
 
   await supabase.rpc("requeue_stale_admissions_operational_batch_targets", {
     p_batch_id: batchId,

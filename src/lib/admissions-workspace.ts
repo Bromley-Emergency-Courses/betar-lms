@@ -35,6 +35,11 @@ export interface StaffNewStudentAdmissionsOperation extends StaffNewStudentAdmis
   duplicateOpenAdmissionLeadId?: string;
   duplicateOpenApplicantName?: string;
   duplicateOpenJourneyStage?: string;
+  applicationTargetTermId?: string;
+  applicationTargetTermName?: string;
+  applicationDeadlineAt?: string;
+  applicationDeadlineState: "not_configured" | "due" | "overdue" | "submitted" | "not_applicable";
+  applicationReminderEligible: boolean;
   needsStaffAttention: boolean;
   isReadyToProgress: boolean;
   isAwaitingApplicant: boolean;
@@ -157,14 +162,32 @@ export function mapStaffNewStudentAdmissionsOperation(
     && ["enquiry", "application"].includes(workItem.journeyStage)
     && ["interest", "application_invited"].includes(workItem.sourceLeadStage)
     && workItem.applicationStatus !== "submitted";
+  const applicationDeadlineState = String(row.application_deadline_state) as StaffNewStudentAdmissionsOperation["applicationDeadlineState"];
+  const validApplicationDeadlineStates = ["not_configured", "due", "overdue", "submitted", "not_applicable"];
+  if (!validApplicationDeadlineStates.includes(applicationDeadlineState)) {
+    throw new Error(`Unknown application deadline state: ${applicationDeadlineState}`);
+  }
+  const applicationDeadlineAt = optionalString(row.application_deadline_at);
+  const attentionIndicators = applicationDeadlineState === "overdue"
+    ? [...new Set(["application_overdue", ...workItem.attentionIndicators])]
+    : workItem.attentionIndicators;
   return {
     ...workItem,
+    attentionIndicators,
+    currentDeadlineAt: ["enquiry", "application"].includes(workItem.journeyStage)
+      ? applicationDeadlineAt
+      : workItem.currentDeadlineAt,
     primaryNextAction: duplicateCanBeAbandoned ? "abandon_duplicate" : workItem.primaryNextAction,
     applicantName: String(row.applicant_name),
     hasOpenEmailDuplicate,
     duplicateOpenAdmissionLeadId: optionalString(row.duplicate_open_admission_lead_id),
     duplicateOpenApplicantName: optionalString(row.duplicate_open_applicant_name),
     duplicateOpenJourneyStage: optionalString(row.duplicate_open_journey_stage),
+    applicationTargetTermId: optionalString(row.application_target_term_id),
+    applicationTargetTermName: optionalString(row.application_target_term_name),
+    applicationDeadlineAt,
+    applicationDeadlineState,
+    applicationReminderEligible: Boolean(row.application_reminder_eligible),
     needsStaffAttention: Boolean(row.needs_staff_attention),
     isReadyToProgress: Boolean(row.is_ready_to_progress),
     isAwaitingApplicant: Boolean(row.is_awaiting_applicant),

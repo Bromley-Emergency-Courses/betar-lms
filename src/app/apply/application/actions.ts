@@ -385,6 +385,8 @@ export async function submitApplication(formData: FormData) {
   if (error) {
     const code = error.message.includes("required fields are complete")
       ? "incomplete"
+      : error.message.includes("application submission deadline") || error.message.includes("application deadline has not")
+        ? "deadline"
       : error.message.includes("future term") || error.message.includes("module offerings")
         ? "study_plan"
         : "failed";
