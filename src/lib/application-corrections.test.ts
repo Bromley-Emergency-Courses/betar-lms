@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   parseApplicationCorrectionDocumentUploadForm,
@@ -118,5 +120,14 @@ describe("application corrections", () => {
       slot_id: slotId,
       reason: "Original verified directly with the awarding body."
     });
+  });
+
+  it("delivers a correction request through a transient portal magic link", () => {
+    const actions = readFileSync(join(process.cwd(), "src/app/admissions/reviews/actions.ts"), "utf8");
+
+    expect(actions).toContain("sendPortalMagicLinkEmail({");
+    expect(actions).toContain("correspondenceLogId,");
+    expect(actions).toContain('templateKey: "application_correction_requested"');
+    expect(actions).toContain('applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application")');
   });
 });

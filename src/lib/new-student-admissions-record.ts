@@ -10,6 +10,10 @@ import {
   type StaffNewStudentAdmissionsOperation
 } from "@/lib/admissions-workspace";
 import type { ApplicationDocumentSlotKey, ApplicationDocumentVerificationStatus } from "@/lib/application-documents";
+import type {
+  AdmissionsRegistrationDocumentSlotKey,
+  AdmissionsRegistrationDocumentVerificationRoute
+} from "@/lib/admissions-registration";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
 export interface NewStudentAdmissionLeadRecord {
@@ -112,6 +116,20 @@ export interface NewStudentApplicationRecord {
     moduleConfirmationAccepted: boolean;
     requiredDocumentCount: number;
     uploadedRequiredDocumentCount: number;
+    documentSlots: Array<{
+      id: string;
+      slotKey: AdmissionsRegistrationDocumentSlotKey;
+      label: string;
+      required: boolean;
+      managedFileId?: string;
+      filename?: string;
+      sizeBytes?: number;
+      uploadedAt?: string;
+      verificationRoute: AdmissionsRegistrationDocumentVerificationRoute;
+      verificationStatus: ApplicationDocumentVerificationStatus;
+      verificationAt?: string;
+      verificationNote?: string;
+    }>;
     studentId?: string;
     convertedAt?: string;
   };
@@ -473,12 +491,36 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
 
       let requiredDocumentCount = 0;
       let uploadedRequiredDocumentCount = 0;
+      let registrationDocumentSlots: NonNullable<NewStudentApplicationRecord["registration"]>["documentSlots"] = [];
       if (registrationRow) {
-        const registrationSlotResult = await supabase.from("admissions_registration_document_slots").select("required, managed_file_id, verification_status").eq("registration_id", registrationRow.id);
+        const registrationSlotResult = await supabase
+          .from("admissions_registration_document_slots")
+          .select("id, slot_key, label, required, managed_file_id, original_filename, sanitized_filename, size_bytes, uploaded_at, verification_route, verification_status, verification_at, verification_note")
+          .eq("registration_id", registrationRow.id)
+          .order("required", { ascending: false });
         if (registrationSlotResult.error) throw new Error(registrationSlotResult.error.message);
         const requiredSlots = (registrationSlotResult.data ?? []).filter((row) => row.required);
         requiredDocumentCount = requiredSlots.length;
-        uploadedRequiredDocumentCount = requiredSlots.filter((row) => row.managed_file_id && row.verification_status !== "rejected").length;
+        uploadedRequiredDocumentCount = requiredSlots.filter(
+          (row) =>
+            (row.managed_file_id && row.verification_status !== "rejected") ||
+            row.verification_route === "in_person"
+        ).length;
+        registrationDocumentSlots = (registrationSlotResult.data ?? []).map((row) => ({
+          id: String(row.id),
+          slotKey: String(row.slot_key) as AdmissionsRegistrationDocumentSlotKey,
+          label: String(row.label),
+          required: Boolean(row.required),
+          managedFileId: optionalString(row.managed_file_id),
+          filename: optionalString(row.original_filename) ?? optionalString(row.sanitized_filename),
+          sizeBytes: row.size_bytes == null ? undefined : numberValue(row.size_bytes),
+          uploadedAt: optionalString(row.uploaded_at),
+          verificationRoute: row.verification_route === "in_person" ? "in_person" : "upload",
+          verificationStatus: String(row.verification_status) as ApplicationDocumentVerificationStatus,
+          verificationAt: optionalString(row.verification_at),
+          verificationNote: optionalString(row.verification_note)
+        }));
+        registrationDocumentSlots.forEach((slot) => entityIds.add(slot.id));
       }
 
       const fields = Object.fromEntries(applicationFieldNames.map((key) => [key, appRow[key] as string | number | boolean | undefined]));
@@ -571,7 +613,7 @@ export async function getNewStudentAdmissionRecord(admissionId: string): Promise
           id: String(offerRow.id), reference: String(offerRow.offer_reference), status: String(offerRow.status), issuedAt: optionalString(offerRow.issued_at), deadlineAt: optionalString(offerRow.deadline_at), acceptedAt: optionalString(offerRow.accepted_at), declinedAt: optionalString(offerRow.declined_at), lapsedAt: optionalString(offerRow.lapsed_at), withdrawnAt: optionalString(offerRow.withdrawn_at), withdrawalReason: optionalString(offerRow.withdrawal_reason), reminderCount: numberValue(offerRow.deadline_reminder_count), reissueCount: numberValue(offerRow.reissue_count), lastReissuedAt: optionalString(offerRow.last_reissued_at), reissues: offerReissues
         } : undefined,
         registration: registrationRow ? {
-          id: String(registrationRow.id), status: String(registrationRow.status), deadlineAt: optionalString(registrationRow.registration_deadline_at), savedAt: optionalString(registrationRow.saved_at), submittedAt: optionalString(registrationRow.submitted_at), lapsedAt: optionalString(registrationRow.lapsed_at), lapsedReason: optionalString(registrationRow.lapsed_reason), reopenedAt: optionalString(registrationRow.reopened_at), reopenedReason: optionalString(registrationRow.reopened_reason), termsVersion: optionalString(registrationRow.terms_version), termsAcceptedAt: optionalString(registrationRow.terms_accepted_at), moduleConfirmationAccepted: Boolean(registrationRow.module_confirmation_accepted), requiredDocumentCount, uploadedRequiredDocumentCount, studentId: optionalString(registrationRow.student_id), convertedAt: optionalString(registrationRow.converted_at)
+          id: String(registrationRow.id), status: String(registrationRow.status), deadlineAt: optionalString(registrationRow.registration_deadline_at), savedAt: optionalString(registrationRow.saved_at), submittedAt: optionalString(registrationRow.submitted_at), lapsedAt: optionalString(registrationRow.lapsed_at), lapsedReason: optionalString(registrationRow.lapsed_reason), reopenedAt: optionalString(registrationRow.reopened_at), reopenedReason: optionalString(registrationRow.reopened_reason), termsVersion: optionalString(registrationRow.terms_version), termsAcceptedAt: optionalString(registrationRow.terms_accepted_at), moduleConfirmationAccepted: Boolean(registrationRow.module_confirmation_accepted), requiredDocumentCount, uploadedRequiredDocumentCount, documentSlots: registrationDocumentSlots, studentId: optionalString(registrationRow.student_id), convertedAt: optionalString(registrationRow.converted_at)
         } : undefined
       };
     }

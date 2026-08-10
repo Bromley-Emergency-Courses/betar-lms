@@ -33,7 +33,7 @@ export default async function ApplicantLoginPage({
             <Mail size={20} />
           </div>
           <h1>Check your email</h1>
-          <p className="muted">Enter the email address used for your BETAR application invitation.</p>
+          <p className="muted">Enter the email address used for your BETAR application invitation. Email sign-in links are single-use, so request a fresh one whenever you return.</p>
         </div>
 
         {params.error ? <p className="login-error">{params.error}</p> : null}

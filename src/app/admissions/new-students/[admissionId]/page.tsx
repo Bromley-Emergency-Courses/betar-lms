@@ -28,6 +28,7 @@ import {
   recordApplicationEvidenceOverride,
   recordStaffApplicationReview,
   reopenLapsedAdmissionsRegistration,
+  verifyAdmissionsRegistrationDocument,
   verifyApplicationDocument
 } from "@/app/admissions/reviews/actions";
 import { DocumentOpenButton } from "@/app/admissions/reviews/document-open-button";
@@ -136,6 +137,7 @@ const successMessages: Record<string, string> = {
   decision_recorded: "Application decision recorded and correspondence attempted when enabled.",
   registration_reopened: "Registration reopened for applicant resubmission.",
   registration_converted: "Registration converted to a student record and planned enrolments.",
+  registration_document_verified: "Registration document verification state saved.",
   updated: "Administrative details updated without changing the journey stage.",
   admission_abandoned: "Admissions record closed as abandoned. It remains available and can be reopened.",
   admission_abandoned_demo: "Demo admissions record would be closed as abandoned.",
@@ -175,6 +177,8 @@ function warningMessage(searchParams: Record<string, string | string[] | undefin
   if (searchParams.invited === "email_disabled") return "The invitation workflow record was created, but email delivery is disabled.";
   if (searchParams.invited === "email_failed") return "The invitation workflow record was created, but email delivery failed. The applicant has not been marked as successfully contacted.";
   if (searchParams.decision_email_failed) return "The decision was recorded, but its email delivery failed. The portal remains the source of truth.";
+  if (searchParams.correction_email_disabled) return "The correction request was created, but its email was suppressed by the current delivery controls.";
+  if (searchParams.correction_email_failed) return "The correction request was created, but its email delivery failed. Check the correspondence record before contacting the applicant.";
   if (searchParams.offer_reissue_email_failed) return "The offer was reissued, but its email delivery failed. The portal remains the source of truth.";
   if (searchParams.offer_withdrawal_email_failed) return "The offer was withdrawn, but its email delivery failed. The withdrawal remains authoritative.";
   return undefined;
@@ -592,8 +596,56 @@ function DecisionOfferRegistration({ record, application }: { record: NewStudent
           <div className={styles.facts}>
             <div className={styles.fact}><span>Status</span><strong>{plainLanguageAdmissionsLabel(registration.status)}</strong></div>
             <div className={styles.fact}><span>Deadline</span><strong>{formatDateTime(registration.deadlineAt)}</strong></div>
-            <div className={styles.fact}><span>Required documents</span><strong>{registration.uploadedRequiredDocumentCount}/{registration.requiredDocumentCount}</strong></div>
+            <div className={styles.fact}><span>Required document routes recorded</span><strong>{registration.uploadedRequiredDocumentCount}/{registration.requiredDocumentCount}</strong></div>
             <div className={styles.fact}><span>Terms accepted</span><strong>{registration.termsAcceptedAt ? "Yes" : "No"}</strong></div>
+          </div>
+          <div className={styles.documentList}>
+            {registration.documentSlots.map((slot) => (
+              <div className={styles.document} key={slot.id}>
+                <div className={styles.documentHeader}>
+                  <div>
+                    <strong>{slot.label}</strong>
+                    <p>
+                      {slot.managedFileId
+                        ? `${slot.filename ?? "Uploaded file"}${slot.uploadedAt ? ` · uploaded ${formatDateTime(slot.uploadedAt)}` : ""}`
+                        : slot.verificationRoute === "in_person"
+                          ? "Applicant will bring the original to induction"
+                          : "No file or later-verification route recorded"}
+                    </p>
+                    {slot.verificationNote ? <p>Staff note: {slot.verificationNote}</p> : null}
+                  </div>
+                  <span className={`${styles.pill} ${slot.verificationStatus === "verified" ? styles.readyPill : slot.verificationStatus === "rejected" ? styles.attentionPill : ""}`}>
+                    {slot.verificationRoute === "in_person" && slot.verificationStatus === "unverified"
+                      ? "Needs induction verification"
+                      : plainLanguageAdmissionsLabel(slot.verificationStatus)}
+                  </span>
+                </div>
+                <div className={styles.documentActions}>
+                  <DocumentOpenButton fileId={slot.managedFileId} />
+                  <form action={verifyAdmissionsRegistrationDocument} className={styles.actionForm}>
+                    <HiddenRecordReferences record={record} application={application} />
+                    <input type="hidden" name="registration_id" value={registration.id} />
+                    <input type="hidden" name="slot_id" value={slot.id} />
+                    <input type="hidden" name="verification_route" value={slot.managedFileId ? "upload" : "in_person"} />
+                    <p className={styles.helpText}>
+                      {slot.managedFileId
+                        ? "Review the uploaded document."
+                        : "No file is available; keep this marked as needing induction verification until staff have checked the original."}
+                    </p>
+                    <label>
+                      <span>Verification state</span>
+                      <select name="verification_status" defaultValue={slot.verificationStatus}>
+                        <option value="unverified">Needs verification</option>
+                        <option value="verified">Verified</option>
+                        {slot.managedFileId ? <option value="rejected">Rejected / replace</option> : null}
+                      </select>
+                    </label>
+                    <label><span>Verification note</span><textarea name="verification_note" defaultValue={slot.verificationNote} rows={2} maxLength={4000} required /></label>
+                    <AdmissionsRecordSubmitButton>Save document check</AdmissionsRecordSubmitButton>
+                  </form>
+                </div>
+              </div>
+            ))}
           </div>
           {reopenAccess.allowed ? (
             <form action={reopenLapsedAdmissionsRegistration} className={styles.actionForm}>

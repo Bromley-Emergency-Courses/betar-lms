@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import {
   buildAdmissionsRegistrationDocumentObjectPath,
   getAdmissionsRegistrationDocumentSlotDefinition,
+  parseAdmissionsRegistrationDocumentVerificationRouteForm,
   parseAdmissionsRegistrationDocumentUploadForm,
   parseAdmissionsRegistrationDraftForm,
   parseBeginAdmissionsRegistrationForm,
@@ -89,7 +90,8 @@ export async function uploadAdmissionsRegistrationDocument(formData: FormData) {
   const definition = getAdmissionsRegistrationDocumentSlotDefinition(parsed.slot_key);
   const validation = validateAdmissionsRegistrationDocumentUpload({ file, slotKey: parsed.slot_key });
   if (!validation.valid) {
-    throw new Error(validation.errors.join(" "));
+    const code = file.size > definition.maxBytes ? "size" : "type";
+    redirect(`/portal/registration?document_error=${code}`);
   }
 
   if (!isSupabaseConfigured()) {
@@ -140,6 +142,30 @@ export async function uploadAdmissionsRegistrationDocument(formData: FormData) {
   redirect("/portal/registration?document=uploaded");
 }
 
+export async function setAdmissionsRegistrationDocumentVerificationRoute(formData: FormData) {
+  await requireApplicantProfile("/portal/registration");
+  const parsed = parseAdmissionsRegistrationDocumentVerificationRouteForm(formData);
+
+  if (!isSupabaseConfigured()) {
+    redirect("/portal/registration?document_route=demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("set_admissions_registration_document_verification_route", {
+    p_registration_id: parsed.registration_id,
+    p_slot_key: parsed.slot_key,
+    p_verification_route: parsed.verification_route
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/portal");
+  revalidatePath("/portal/registration");
+  redirect(`/portal/registration?document_route=${parsed.verification_route}`);
+}
+
 export async function submitAdmissionsRegistration(formData: FormData) {
   await requireApplicantProfile("/portal/registration");
   const parsed = parseSubmitAdmissionsRegistrationForm(formData);
@@ -185,7 +211,7 @@ export async function submitAdmissionsRegistration(formData: FormData) {
   });
 
   if (saveError) {
-    throw new Error(saveError.message);
+    redirect("/portal/registration?registration_error=save");
   }
 
   const { error } = await supabase.rpc("submit_admissions_registration", {
@@ -198,7 +224,12 @@ export async function submitAdmissionsRegistration(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(error.message);
+    const code = error.message.includes("required fields are complete")
+      ? "incomplete"
+      : error.message.includes("deadline")
+        ? "deadline"
+        : "submit";
+    redirect(`/portal/registration?registration_error=${code}`);
   }
 
   revalidatePath("/portal");

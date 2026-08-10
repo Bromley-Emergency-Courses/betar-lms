@@ -3,6 +3,7 @@ import { CheckCircle2, FileText, GraduationCap, LockKeyhole, ShieldCheck, Upload
 import {
   beginAdmissionsRegistration,
   saveAdmissionsRegistration,
+  setAdmissionsRegistrationDocumentVerificationRoute,
   submitAdmissionsRegistration,
   uploadAdmissionsRegistrationDocument
 } from "@/app/portal/registration/actions";
@@ -13,6 +14,7 @@ import {
   admissionsRegistrationTermsText,
   admissionsRegistrationTermsVersion,
   type AdmissionsRegistrationDocumentSlotKey,
+  type AdmissionsRegistrationDocumentVerificationRoute,
   type AdmissionsRegistrationStatus
 } from "@/lib/admissions-registration";
 import type { ApplicationDocumentVerificationStatus } from "@/lib/application-documents";
@@ -56,6 +58,8 @@ interface RegistrationDocumentSlotSummary {
   sizeBytes?: number;
   uploadedAt?: string;
   verificationStatus: ApplicationDocumentVerificationStatus;
+  verificationRoute: AdmissionsRegistrationDocumentVerificationRoute;
+  verificationNote?: string;
 }
 
 interface RegistrationTermsSummary {
@@ -162,6 +166,8 @@ type RegistrationDocumentSlotRow = {
   size_bytes: number | null;
   uploaded_at: string | null;
   verification_status: ApplicationDocumentVerificationStatus;
+  verification_route: AdmissionsRegistrationDocumentVerificationRoute;
+  verification_note: string | null;
 };
 
 function relatedObject(value: unknown): RelatedObject | undefined {
@@ -307,7 +313,9 @@ function mapRegistration(
       contentType: optionalString(slot.content_type),
       sizeBytes: slot.size_bytes ?? undefined,
       uploadedAt: optionalString(slot.uploaded_at),
-      verificationStatus: slot.verification_status
+      verificationStatus: slot.verification_status,
+      verificationRoute: slot.verification_route,
+      verificationNote: optionalString(slot.verification_note)
     }))
   };
 }
@@ -478,7 +486,7 @@ async function getRegistrationContext(personId: string): Promise<{
     supabase
       .from("admissions_registration_document_slots")
       .select(
-        "slot_key, label, required, managed_file_id, original_filename, sanitized_filename, content_type, size_bytes, uploaded_at, verification_status"
+        "slot_key, label, required, managed_file_id, original_filename, sanitized_filename, content_type, size_bytes, uploaded_at, verification_status, verification_route, verification_note"
       )
       .eq("registration_id", registrationResult.data.id)
       .order("required", { ascending: false })
@@ -573,7 +581,7 @@ function RegistrationDocumentSlotsPanel({
     <div className="application-section">
       <div className="application-section-heading">
         <h3>Documents</h3>
-        <span>Identity and qualification required</span>
+        <span>Upload now or verify at induction</span>
       </div>
       <div className="application-document-list">
         {admissionsRegistrationDocumentSlotDefinitions.map((definition) => {
@@ -593,8 +601,18 @@ function RegistrationDocumentSlotsPanel({
                     {uploadedAt ? ` · Uploaded ${uploadedAt}` : ""} · {uploadedSlot.verificationStatus.replaceAll("_", " ")}
                   </p>
                 ) : (
-                  <p className="muted small">No file uploaded.</p>
+                  <p className="muted small">
+                    {uploadedSlot?.verificationRoute === "in_person"
+                      ? "Verification will be completed in person at induction."
+                      : "No file uploaded."}
+                  </p>
                 )}
+                {uploadedSlot?.verificationNote ? <p className="muted small">Staff note: {uploadedSlot.verificationNote}</p> : null}
+                {definition.required && editable ? (
+                  <p className="muted small">
+                    PDF is recommended; the maximum size is {Math.floor(definition.maxBytes / 1024 / 1024)} MB. If you cannot upload a suitable file, choose verification at induction and bring the original document with you.
+                  </p>
+                ) : null}
               </div>
 
               {editable ? (
@@ -605,6 +623,20 @@ function RegistrationDocumentSlotsPanel({
                   <button className="button secondary" type="submit">
                     <Upload size={16} />
                     Upload
+                  </button>
+                </form>
+              ) : null}
+              {editable && definition.required && !uploadedSlot?.managedFileId ? (
+                <form action={setAdmissionsRegistrationDocumentVerificationRoute}>
+                  <input type="hidden" name="registration_id" value={registrationId} />
+                  <input type="hidden" name="slot_key" value={definition.key} />
+                  <input
+                    type="hidden"
+                    name="verification_route"
+                    value={uploadedSlot?.verificationRoute === "in_person" ? "upload" : "in_person"}
+                  />
+                  <button className="button secondary" type="submit">
+                    {uploadedSlot?.verificationRoute === "in_person" ? "Upload instead" : "Verify later at induction"}
                   </button>
                 </form>
               ) : null}
@@ -674,6 +706,7 @@ function RegistrationForm({
             name="module_confirmation_accepted"
             type="checkbox"
             defaultChecked={registration.moduleConfirmationAccepted}
+            required
           />{" "}
           I confirm this course of study and these intended first-term modules match my accepted offer
         </label>
@@ -687,13 +720,13 @@ function RegistrationForm({
             <Field label="Title" htmlFor="registration-title">
               <input id="registration-title" name="title" className="input" defaultValue={registration.title ?? ""} />
             </Field>
-            <Field label="First name" htmlFor="registration-first-name">
+            <Field label="First name" htmlFor="registration-first-name" required>
               <input id="registration-first-name" name="first_name" className="input" defaultValue={registration.firstName} required />
             </Field>
             <Field label="Middle names" htmlFor="registration-middle-names">
               <input id="registration-middle-names" name="middle_names" className="input" defaultValue={registration.middleNames ?? ""} />
             </Field>
-            <Field label="Last name" htmlFor="registration-last-name">
+            <Field label="Last name" htmlFor="registration-last-name" required>
               <input id="registration-last-name" name="last_name" className="input" defaultValue={registration.lastName} required />
             </Field>
             <Field label="Preferred name" htmlFor="registration-preferred-name">
@@ -702,7 +735,7 @@ function RegistrationForm({
             <Field label="Previous surname" htmlFor="registration-previous-surname">
               <input id="registration-previous-surname" name="previous_surname" className="input" defaultValue={registration.previousSurname ?? ""} />
             </Field>
-            <Field label="Date of birth" htmlFor="registration-date-of-birth">
+            <Field label="Date of birth" htmlFor="registration-date-of-birth" required>
               <input
                 id="registration-date-of-birth"
                 name="date_of_birth"
@@ -712,18 +745,19 @@ function RegistrationForm({
                 required
               />
             </Field>
-            <Field label="Email" htmlFor="registration-email">
+            <Field label="Email" htmlFor="registration-email" required>
               <input id="registration-email" name="email" className="input" type="email" defaultValue={registration.email} required />
             </Field>
-            <Field label="Phone" htmlFor="registration-phone">
-              <input id="registration-phone" name="phone" className="input" type="tel" defaultValue={registration.phone ?? ""} />
+            <Field label="Phone" htmlFor="registration-phone" required>
+              <input id="registration-phone" name="phone" className="input" type="tel" defaultValue={registration.phone ?? ""} required />
             </Field>
-            <Field label="Address line 1" htmlFor="registration-address-line-1">
+            <Field label="Address line 1" htmlFor="registration-address-line-1" required>
               <input
                 id="registration-address-line-1"
                 name="address_line_1"
                 className="input"
                 defaultValue={registration.addressLine1 ?? ""}
+                required
               />
             </Field>
             <Field label="Address line 2" htmlFor="registration-address-line-2">
@@ -734,14 +768,14 @@ function RegistrationForm({
                 defaultValue={registration.addressLine2 ?? ""}
               />
             </Field>
-            <Field label="City/town" htmlFor="registration-city">
-              <input id="registration-city" name="city" className="input" defaultValue={registration.city ?? ""} />
+            <Field label="City/town" htmlFor="registration-city" required>
+              <input id="registration-city" name="city" className="input" defaultValue={registration.city ?? ""} required />
             </Field>
-            <Field label="Postcode" htmlFor="registration-postcode">
-              <input id="registration-postcode" name="postcode" className="input" defaultValue={registration.postcode ?? ""} />
+            <Field label="Postcode" htmlFor="registration-postcode" required>
+              <input id="registration-postcode" name="postcode" className="input" defaultValue={registration.postcode ?? ""} required />
             </Field>
-            <Field label="Country" htmlFor="registration-country">
-              <input id="registration-country" name="country" className="input" defaultValue={registration.country ?? ""} />
+            <Field label="Country" htmlFor="registration-country" required>
+              <input id="registration-country" name="country" className="input" defaultValue={registration.country ?? ""} required />
             </Field>
           </FormGrid>
         </div>
@@ -753,12 +787,12 @@ function RegistrationForm({
           </div>
           <p className="muted small">{registrationTerms.text}</p>
           <label className="check-option inline-check">
-            <input name="terms_accepted" type="checkbox" /> I accept the registration terms and conditions
+            <input name="terms_accepted" type="checkbox" required /> I accept the registration terms and conditions
           </label>
         </div>
 
         <div className="offer-action-row">
-          <button className="button primary" type="submit">
+          <button className="button primary" type="submit" formNoValidate>
             <FileText size={16} />
             Save draft
           </button>
@@ -849,10 +883,26 @@ function LapsedRegistrationPanel({ offer, registration }: { offer: AcceptedOffer
 export default async function PortalRegistrationPage({
   searchParams
 }: {
-  searchParams: Promise<{ started?: string; saved?: string; submitted?: string; document?: string }>;
+  searchParams: Promise<{
+    started?: string;
+    saved?: string;
+    submitted?: string;
+    document?: string;
+    document_route?: string;
+    document_error?: string;
+    registration_error?: string;
+  }>;
 }) {
   const profile = await requireApplicantProfile("/portal/registration");
-  const { started, saved, submitted, document } = await searchParams;
+  const {
+    started,
+    saved,
+    submitted,
+    document,
+    document_route: documentRoute,
+    document_error: documentError,
+    registration_error: registrationError
+  } = await searchParams;
   const { acceptedOffer, registration, registrationTerms } = await getRegistrationContext(profile.personId);
 
   return (
@@ -882,6 +932,29 @@ export default async function PortalRegistrationPage({
         {document ? (
           <NoticeBanner type="success" title="Document uploaded">
             {document === "demo" ? "Demo mode is running without Supabase storage, so no live document was uploaded." : "Your registration document has been saved."}
+          </NoticeBanner>
+        ) : null}
+        {documentRoute ? (
+          <NoticeBanner type="success" title="Document verification choice saved">
+            {documentRoute === "in_person"
+              ? "Bring the original document to induction for verification. You can still upload it here before submitting registration."
+              : "Upload is selected for this document."}
+          </NoticeBanner>
+        ) : null}
+        {documentError ? (
+          <NoticeBanner type="error" title="Document not uploaded">
+            {documentError === "size"
+              ? "The file is larger than the limit shown beside that document. Convert or compress it to PDF, or choose verification at induction and bring the original."
+              : "Use one of the file types shown by the upload control. PDF is recommended for documents."}
+          </NoticeBanner>
+        ) : null}
+        {registrationError ? (
+          <NoticeBanner type="error" title="Registration not submitted">
+            {registrationError === "incomplete"
+              ? "Complete every field marked with a red asterisk and either upload each required document or choose verification at induction."
+              : registrationError === "deadline"
+                ? "The registration deadline has passed. Contact admissions to reopen it."
+                : "Your saved registration is unchanged. Please review the form and try again, or contact admissions."}
           </NoticeBanner>
         ) : null}
         {submitted ? (

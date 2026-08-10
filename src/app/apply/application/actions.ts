@@ -367,7 +367,7 @@ export async function submitApplication(formData: FormData) {
 
   const changedFields = findUnsavedApplicationDraftChanges(currentDraft, savedDraft);
   if (changedFields.length > 0) {
-    throw new Error("Save your latest changes before submitting your application.");
+    redirect("/apply/application?submit_error=unsaved");
   }
 
   const { error } = await supabase.rpc("submit_application", {
@@ -378,7 +378,12 @@ export async function submitApplication(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(error.message);
+    const code = error.message.includes("required fields are complete")
+      ? "incomplete"
+      : error.message.includes("future term") || error.message.includes("module offerings")
+        ? "study_plan"
+        : "failed";
+    redirect(`/apply/application?submit_error=${code}`);
   }
 
   revalidatePath("/apply/application");

@@ -240,6 +240,10 @@ function applicationUrl(appUrl: string): string {
   return new URL("/apply/application", appUrl).toString();
 }
 
+function applicantLoginUrl(appUrl: string): string {
+  return new URL("/apply/login", appUrl).toString();
+}
+
 function htmlEscape(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -391,6 +395,7 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
         "You have been invited to complete your BETAR application.",
         "Use the secure link below to sign in and continue your application.",
         stringMetadata(metadata, "action_link") ?? portal,
+        `This link is single-use. To return later, request a fresh sign-in link at ${applicantLoginUrl(appUrl)}.`,
         "Regards,\nBETAR Admissions"
       ].join("\n\n");
       break;
@@ -402,6 +407,7 @@ export function renderCorrespondenceEmail(input: CorrespondenceEmailRenderInput)
           ? `Please use the secure link below to review the request and resubmit your corrections by ${deadline}.`
           : "Please use the secure link below to review the request and resubmit your corrections.",
         stringMetadata(metadata, "action_link") ?? applicationUrl(appUrl),
+        `This link is single-use. To return later, request a fresh sign-in link at ${applicantLoginUrl(appUrl)}.`,
         "The secure application page is the authoritative record of the requested changes.",
         "Regards,\nBETAR Admissions"
       ].join("\n\n");

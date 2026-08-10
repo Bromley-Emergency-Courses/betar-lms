@@ -27,6 +27,7 @@ export const admissionsRegistrationDocumentSlotKeys = [
 
 export type AdmissionsRegistrationStatus = (typeof admissionsRegistrationStatuses)[number];
 export type AdmissionsRegistrationDocumentSlotKey = (typeof admissionsRegistrationDocumentSlotKeys)[number];
+export type AdmissionsRegistrationDocumentVerificationRoute = "upload" | "in_person";
 export type AdmissionsRegistrationDocumentBucket = "id-documents" | "qualification-documents" | "student-photos";
 export type AdmissionsRegistrationDocumentRetentionClass = "identity_document" | "qualification_document" | "student_photo";
 
@@ -200,6 +201,21 @@ const registrationDocumentUploadSchema = z.object({
   slot_key: z.enum(admissionsRegistrationDocumentSlotKeys)
 });
 
+const registrationDocumentVerificationRouteSchema = z.object({
+  registration_id: idSchema,
+  slot_key: z.enum(admissionsRegistrationDocumentSlotKeys),
+  verification_route: z.enum(["upload", "in_person"])
+});
+
+const staffRegistrationDocumentVerificationSchema = z.object({
+  application_id: idSchema,
+  registration_id: idSchema,
+  slot_id: idSchema,
+  verification_route: z.enum(["upload", "in_person"]),
+  verification_status: z.enum(["unverified", "verified", "rejected"]),
+  verification_note: nullableText(4000)
+});
+
 const registrationSubmitSchema = z
   .object({
     registration_id: idSchema,
@@ -246,6 +262,8 @@ const registrationReopenSchema = z.object({
 export type BeginAdmissionsRegistrationPayload = z.infer<typeof beginRegistrationSchema>;
 export type AdmissionsRegistrationDraftPayload = z.infer<typeof registrationDraftSchema>;
 export type AdmissionsRegistrationDocumentUploadPayload = z.infer<typeof registrationDocumentUploadSchema>;
+export type AdmissionsRegistrationDocumentVerificationRoutePayload = z.infer<typeof registrationDocumentVerificationRouteSchema>;
+export type StaffRegistrationDocumentVerificationPayload = z.infer<typeof staffRegistrationDocumentVerificationSchema>;
 export type SubmitAdmissionsRegistrationPayload = z.infer<typeof registrationSubmitSchema>;
 export type ProcessAdmissionsRegistrationDeadlineWorkflowPayload = z.infer<typeof registrationDeadlineWorkflowFormSchema>;
 export type ReopenLapsedAdmissionsRegistrationPayload = z.infer<typeof registrationReopenSchema>;
@@ -292,6 +310,29 @@ export function parseAdmissionsRegistrationDocumentUploadForm(
   return registrationDocumentUploadSchema.parse({
     registration_id: formString(formData, "registration_id"),
     slot_key: formString(formData, "slot_key")
+  });
+}
+
+export function parseAdmissionsRegistrationDocumentVerificationRouteForm(
+  formData: FormData
+): AdmissionsRegistrationDocumentVerificationRoutePayload {
+  return registrationDocumentVerificationRouteSchema.parse({
+    registration_id: formString(formData, "registration_id"),
+    slot_key: formString(formData, "slot_key"),
+    verification_route: formString(formData, "verification_route")
+  });
+}
+
+export function parseStaffRegistrationDocumentVerificationForm(
+  formData: FormData
+): StaffRegistrationDocumentVerificationPayload {
+  return staffRegistrationDocumentVerificationSchema.parse({
+    application_id: formString(formData, "application_id"),
+    registration_id: formString(formData, "registration_id"),
+    slot_id: formString(formData, "slot_id"),
+    verification_route: formString(formData, "verification_route"),
+    verification_status: formString(formData, "verification_status"),
+    verification_note: formString(formData, "verification_note")
   });
 }
 

@@ -641,14 +641,14 @@ function ApplicationDraftForm({
           <Field label="Title" htmlFor="application-title">
             <input id="application-title" name="title" className="input" defaultValue={draft?.title ?? ""} />
           </Field>
-          <Field label="First name" htmlFor="application-first-name">
-            <input id="application-first-name" name="first_name" className="input" defaultValue={firstName} />
+          <Field label="First name" htmlFor="application-first-name" required>
+            <input id="application-first-name" name="first_name" className="input" defaultValue={firstName} required />
           </Field>
           <Field label="Middle names" htmlFor="application-middle-names">
             <input id="application-middle-names" name="middle_names" className="input" defaultValue={draft?.middleNames ?? ""} />
           </Field>
-          <Field label="Last name" htmlFor="application-last-name">
-            <input id="application-last-name" name="last_name" className="input" defaultValue={lastName} />
+          <Field label="Last name" htmlFor="application-last-name" required>
+            <input id="application-last-name" name="last_name" className="input" defaultValue={lastName} required />
           </Field>
           <Field label="Preferred name" htmlFor="application-preferred-name">
             <input id="application-preferred-name" name="preferred_name" className="input" defaultValue={draft?.preferredName ?? profile.person.preferredName ?? ""} />
@@ -656,8 +656,8 @@ function ApplicationDraftForm({
           <Field label="Previous surname" htmlFor="application-previous-surname">
             <input id="application-previous-surname" name="previous_surname" className="input" defaultValue={draft?.previousSurname ?? ""} />
           </Field>
-          <Field label="Date of birth" htmlFor="application-date-of-birth">
-            <input id="application-date-of-birth" name="date_of_birth" className="input" type="date" defaultValue={draft?.dateOfBirth ?? ""} />
+          <Field label="Date of birth" htmlFor="application-date-of-birth" required>
+            <input id="application-date-of-birth" name="date_of_birth" className="input" type="date" defaultValue={draft?.dateOfBirth ?? ""} required />
           </Field>
           <Field label="Previous BETAR/university study" htmlFor="application-previous-study">
             <input id="application-previous-study" name="previous_study_detail" className="input" defaultValue={draft?.previousStudyDetail ?? ""} />
@@ -670,68 +670,69 @@ function ApplicationDraftForm({
 
       <ApplicationSection title="Contact">
         <FormGrid>
-          <Field label="Email" htmlFor="application-email">
-            <input id="application-email" name="email" className="input" type="email" defaultValue={email} />
+          <Field label="Email" htmlFor="application-email" required>
+            <input id="application-email" name="email" className="input" type="email" defaultValue={email} required />
           </Field>
-          <Field label="Phone" htmlFor="application-phone">
-            <input id="application-phone" name="phone" className="input" type="tel" defaultValue={draft?.phone ?? ""} />
+          <Field label="Phone" htmlFor="application-phone" required>
+            <input id="application-phone" name="phone" className="input" type="tel" defaultValue={draft?.phone ?? ""} required />
           </Field>
-          <Field label="Address line 1" htmlFor="application-address-line-1">
-            <input id="application-address-line-1" name="address_line_1" className="input" defaultValue={draft?.addressLine1 ?? ""} />
+          <Field label="Address line 1" htmlFor="application-address-line-1" required>
+            <input id="application-address-line-1" name="address_line_1" className="input" defaultValue={draft?.addressLine1 ?? ""} required />
           </Field>
           <Field label="Address line 2" htmlFor="application-address-line-2">
             <input id="application-address-line-2" name="address_line_2" className="input" defaultValue={draft?.addressLine2 ?? ""} />
           </Field>
-          <Field label="City/town" htmlFor="application-city">
-            <input id="application-city" name="city" className="input" defaultValue={draft?.city ?? ""} />
+          <Field label="City/town" htmlFor="application-city" required>
+            <input id="application-city" name="city" className="input" defaultValue={draft?.city ?? ""} required />
           </Field>
-          <Field label="Postcode" htmlFor="application-postcode">
-            <input id="application-postcode" name="postcode" className="input" defaultValue={draft?.postcode ?? ""} />
+          <Field label="Postcode" htmlFor="application-postcode" required>
+            <input id="application-postcode" name="postcode" className="input" defaultValue={draft?.postcode ?? ""} required />
           </Field>
-          <Field label="Country" htmlFor="application-country">
-            <input id="application-country" name="country" className="input" defaultValue={draft?.country ?? ""} />
+          <Field label="Country" htmlFor="application-country" required>
+            <input id="application-country" name="country" className="input" defaultValue={draft?.country ?? ""} required />
           </Field>
         </FormGrid>
       </ApplicationSection>
 
       <ApplicationSection title="Employment">
         <FormGrid>
-          <Field label="Current clinical role" htmlFor="application-clinical-role">
-            <input id="application-clinical-role" name="clinical_role" className="input" defaultValue={draft?.clinicalRole ?? ""} />
+          <Field label="Current clinical role" htmlFor="application-clinical-role" required>
+            <input id="application-clinical-role" name="clinical_role" className="input" defaultValue={draft?.clinicalRole ?? ""} required />
           </Field>
-          <Field label="Employer/organisation" htmlFor="application-employer">
-            <input id="application-employer" name="employer" className="input" defaultValue={draft?.employer ?? ""} />
+          <Field label="Employer/organisation" htmlFor="application-employer" required>
+            <input id="application-employer" name="employer" className="input" defaultValue={draft?.employer ?? ""} required />
           </Field>
-          <Field label="Department/specialty" htmlFor="application-department-specialty">
-            <input id="application-department-specialty" name="department_specialty" className="input" defaultValue={draft?.departmentSpecialty ?? ""} />
+          <Field label="Department/specialty" htmlFor="application-department-specialty" required>
+            <input id="application-department-specialty" name="department_specialty" className="input" defaultValue={draft?.departmentSpecialty ?? ""} required />
           </Field>
-          <Field label="Registration body" htmlFor="application-registration-body">
-            <input id="application-registration-body" name="professional_registration_body" className="input" defaultValue={draft?.professionalRegistrationBody ?? ""} />
+          <Field label="Registration body" htmlFor="application-registration-body" required>
+            <input id="application-registration-body" name="professional_registration_body" className="input" defaultValue={draft?.professionalRegistrationBody ?? ""} required />
           </Field>
-          <Field label="Registration number" htmlFor="application-registration-number">
-            <input id="application-registration-number" name="professional_registration_number" className="input" defaultValue={draft?.professionalRegistrationNumber ?? ""} />
+          <Field label="Registration number" htmlFor="application-registration-number" required>
+            <input id="application-registration-number" name="professional_registration_number" className="input" defaultValue={draft?.professionalRegistrationNumber ?? ""} required />
           </Field>
         </FormGrid>
-        <Field label="Relevant clinical experience" htmlFor="application-work-experience">
+        <Field label="Relevant clinical experience" htmlFor="application-work-experience" required>
           <textarea
             id="application-work-experience"
             name="work_experience"
             className="textarea"
             defaultValue={draft?.workExperience ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
       </ApplicationSection>
 
       <ApplicationSection title="Qualifications">
         <FormGrid>
-          <Field label="Qualification title/level" htmlFor="application-highest-qualification">
-            <input id="application-highest-qualification" name="highest_qualification" className="input" defaultValue={draft?.highestQualification ?? ""} />
+          <Field label="Qualification title/level" htmlFor="application-highest-qualification" required>
+            <input id="application-highest-qualification" name="highest_qualification" className="input" defaultValue={draft?.highestQualification ?? ""} required />
           </Field>
-          <Field label="Awarding body" htmlFor="application-awarding-body">
-            <input id="application-awarding-body" name="qualification_awarding_body" className="input" defaultValue={draft?.qualificationAwardingBody ?? ""} />
+          <Field label="Awarding body" htmlFor="application-awarding-body" required>
+            <input id="application-awarding-body" name="qualification_awarding_body" className="input" defaultValue={draft?.qualificationAwardingBody ?? ""} required />
           </Field>
-          <Field label="Award year" htmlFor="application-qualification-year">
+          <Field label="Award year" htmlFor="application-qualification-year" required>
             <input
               id="application-qualification-year"
               name="qualification_year"
@@ -740,6 +741,7 @@ function ApplicationDraftForm({
               min="1900"
               max="2100"
               defaultValue={draft?.qualificationYear ?? ""}
+              required
             />
           </Field>
           <Field label="Result/classification" htmlFor="application-qualification-result">
@@ -761,14 +763,14 @@ function ApplicationDraftForm({
 
       <ApplicationSection title="Nationality And Visa">
         <FormGrid>
-          <Field label="Nationality" htmlFor="application-nationality">
-            <input id="application-nationality" name="nationality" className="input" defaultValue={draft?.nationality ?? ""} />
+          <Field label="Nationality" htmlFor="application-nationality" required>
+            <input id="application-nationality" name="nationality" className="input" defaultValue={draft?.nationality ?? ""} required />
           </Field>
           <Field label="Country of birth" htmlFor="application-country-of-birth">
             <input id="application-country-of-birth" name="country_of_birth" className="input" defaultValue={draft?.countryOfBirth ?? ""} />
           </Field>
-          <Field label="Country of ordinary residence" htmlFor="application-country-of-residence">
-            <input id="application-country-of-residence" name="country_of_residence" className="input" defaultValue={draft?.countryOfResidence ?? ""} />
+          <Field label="Country of ordinary residence" htmlFor="application-country-of-residence" required>
+            <input id="application-country-of-residence" name="country_of_residence" className="input" defaultValue={draft?.countryOfResidence ?? ""} required />
           </Field>
         </FormGrid>
         <label className="check-option inline-check">
@@ -821,34 +823,37 @@ function ApplicationDraftForm({
       </ApplicationSection>
 
       <ApplicationSection title="POCUS Questions">
-        <Field label="Your previous experience in POCUS" htmlFor="application-pocus-experience">
+        <Field label="Your previous experience in POCUS" htmlFor="application-pocus-experience" required>
           <textarea
             id="application-pocus-experience"
             name="pocus_previous_experience"
             className="textarea"
             defaultValue={draft?.pocusPreviousExperience ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
-        <Field label="Your motivation to enrol in this course" htmlFor="application-pocus-motivation">
-          <textarea id="application-pocus-motivation" name="pocus_motivation" className="textarea" defaultValue={draft?.pocusMotivation ?? ""} maxLength={4000} />
+        <Field label="Your motivation to enrol in this course" htmlFor="application-pocus-motivation" required>
+          <textarea id="application-pocus-motivation" name="pocus_motivation" className="textarea" defaultValue={draft?.pocusMotivation ?? ""} maxLength={4000} required />
         </Field>
-        <Field label="Case where POCUS improved clinical management" htmlFor="application-pocus-case-improved">
+        <Field label="Case where POCUS improved clinical management" htmlFor="application-pocus-case-improved" required>
           <textarea
             id="application-pocus-case-improved"
             name="pocus_case_improved_management"
             className="textarea"
             defaultValue={draft?.pocusCaseImprovedManagement ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
-        <Field label="Case where you recognised POCUS limitations" htmlFor="application-pocus-limitations">
+        <Field label="Case where you recognised POCUS limitations" htmlFor="application-pocus-limitations" required>
           <textarea
             id="application-pocus-limitations"
             name="pocus_limitations_case"
             className="textarea"
             defaultValue={draft?.pocusLimitationsCase ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
       </ApplicationSection>
@@ -872,10 +877,10 @@ function ApplicationDraftForm({
 export default async function ApplicationAccessPage({
   searchParams
 }: {
-  searchParams: Promise<{ saved?: string; submitted?: string; document?: string }>;
+  searchParams: Promise<{ saved?: string; submitted?: string; document?: string; submit_error?: string }>;
 }) {
   const profile = await requireApplicantProfile("/apply/application");
-  const { saved, submitted, document } = await searchParams;
+  const { saved, submitted, document, submit_error: submitError } = await searchParams;
   const { invitations, draft, documentSlots, terms, offerings } = await getApplicantApplicationContext(profile.personId);
   const latestInvitation = invitations[0];
   const claimedInvitation =
@@ -901,7 +906,25 @@ export default async function ApplicationAccessPage({
             <CheckCircle2 size={22} />
             <div>
               <h2>Draft saved</h2>
-              <p>{saved === "demo" ? "Demo mode is running without a Supabase database, so no live draft was saved." : "Your latest changes have been saved."}</p>
+              <p>{saved === "demo" ? "Demo mode is running without a Supabase database, so no live draft was saved." : "Your latest changes have been saved. To return later, request a fresh sign-in link from the applicant login page; invitation links are single-use."}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {submitError ? (
+          <div className="apply-error" role="alert">
+            <LockKeyhole size={22} />
+            <div>
+              <h2>Application not submitted</h2>
+              <p>
+                {submitError === "unsaved"
+                  ? "Save your latest changes before submitting."
+                  : submitError === "study_plan"
+                    ? "Choose a current published start term and one or two available module offerings."
+                    : submitError === "incomplete"
+                      ? "Complete every field marked with a red asterisk and upload both required evidence documents."
+                      : "The application could not be submitted. Your saved draft is unchanged; please try again or contact admissions."}
+              </p>
             </div>
           </div>
         ) : null}
@@ -934,7 +957,7 @@ export default async function ApplicationAccessPage({
           <div className="section-header">
             <div>
               <h2>Invitation</h2>
-              <p>Magic-link access is active for this applicant identity.</p>
+              <p>Invitation links are single-use. For later visits, use the applicant login page to request a fresh sign-in link.</p>
             </div>
             <div className="icon-box">
               <LockKeyhole size={18} />

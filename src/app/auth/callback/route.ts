@@ -36,7 +36,11 @@ export async function GET(request: NextRequest) {
       token_hash: tokenHash
     });
     if (error) {
-      return loginRedirect(request, error.message, next);
+      return loginRedirect(
+        request,
+        "This sign-in link has expired or has already been used. Request a fresh link below.",
+        next
+      );
     }
   } else {
     return loginRedirect(request, "Sign-in link was missing a verification code.", next);

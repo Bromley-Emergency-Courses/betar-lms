@@ -19,6 +19,7 @@ export interface PortalMagicLinkEmailInput {
   personId?: string | null;
   admissionLeadId?: string | null;
   studentId?: string | null;
+  correspondenceLogId?: string | null;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -84,6 +85,27 @@ async function findOrCreateCorrespondenceLog(
   recipient: ResolvedPortalRecipient
 ): Promise<string> {
   const supabase = createSupabaseServiceRoleClient();
+
+  if (input.correspondenceLogId) {
+    const existingResult = await supabase
+      .from("correspondence_logs")
+      .select("id")
+      .eq("id", input.correspondenceLogId)
+      .eq("person_id", recipient.personId)
+      .eq("recipient_email", input.email.trim().toLowerCase())
+      .eq("template_key", input.templateKey)
+      .maybeSingle();
+
+    if (existingResult.error) {
+      throw new Error(existingResult.error.message);
+    }
+    if (!existingResult.data) {
+      throw new Error("The requested correspondence log does not match this portal recipient.");
+    }
+
+    return String(existingResult.data.id);
+  }
+
   const invitationId = input.metadata?.invitation_id;
 
   if (typeof invitationId === "string" && invitationId.length > 0) {
