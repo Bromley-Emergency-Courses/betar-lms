@@ -27,6 +27,23 @@ describe("portal magic-link callbacks", () => {
     expect(parsed.hash).toBe("");
   });
 
+  it("preserves Supabase's signup verification type for a first-time applicant", () => {
+    const callbackUrl = portalMagicLinkCallbackUrl(
+      {
+        properties: {
+          hashed_token: "first-contact-token",
+          verification_type: "signup"
+        }
+      },
+      "https://lms.example.test/auth/callback?next=%2Fapply%2Fapplication"
+    );
+
+    expect(callbackUrl).not.toBeNull();
+    const parsed = new URL(callbackUrl!);
+    expect(parsed.searchParams.get("token_hash")).toBe("first-contact-token");
+    expect(parsed.searchParams.get("type")).toBe("signup");
+  });
+
   it("rejects incomplete, unexpected, and unsafe generated-link data", () => {
     const redirectTo = "https://lms.example.test/auth/callback";
 

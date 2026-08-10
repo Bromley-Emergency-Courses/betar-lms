@@ -3,10 +3,14 @@ interface GeneratedMagicLinkProperties {
   verification_type?: unknown;
 }
 
+const portalSignInVerificationTypes = new Set(["signup", "magiclink"]);
+
 /**
  * Converts Supabase's admin-generated magic-link response into the app callback
- * URL used by the SSR auth flow. Supabase's default action_link completes auth
- * with URL-fragment tokens, which a server route cannot read.
+ * URL used by the SSR auth flow. Supabase returns `signup` for the first magic
+ * link issued to a new auth identity and `magiclink` for later sign-ins. Its
+ * default action_link completes auth with URL-fragment tokens, which a server
+ * route cannot read.
  */
 export function portalMagicLinkCallbackUrl(
   data: unknown,
@@ -29,7 +33,8 @@ export function portalMagicLinkCallbackUrl(
   if (
     typeof tokenHash !== "string" ||
     tokenHash.length === 0 ||
-    verificationType !== "magiclink"
+    typeof verificationType !== "string" ||
+    !portalSignInVerificationTypes.has(verificationType)
   ) {
     return null;
   }
