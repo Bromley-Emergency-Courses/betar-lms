@@ -748,7 +748,7 @@ export default async function NewStudentAdmissionRecordPage({
             </div>
             <div className={styles.headerPills}>
               <span className={styles.pill}>{newStudentJourneyStageLabels[record.operation.journeyStage]}</span>
-              {record.pilotTestRecord?.active ? <span className={`${styles.pill} ${styles.readyPill}`}><LockKeyhole size={12} /> Pilot test record</span> : null}
+              {record.email.mode === "pilot" && record.pilotTestRecord?.active ? <span className={`${styles.pill} ${styles.readyPill}`}><LockKeyhole size={12} /> Pilot test record</span> : null}
               {record.operation.leadingAttentionIndicator ? <span className={`${styles.pill} ${styles.attentionPill}`}><AlertTriangle size={12} /> {plainLanguageAdmissionsLabel(record.operation.leadingAttentionIndicator)}</span> : null}
             </div>
           </header>
@@ -820,7 +820,7 @@ export default async function NewStudentAdmissionRecordPage({
                 ) : null}
                 {record.operation.primaryNextAction === "reissue_offer" ? <p className={styles.helpText}>Use the reissue action in the offer section to set a new response deadline.</p> : null}
               </section>
-              <section className={styles.sideCard}>
+              {record.email.mode === "pilot" ? <section className={styles.sideCard}>
                 <h3>Email pilot safety</h3>
                 <AdmissionsEmailPilotControls
                   recordType="new_applicant"
@@ -833,7 +833,7 @@ export default async function NewStudentAdmissionRecordPage({
                   configurationReady={record.email.missing.length === 0}
                   testRecord={record.pilotTestRecord}
                 />
-              </section>
+              </section> : null}
               <section className={styles.sideCard}>
                 <h3>Record sections</h3>
                 <nav className={styles.quickNav} aria-label="Applicant record sections">

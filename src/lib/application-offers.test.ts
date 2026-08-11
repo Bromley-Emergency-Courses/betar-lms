@@ -345,7 +345,7 @@ async function seedOfferScenario(
     [applicantPersonId, applicantUserId, otherApplicantPersonId, otherApplicantUserId]
   );
   await db.query(
-    "insert into public.admission_leads (id, first_name, last_name, email, stage, next_action_on) values ($1, 'Asha', 'Applicant', 'asha@example.test', $2, '2026-08-10')",
+    "insert into public.admission_leads (id, first_name, last_name, email, stage, next_action_on) values ($1, 'Asha', 'Applicant', 'asha@example.test', $2, '2099-08-10')",
     [leadId, options.leadStage ?? "offered"]
   );
   await db.query(
@@ -397,7 +397,7 @@ async function seedOfferScenario(
       offerPersonId,
       termId,
       status,
-      options.deadlineAt ?? "2026-08-10T23:59:59Z",
+      options.deadlineAt ?? "2099-08-10T23:59:59Z",
       acceptedAt,
       declinedAt,
       lapsedAt,

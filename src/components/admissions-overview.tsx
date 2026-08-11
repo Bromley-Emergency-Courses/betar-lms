@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRight, MailWarning, RotateCcw, ShieldCheck, UserChe
 import Link from "next/link";
 import { AdmissionsLocalNavigation } from "@/components/admissions-workspace-shell";
 import styles from "@/components/admissions-workspace.module.css";
+import { returningStudentAdmissionsWorkspaceEnabled } from "@/lib/admissions-feature";
 import { plainLanguageAdmissionsLabel } from "@/lib/admissions-workspace";
 import type { AdmissionsOverviewData } from "@/lib/admissions-workspace-data";
 
@@ -20,6 +21,7 @@ function QueueList({ items }: { items: Array<{ label: string; count: number }> }
 }
 
 export function AdmissionsOverview({ data }: { data: AdmissionsOverviewData }) {
+  const returningStudentsEnabled = returningStudentAdmissionsWorkspaceEnabled();
   const emailLabel = data.email.mode === "pilot"
     ? "Pilot email mode"
     : data.email.mode === "live"
@@ -82,7 +84,7 @@ export function AdmissionsOverview({ data }: { data: AdmissionsOverviewData }) {
           </div>
         </section>
 
-        <section className={styles.workspaceCard}>
+        {returningStudentsEnabled ? <section className={styles.workspaceCard}>
           <div className={styles.cardHeader}>
             <div className={styles.cardIdentity}>
               <span className={`${styles.cardIcon} ${styles.returningIcon}`}><RotateCcw size={19} aria-hidden="true" /></span>
@@ -107,7 +109,7 @@ export function AdmissionsOverview({ data }: { data: AdmissionsOverviewData }) {
             <span className={styles.phaseBadge}>{data.returningStudents.phase ? plainLanguageAdmissionsLabel(data.returningStudents.phase) : "Setup not started"}</span>
             <Link className={styles.primaryLink} href="/admissions/returning-students">Open returning-student workspace <ArrowRight size={13} /></Link>
           </div>
-        </section>
+        </section> : null}
       </div>
 
       <section className={styles.exceptionSurface}>
@@ -118,10 +120,10 @@ export function AdmissionsOverview({ data }: { data: AdmissionsOverviewData }) {
             <AlertTriangle size={16} aria-hidden="true" />
             <div><strong>{data.exceptions.newStudentInconsistencies} data inconsistencies</strong><span>New-student source records requiring repair</span></div>
           </Link>
-          <Link className={styles.exceptionRow} href="/admissions/returning-students?attention=needs_attention">
+          {returningStudentsEnabled ? <Link className={styles.exceptionRow} href="/admissions/returning-students?attention=needs_attention">
             <MailWarning size={16} aria-hidden="true" />
             <div><strong>{data.exceptions.returningStudentBlockers} returning-student blockers</strong><span>Identity, email or eligibility needs attention</span></div>
-          </Link>
+          </Link> : null}
           {data.exceptions.failedBatches.length > 0 ? (
             <Link className={styles.exceptionRow} href={`/admissions/batches/${data.exceptions.failedBatches[0].id}`}>
               <AlertTriangle size={16} aria-hidden="true" />

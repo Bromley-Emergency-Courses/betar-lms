@@ -4,7 +4,7 @@ import { AdmissionsOperationsTable } from "@/components/admissions-operations-ta
 import { AdmissionsLocalNavigation } from "@/components/admissions-workspace-shell";
 import styles from "@/components/admissions-workspace.module.css";
 import { AppShell } from "@/components/app-shell";
-import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
+import { returningStudentAdmissionsWorkspaceEnabled } from "@/lib/admissions-feature";
 import { parseReturningStudentWorkspaceQuery, plainLanguageAdmissionsLabel } from "@/lib/admissions-workspace";
 import { getAdmissionsOverviewData, getReturningStudentWorkspacePage } from "@/lib/admissions-workspace-data";
 import { requirePermission } from "@/lib/auth";
@@ -17,7 +17,7 @@ export default async function ReturningStudentsAdmissionsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requirePermission("manage_admissions");
-  if (!admissionsStaffWorkspacesEnabled()) redirect("/admissions");
+  if (!returningStudentAdmissionsWorkspaceEnabled()) redirect("/admissions");
 
   const query = parseReturningStudentWorkspaceQuery(await searchParams);
   const [overview, page] = await Promise.all([

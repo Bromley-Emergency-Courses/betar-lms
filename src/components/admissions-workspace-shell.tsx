@@ -1,6 +1,7 @@
 import { LayoutDashboard, RotateCcw, UserCheck, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import styles from "@/components/admissions-workspace.module.css";
+import { returningStudentAdmissionsWorkspaceEnabled } from "@/lib/admissions-feature";
 
 export type AdmissionsWorkspaceLocation = "overview" | "new_students" | "returning_students" | "batch";
 
@@ -22,7 +23,9 @@ export function AdmissionsLocalNavigation({
   }> = [
     { key: "overview", href: "/admissions", label: "Overview", icon: LayoutDashboard },
     { key: "new_students", href: "/admissions/new-students", label: "New students", icon: UserCheck, count: newAttention },
-    { key: "returning_students", href: "/admissions/returning-students", label: "Returning students", icon: RotateCcw, count: returningAttention }
+    ...(returningStudentAdmissionsWorkspaceEnabled()
+      ? [{ key: "returning_students" as const, href: "/admissions/returning-students", label: "Returning students", icon: RotateCcw, count: returningAttention }]
+      : [])
   ];
 
   return (
