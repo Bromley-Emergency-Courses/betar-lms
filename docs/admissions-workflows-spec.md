@@ -1,10 +1,16 @@
 # Admissions and Applications Workflows Spec
 
-Last updated: 2026-07-31
+Last updated: 2026-08-08
 
 This is the developer-facing build spec for the admissions, application, registration, and student portal work. It is derived from the original PGCert admissions system plan and adjusted for the current BETAR LMS codebase.
 
 Use this document to understand what to build. Use `docs/admissions-workflows-roadmap.md` to track what has been built, what is in progress, and what remains.
+
+## Staff Workflow Redesign Contract
+
+The approved implementation contract for the scalable staff Admissions overview, new-student workspace, and returning-student workspace is `docs/admissions-staff-workflows-implementation-spec.md`.
+
+That contract supersedes conflicting staff-UX, direct lead-stage editing, returning-student preference, capacity, confirmation, bulk-action, correspondence, and cutover assumptions in this historical phase-by-phase spec. In particular, the current test-only module-preference window is replaced by an explicit returning-student cycle; its ranked preferences, active-only membership, hard capacity block, and lifecycle-only confirmation are not target behaviour.
 
 ## Build Stance
 
@@ -24,7 +30,7 @@ Core decisions:
 - Do not sync between two systems.
 - Accepted applicants become BETAR students through a database transaction.
 - Public applicant/student routes must have a separate auth and RLS boundary from staff routes.
-- Production applicant emails must not use Supabase's default email sender. Use Supabase Auth custom SMTP with the organisation-approved Microsoft 365/Outlook sender before real applicant invitation or offer email sends at scale. Missing SMTP access blocks go-live and live cohort sends, but it should not block ordinary feature development.
+- Production applicant emails must not use Supabase's default sender. Generate secure access links through the app and deliver admissions correspondence through the configured Microsoft Graph or SMTP provider, with Graph preferred for Microsoft 365. Keep delivery disabled outside the server-enforced fake-record pilot until the organisation sender and live-recipient rollout pass the contract gates.
 - Expanded finance is deferred until the core admissions and registration flow is stable.
 
 ## Scope
@@ -254,7 +260,7 @@ Add correspondence logging before sending automated emails.
 
 Email-provider rules:
 
-- Application invitations currently use Supabase Auth magic-link email. Future email work should preserve the secure invitation claim flow while switching delivery to configured custom SMTP.
+- Application invitations use the app-side portal magic-link delivery path, backed by the configured admissions email provider when enabled. Keep the secure invitation claim flow and do not rely on Supabase's default sender for production applicant mail.
 - The configured provider should be Microsoft 365/Outlook unless a later durable decision replaces it with a transactional provider.
 - For production readiness, record enough provider metadata to trace sends. Where the provider exposes a message ID, persist it in `correspondence_logs.provider_message_id`.
 - Staff-facing send actions should report provider errors clearly instead of silently treating failed email sends as successful invitations.
@@ -502,7 +508,7 @@ Current Phase 1 submit implementation:
 - Submission sets `applications.status = 'submitted'`, sets `submitted_at`, updates the related `admission_leads.stage` to `submitted`, and writes `application.submitted` in the same database transaction.
 - Submitted applications are locked from applicant editing because draft save only allows draft applications on leads still in `application_invited`.
 - The applicant UI disables final submit after draft-field edits until the draft is saved, and the submit server action rejects requests where submitted form fields differ from the saved application snapshot.
-- This slice deliberately does not perform staff review, staff document verification, offer issue, registration, or production email configuration.
+- Final submit itself does not reserve seats, create enrolments, create finance rows, or send email. The later Phase 1 and Phase 2 staff review, offer, registration, and conversion slices are now implemented as separate workflow steps.
 
 ### Documents
 
@@ -544,8 +550,8 @@ Current Phase 1 application document implementation:
 - `record_application_document_upload(...)` validates applicant ownership, draft status, lead stage, slot metadata, extension allow-list, file metadata, object path, and backing `storage.objects` existence before creating the managed-file row and slot linkage.
 - Each successful upload writes a `document.uploaded` audit event without storing document contents or sensitive free-text metadata.
 - Final application submission blocks when required slots are missing, rejected, or no longer linked to a real private storage object, but it does not require staff verification at this stage.
-- Staff review UI and document verification actions are implemented as a later Phase 1 slice.
-- Offer/rejection decisions, offer issue, registration, and production email configuration remain separate Phase 1/2 slices.
+- Staff review UI and document verification actions are implemented on `/admissions/reviews`.
+- Offer/rejection decisions, offer issue, registration, and production email delivery are handled by separate Phase 1/2 slices.
 
 ### Staff Review
 
@@ -566,14 +572,14 @@ Staff review must remain separate from offer/rejection email templates, offer is
 
 Current Phase 1 staff review implementation:
 
-- `/admissions/reviews` is a staff-only admissions/admin screen for submitted applications whose lead is still in `submitted` or `reviewed`.
+- `/admissions/reviews` is a staff-only admissions/admin screen for submitted applications whose lead is still operationally visible: `submitted`, `reviewed`, `offered`, `accepted`, `registration_in_progress`, `registration_lapsed`, `registered`, `offer_declined`, or `offer_lapsed`.
 - The screen shows applicant details, intended start term, selected `module_offerings`, POCUS answers, uploaded evidence status, and a separated restricted support-needs panel.
 - Reading disclosed support-needs detail in the staff review screen writes `application_support_needs.viewed` audit events with redacted metadata before rendering the restricted text.
 - Application documents continue to use `application_document_slots` linked to `managed_files`; staff can open files through the existing server-authorized signed URL endpoint.
 - `verify_application_document_slot(...)` records `unverified`, `verified`, or `rejected` states with verifier, timestamp, note, and audit events: `document.verified`, `document.rejected`, or `document.verification_reset`.
 - `application_reviews` stores one review row per application with reviewer, readiness status, review notes, decision reason notes, and last reviewed timestamp.
 - `record_staff_application_review(...)` writes `application.review_recorded`, redacts free-text note content from audit metadata, and moves the related lead from `submitted` to `reviewed` only when readiness is `ready_for_decision`.
-- The review slice deliberately does not create offer records, send offer/rejection/reminder emails, create enrolments, create finance rows, accept offers, register applicants, or configure production email.
+- The review-note/document-verification actions do not create offers, enrolments, finance rows, or registration rows. The same `/admissions/reviews` screen now also hosts the separate offer/rejection, offer-deadline, registration-deadline, registration-reopen, and submitted-registration conversion actions described below.
 
 ### Offers
 
@@ -633,8 +639,8 @@ Current Phase 1 offer deadline/reminder/lapse implementation:
 - Reminder and lapse correspondence logs keep `delivery_status = suppressed`, `production_email_send_enabled = false`, and `provider_message_id = null`. They are placeholders only and do not send real email.
 - Staff review/admin UI now includes submitted, offered, accepted, declined, and lapsed offer-stage applications. It shows offer reference, status, deadline, deadline-passed state, reminder logging state, and lapsed state, plus the manual deadline workflow trigger.
 - Applicant portal UI shows deadline, lapsed state, and deadline-passed state clearly. The portal/database remains the source of truth.
-- This slice deliberately does not add a production scheduler/cron, Microsoft 365 SMTP configuration, real applicant sends, registration wizard, enrolments, finance rows, or module capacity changes.
-- Accepted offers show a clear portal state that registration is the next step. The registration wizard, conversion, enrolments, finance rows, production scheduling, and production SMTP configuration remain separate future tasks.
+- This slice deliberately does not add a production scheduler/cron, enrolments, finance rows, or module capacity changes. App-side email sending is attempted only when admissions email delivery is configured and enabled.
+- Accepted offers show a clear portal state that registration is the next step. The registration wizard, conversion to student, and initial planned enrolments are now implemented in Phase 2; finance rows, production scheduling, and remaining production email readiness work are still separate.
 
 ### Emails and Letters
 
@@ -706,7 +712,7 @@ Current Phase 2 registration foundation implementation:
 - T&Cs are versioned in `admissions_registration_terms_versions`. The portal reads the active version/text from the database, and the submit server action fetches the active version/hash before calling `submit_admissions_registration(...)`. Final submit saves the current draft form fields first, then records version, hash, person, auth user, timestamp, IP address, and user agent, and writes `registration.terms_accepted` and `registration.submitted`.
 - Final registration submission validates required personal details, confirmed offer modules, active accepted-term offerings, required uploaded identity/qualification slots, and current T&C acceptance.
 - `/portal` shows registration not-started/in-progress/submitted states for accepted offers, and `/admissions/reviews` shows registration status to admissions admins.
-- This slice deliberately does not call `convert_admissions_registration(...)`, create or activate student records, create enrolments, create finance rows or invoices, send emails, add a scheduler, or implement registration lapsed/reopened workflow.
+- The registration foundation slice itself did not call conversion, create finance rows or invoices, send emails, or add a scheduler. Conversion and lapsed/reopened handling are now implemented as later Phase 2 slices; finance rows/invoices and production registration emails remain pending.
 
 Current Phase 2 registration conversion implementation:
 
@@ -733,7 +739,9 @@ Current Phase 2 registration lapsed/reopened implementation:
 - Applicant portal and staff review UI show registration deadline, lapsed state, reopened state, and suppressed-notice behavior.
 - This slice deliberately does not create finance rows, invoices, payment rows, real email sends, production SMTP configuration, scheduler/cron deployment, capacity/waitlist behavior, or Phase 3 module preference windows.
 
-## Phase 3: Termly Module Preferences
+## Phase 3: Returning-Student Cycles
+
+The current module-preference implementation described below is a test-only historical foundation. It is not the target workflow. Implement the returning-student cycle, provisional-selection, advisory-capacity, planned-enrolment confirmation, bulk-operation, and clean-replacement rules in `docs/admissions-staff-workflows-implementation-spec.md`.
 
 Preference windows replace Google Forms and email chasing.
 
@@ -944,7 +952,7 @@ Security rules:
 
 ## Accessibility
 
-Applicant and student-facing pages should target WCAG 2.2 AA.
+Applicant and student-facing pages should target WCAG 2.2 AA. The redesigned staff Admissions workflow must meet WCAG 2.2 AA under the complete-process acceptance contract in `docs/admissions-staff-workflows-implementation-spec.md`.
 
 Implementation expectations:
 
@@ -988,13 +996,13 @@ Phase 2 is complete when:
 - Registration conversion creates/activates student record without re-keying.
 - Initial enrolments and expected finance rows are created.
 
-Phase 3 is complete when:
+Phase 3 is complete when the returning-student implementation and acceptance gates in `docs/admissions-staff-workflows-implementation-spec.md` pass. At minimum:
 
-- Staff can open a preference window.
-- Students can submit 0, 1, or 2 module preferences.
-- Capacity cannot be oversubscribed.
-- Staff can confirm enrolments.
-- Existing finance records are generated from confirmed enrolments.
+- Staff can create the one cycle for the Published target term, review explicit participant membership, and deliberately start response collection without automatic contact.
+- Included learners can submit one or two unranked provisional selections or an explicit study-break response.
+- Planned capacity is advisory; excess demand is visible and acknowledged rather than hard-blocked.
+- Staff can resolve participants individually or in valid batches, and confirmation idempotently creates or links planned enrolments.
+- Correspondence is log-first, supports exact recipient snapshots and failure-only retry, and passes the controlled fake-record email pilot before live enablement.
 
 Phase 4 remains deferred until explicitly reprioritized.
 

@@ -1,8 +1,11 @@
 import { ClipboardCheck, Eye, ListChecks, Pencil } from "lucide-react";
 import Link from "next/link";
 import { AdmissionsBoard, AdmissionsRecords, AdmissionsTools } from "@/components/admissions-records";
+import { AdmissionsOverview } from "@/components/admissions-overview";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
+import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
+import { getAdmissionsOverviewData } from "@/lib/admissions-workspace-data";
 import { requirePermission } from "@/lib/auth";
 import { getLmsData } from "@/lib/lms-data";
 
@@ -13,6 +16,14 @@ export default async function AdmissionsPage({
 }) {
   await requirePermission("manage_admissions");
   const { mode, invited } = await searchParams;
+  if (admissionsStaffWorkspacesEnabled()) {
+    const overview = await getAdmissionsOverviewData();
+    return (
+      <AppShell title="Admissions" subtitle="New-student intake and returning-student study cycles">
+        <AdmissionsOverview data={overview} />
+      </AppShell>
+    );
+  }
   const editMode = mode === "edit";
   const data = await getLmsData();
 

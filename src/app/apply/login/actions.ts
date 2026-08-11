@@ -39,6 +39,10 @@ export async function sendApplicantMagicLink(formData: FormData) {
     redirect(loginPath({ error: "Email delivery is disabled for this environment.", next }));
   }
 
+  if (deliveryResult.status === "suppressed") {
+    redirect(loginPath({ sent: "1", next }));
+  }
+
   if (correspondenceEmailFailed(deliveryResult)) {
     const message = deliveryResult.status === "failed" ? deliveryResult.error : "Email delivery could not be completed.";
     redirect(loginPath({ error: message, next }));

@@ -271,6 +271,11 @@ textarea {
   justify-self: start;
 }
 
+.required-marker {
+  color: var(--red);
+  font-weight: 900;
+}
+
 .application-draft-form {
   width: min(100%, 860px);
 }
@@ -396,6 +401,19 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
+}
+
+.application-correction-panel {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+}
+
+.application-correction-response-form {
+  display: grid;
+  gap: 10px;
+}
+
+.application-correction-response-form .button {
+  justify-self: start;
 }
 
 .offer-summary-grid {

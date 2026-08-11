@@ -87,11 +87,16 @@ describe("correspondence log inserts", () => {
       template_version: 1,
       channel: "email",
       rendered_subject: "Your BETAR offer",
+      rendered_body: null,
+      delivery_provider: null,
       provider_message_id: null,
       delivery_status: "queued",
       bounce_status: "none",
       sent_at: null,
       generated_file_id: null,
+      operational_batch_id: null,
+      operational_batch_target_id: null,
+      attempt_number: 1,
       metadata: {},
       created_by_user_id: null
     });

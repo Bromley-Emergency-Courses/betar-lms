@@ -1,6 +1,12 @@
-import { CheckCircle2, FileText, LockKeyhole, ShieldCheck, Upload } from "lucide-react";
+import { CheckCircle2, Clock3, FileText, LockKeyhole, ShieldCheck, Upload } from "lucide-react";
 import { Field, FormGrid } from "@/components/forms";
-import { saveApplicationDraft, uploadApplicationDocument } from "@/app/apply/application/actions";
+import {
+  resubmitApplicationCorrections,
+  saveApplicationDraft,
+  uploadApplicationCorrectionDocument,
+  uploadApplicationDocument
+} from "@/app/apply/application/actions";
+import { ApplicationCorrectionFieldResponse } from "@/app/apply/application/application-correction-field-response";
 import { ApplicationSubmitControls } from "@/app/apply/application/application-submit-controls";
 import {
   StudyPlanFields,
@@ -12,6 +18,11 @@ import {
   type ApplicationDocumentSlotKey,
   type ApplicationDocumentVerificationStatus
 } from "@/lib/application-documents";
+import {
+  applicationCorrectionFieldKeys,
+  applicationCorrectionFieldLabel,
+  type ApplicationCorrectionFieldKey
+} from "@/lib/application-corrections";
 import { applicationDeclarationText } from "@/lib/application-submit";
 import { requireApplicantProfile, type PortalProfile } from "@/lib/portal-auth";
 import { getAppData } from "@/lib/seed";
@@ -96,6 +107,30 @@ interface ApplicationDocumentSlotSummary {
   verificationStatus: ApplicationDocumentVerificationStatus;
 }
 
+interface ApplicantCorrectionItemSummary {
+  id: string;
+  targetType: "application_field" | "document_slot";
+  targetKey: string;
+  instructions: string;
+  status: "open" | "resubmitted" | "accepted";
+  baselineValue: string | number | boolean | null;
+  proposedValue: string | number | boolean | null;
+  replacementManagedFileId?: string;
+  responseNote?: string;
+  savedAt?: string;
+}
+
+interface ApplicantCorrectionRequestSummary {
+  id: string;
+  applicationId: string;
+  status: "open" | "resubmitted";
+  summary?: string;
+  dueAt: string;
+  requestedAt: string;
+  revisionNumber: number;
+  items: ApplicantCorrectionItemSummary[];
+}
+
 type ApplicationDraftRow = {
   id: string;
   admission_lead_id: string;
@@ -164,6 +199,29 @@ type ApplicationDocumentSlotRow = {
   size_bytes: number | null;
   uploaded_at: string | null;
   verification_status: ApplicationDocumentVerificationStatus;
+};
+
+type ApplicantCorrectionRequestRow = {
+  id: string;
+  application_id: string;
+  status: "open" | "resubmitted";
+  summary: string | null;
+  due_at: string;
+  requested_at: string;
+  revision_number: number;
+};
+
+type ApplicantCorrectionItemRow = {
+  id: string;
+  target_type: "application_field" | "document_slot";
+  target_key: string;
+  instructions: string;
+  status: "open" | "resubmitted" | "accepted";
+  baseline_value: string | number | boolean | null;
+  proposed_value: string | number | boolean | null;
+  replacement_managed_file_id: string | null;
+  applicant_response_note: string | null;
+  applicant_saved_at: string | null;
 };
 
 function optionalString(value: string | null | undefined): string | undefined {
@@ -242,8 +300,11 @@ async function getApplicantApplicationContext(personId: string): Promise<{
   invitations: ApplicantInvitationSummary[];
   draft?: ApplicationDraftSummary;
   documentSlots: ApplicationDocumentSlotSummary[];
+  correctionRequest?: ApplicantCorrectionRequestSummary;
   terms: ApplicationTermOption[];
   offerings: ApplicationOfferingOption[];
+  applicationDeadlineAt?: string;
+  applicationDeadlinePassed: boolean;
 }> {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -268,7 +329,10 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       ],
       draft: undefined,
       documentSlots: [],
+      correctionRequest: undefined,
       terms,
+      applicationDeadlineAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      applicationDeadlinePassed: false,
       offerings: data.offerings
         .map((offering) => ({ offering, courseModule: activeModulesById.get(offering.moduleId) }))
         .filter(({ offering, courseModule }) => courseModule && termIds.has(offering.termId))
@@ -350,7 +414,7 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       .order("last_saved_at", { ascending: false }),
     supabase
       .from("terms")
-      .select("id, name, starts_on")
+      .select("id, name, starts_on, application_deadline_at")
       .in("status", ["published", "active"])
       .gte("starts_on", today)
       .order("starts_on"),
@@ -401,8 +465,9 @@ async function getApplicantApplicationContext(personId: string): Promise<{
 
   let draft: ApplicationDraftSummary | undefined;
   let documentSlots: ApplicationDocumentSlotSummary[] = [];
+  let correctionRequest: ApplicantCorrectionRequestSummary | undefined;
   if (selectedDraftRow) {
-    const [choiceResult, supportNeedsResult, documentSlotResult] = await Promise.all([
+    const [choiceResult, supportNeedsResult, documentSlotResult, correctionRequestResult] = await Promise.all([
       supabase
         .from("application_module_offering_choices")
         .select("offering_id")
@@ -419,7 +484,15 @@ async function getApplicantApplicationContext(personId: string): Promise<{
           "slot_key, label, required, managed_file_id, original_filename, sanitized_filename, content_type, size_bytes, uploaded_at, verification_status"
         )
         .eq("application_id", selectedDraftRow.id)
-        .order("required", { ascending: false })
+        .order("required", { ascending: false }),
+      supabase
+        .from("application_correction_requests")
+        .select("id, application_id, status, summary, due_at, requested_at, revision_number")
+        .eq("application_id", selectedDraftRow.id)
+        .in("status", ["open", "resubmitted"])
+        .order("requested_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<ApplicantCorrectionRequestRow>()
     ]);
 
     if (choiceResult.error) {
@@ -430,6 +503,9 @@ async function getApplicantApplicationContext(personId: string): Promise<{
     }
     if (documentSlotResult.error) {
       throw new Error(documentSlotResult.error.message);
+    }
+    if (correctionRequestResult.error) {
+      throw new Error(correctionRequestResult.error.message);
     }
 
     draft = mapApplicationDraft(
@@ -449,12 +525,55 @@ async function getApplicantApplicationContext(personId: string): Promise<{
       uploadedAt: optionalString(row.uploaded_at),
       verificationStatus: row.verification_status
     }));
+
+    if (correctionRequestResult.data) {
+      const requestRow = correctionRequestResult.data;
+      const correctionItemResult = await supabase
+        .from("application_correction_items")
+        .select("id, target_type, target_key, instructions, status, baseline_value, proposed_value, replacement_managed_file_id, applicant_response_note, applicant_saved_at")
+        .eq("request_id", requestRow.id)
+        .order("created_at");
+      if (correctionItemResult.error) {
+        throw new Error(correctionItemResult.error.message);
+      }
+
+      correctionRequest = {
+        id: requestRow.id,
+        applicationId: requestRow.application_id,
+        status: requestRow.status,
+        summary: optionalString(requestRow.summary),
+        dueAt: requestRow.due_at,
+        requestedAt: requestRow.requested_at,
+        revisionNumber: requestRow.revision_number,
+        items: ((correctionItemResult.data ?? []) as ApplicantCorrectionItemRow[]).map((row) => ({
+          id: row.id,
+          targetType: row.target_type,
+          targetKey: row.target_key,
+          instructions: row.instructions,
+          status: row.status,
+          baselineValue: row.baseline_value,
+          proposedValue: row.proposed_value,
+          replacementManagedFileId: optionalString(row.replacement_managed_file_id),
+          responseNote: optionalString(row.applicant_response_note),
+          savedAt: optionalString(row.applicant_saved_at)
+        }))
+      };
+    }
   }
+
+  const applicationDeadlineAt = (() => {
+    const deadlineTerm = (termResult.data ?? []).find((row) => String(row.id) === draft?.intendedStartTermId)
+      ?? (termResult.data ?? [])[0];
+    return deadlineTerm?.application_deadline_at ? String(deadlineTerm.application_deadline_at) : undefined;
+  })();
 
   return {
     invitations,
     draft,
     documentSlots,
+    correctionRequest,
+    applicationDeadlineAt,
+    applicationDeadlinePassed: Boolean(applicationDeadlineAt && new Date(applicationDeadlineAt).getTime() < Date.now()),
     terms: (termResult.data ?? []).map((row) => ({
       id: String(row.id),
       name: String(row.name),
@@ -495,7 +614,13 @@ function ApplicationSection({
   );
 }
 
-function ApplicationSubmittedPanel({ draft }: { draft: ApplicationDraftSummary }) {
+function ApplicationSubmittedPanel({
+  draft,
+  hasActiveCorrections
+}: {
+  draft: ApplicationDraftSummary;
+  hasActiveCorrections: boolean;
+}) {
   return (
     <div className="apply-form-panel application-draft-form">
       <div className="section-header">
@@ -510,12 +635,141 @@ function ApplicationSubmittedPanel({ draft }: { draft: ApplicationDraftSummary }
         </div>
       </div>
       <div className="application-preview-box">
-        <strong>Locked for admissions review</strong>
+        <strong>{hasActiveCorrections ? "Original submission preserved" : "Locked for admissions review"}</strong>
         <p className="muted small">
-          Programme: {draft.programme === "pgcert" ? "PGCert" : "Microcredential"} · selected first-term offerings:{" "}
-          {draft.selectedOfferingIds.length}
+          {hasActiveCorrections
+            ? "Only the specific corrections requested by admissions can be changed below."
+            : `Programme: ${draft.programme === "pgcert" ? "PGCert" : "Microcredential"} · selected first-term offerings: ${draft.selectedOfferingIds.length}`}
         </p>
       </div>
+    </div>
+  );
+}
+
+function isApplicationCorrectionFieldKey(value: string): value is ApplicationCorrectionFieldKey {
+  return applicationCorrectionFieldKeys.some((key) => key === value);
+}
+
+function displayCorrectionValue(value: string | number | boolean | null): string {
+  if (value === null || value === "") return "Not previously provided";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value).replaceAll("_", " ");
+}
+
+function ApplicationCorrectionPanel({
+  request
+}: {
+  request: ApplicantCorrectionRequestSummary;
+}) {
+  const editable = request.status === "open";
+  const unresolvedItems = request.items.filter((item) => item.status !== "accepted");
+  const addressedItems = unresolvedItems.filter((item) =>
+    item.targetType === "document_slot" ? Boolean(item.replacementManagedFileId) : Boolean(item.savedAt)
+  );
+  const allAddressed = unresolvedItems.length > 0 && addressedItems.length === unresolvedItems.length;
+
+  return (
+    <div className="apply-form-panel application-draft-form application-correction-panel">
+      <div className="section-header">
+        <div>
+          <h2>{editable ? "Admissions needs more information" : "Corrections sent to admissions"}</h2>
+          <p>
+            {editable
+              ? `Address each requested item and resubmit by ${new Date(request.dueAt).toLocaleDateString("en-GB")}.`
+              : "Your responses are locked while admissions reviews them. If another change is needed, this section will reopen."}
+          </p>
+        </div>
+        <div className="icon-box">
+          {editable ? <FileText size={18} /> : <ShieldCheck size={18} />}
+        </div>
+      </div>
+
+      {request.summary ? <div className="application-preview-box"><strong>Admissions summary</strong><p className="muted small">{request.summary}</p></div> : null}
+
+      <div className="application-document-list">
+        {request.items.map((item, index) => {
+          const fieldKey = item.targetType === "application_field" && isApplicationCorrectionFieldKey(item.targetKey)
+            ? item.targetKey
+            : null;
+          const documentDefinition = item.targetType === "document_slot"
+            ? applicationDocumentSlotDefinitions.find((definition) => definition.key === item.targetKey)
+            : undefined;
+          const itemEditable = editable && item.status !== "accepted";
+          const itemAddressed = item.status === "accepted"
+            || (item.targetType === "document_slot" ? Boolean(item.replacementManagedFileId) : Boolean(item.savedAt));
+
+          return (
+            <article className="application-document-slot" key={item.id}>
+              <div>
+                <div className="application-document-slot-heading">
+                  <strong>
+                    {index + 1}. {fieldKey
+                      ? applicationCorrectionFieldLabel(fieldKey)
+                      : documentDefinition?.label ?? item.targetKey.replaceAll("_", " ")}
+                  </strong>
+                  <span>{item.status === "accepted" ? "Accepted" : itemAddressed ? "Response saved" : "Action required"}</span>
+                </div>
+                <p>{item.instructions}</p>
+                {fieldKey ? <p className="muted small">Previously submitted: {displayCorrectionValue(item.baselineValue)}</p> : null}
+                {item.savedAt ? <p className="muted small">Last saved {new Date(item.savedAt).toLocaleString("en-GB")}</p> : null}
+              </div>
+
+              {itemEditable && fieldKey ? (
+                <ApplicationCorrectionFieldResponse
+                  itemId={item.id}
+                  fieldKey={fieldKey}
+                  initialValue={item.savedAt ? item.proposedValue : item.baselineValue}
+                  initialCleared={Boolean(item.savedAt) && item.proposedValue === null}
+                  responseNote={item.responseNote}
+                />
+              ) : null}
+
+              {itemEditable && documentDefinition ? (
+                <form className="application-correction-response-form" action={uploadApplicationCorrectionDocument}>
+                  <input type="hidden" name="application_id" value={request.applicationId} />
+                  <input type="hidden" name="item_id" value={item.id} />
+                  <input type="hidden" name="slot_key" value={documentDefinition.key} />
+                  <label>
+                    <span>{item.replacementManagedFileId ? "Replace the saved file" : "Replacement document"}</span>
+                    <input
+                      className="input"
+                      name="document"
+                      type="file"
+                      accept={documentDefinition.acceptedExtensions.join(",")}
+                      required
+                    />
+                  </label>
+                  <p className="muted small">
+                    PDF is recommended. Maximum {Math.floor(documentDefinition.maxBytes / 1024 / 1024)} MB for this document.
+                  </p>
+                  <label>
+                    <span>Note to admissions (optional)</span>
+                    <textarea className="textarea" name="response_note" rows={2} maxLength={2000} defaultValue={item.responseNote} />
+                  </label>
+                  <button className="button secondary" type="submit">
+                    <Upload size={16} /> {item.replacementManagedFileId ? "Upload another replacement" : "Upload replacement"}
+                  </button>
+                </form>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+
+      {editable ? (
+        <div className="application-actions">
+          <div className="application-preview-box">
+            <strong>{allAddressed ? "Ready to resubmit" : `${addressedItems.length} of ${unresolvedItems.length} requested items addressed`}</strong>
+            <p className="muted small">Save or upload a response for every requested item before sending the corrections back to admissions.</p>
+          </div>
+          <form action={resubmitApplicationCorrections}>
+            <input type="hidden" name="request_id" value={request.id} />
+            <button className="button primary apply-submit" type="submit" disabled={!allAddressed}>
+              <ShieldCheck size={16} /> Resubmit corrections
+            </button>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -607,13 +861,17 @@ function ApplicationDraftForm({
   draft,
   profile,
   terms,
-  offerings
+  offerings,
+  applicationDeadlineAt,
+  applicationDeadlinePassed
 }: {
   admissionLeadId: string;
   draft?: ApplicationDraftSummary;
   profile: PortalProfile;
   terms: ApplicationTermOption[];
   offerings: ApplicationOfferingOption[];
+  applicationDeadlineAt?: string;
+  applicationDeadlinePassed: boolean;
 }) {
   const firstName = draft?.firstName ?? profile.person.firstName;
   const lastName = draft?.lastName ?? profile.person.lastName;
@@ -641,14 +899,14 @@ function ApplicationDraftForm({
           <Field label="Title" htmlFor="application-title">
             <input id="application-title" name="title" className="input" defaultValue={draft?.title ?? ""} />
           </Field>
-          <Field label="First name" htmlFor="application-first-name">
-            <input id="application-first-name" name="first_name" className="input" defaultValue={firstName} />
+          <Field label="First name" htmlFor="application-first-name" required>
+            <input id="application-first-name" name="first_name" className="input" defaultValue={firstName} required />
           </Field>
           <Field label="Middle names" htmlFor="application-middle-names">
             <input id="application-middle-names" name="middle_names" className="input" defaultValue={draft?.middleNames ?? ""} />
           </Field>
-          <Field label="Last name" htmlFor="application-last-name">
-            <input id="application-last-name" name="last_name" className="input" defaultValue={lastName} />
+          <Field label="Last name" htmlFor="application-last-name" required>
+            <input id="application-last-name" name="last_name" className="input" defaultValue={lastName} required />
           </Field>
           <Field label="Preferred name" htmlFor="application-preferred-name">
             <input id="application-preferred-name" name="preferred_name" className="input" defaultValue={draft?.preferredName ?? profile.person.preferredName ?? ""} />
@@ -656,8 +914,8 @@ function ApplicationDraftForm({
           <Field label="Previous surname" htmlFor="application-previous-surname">
             <input id="application-previous-surname" name="previous_surname" className="input" defaultValue={draft?.previousSurname ?? ""} />
           </Field>
-          <Field label="Date of birth" htmlFor="application-date-of-birth">
-            <input id="application-date-of-birth" name="date_of_birth" className="input" type="date" defaultValue={draft?.dateOfBirth ?? ""} />
+          <Field label="Date of birth" htmlFor="application-date-of-birth" required>
+            <input id="application-date-of-birth" name="date_of_birth" className="input" type="date" defaultValue={draft?.dateOfBirth ?? ""} required />
           </Field>
           <Field label="Previous BETAR/university study" htmlFor="application-previous-study">
             <input id="application-previous-study" name="previous_study_detail" className="input" defaultValue={draft?.previousStudyDetail ?? ""} />
@@ -670,68 +928,69 @@ function ApplicationDraftForm({
 
       <ApplicationSection title="Contact">
         <FormGrid>
-          <Field label="Email" htmlFor="application-email">
-            <input id="application-email" name="email" className="input" type="email" defaultValue={email} />
+          <Field label="Email" htmlFor="application-email" required>
+            <input id="application-email" name="email" className="input" type="email" defaultValue={email} required />
           </Field>
-          <Field label="Phone" htmlFor="application-phone">
-            <input id="application-phone" name="phone" className="input" type="tel" defaultValue={draft?.phone ?? ""} />
+          <Field label="Phone" htmlFor="application-phone" required>
+            <input id="application-phone" name="phone" className="input" type="tel" defaultValue={draft?.phone ?? ""} required />
           </Field>
-          <Field label="Address line 1" htmlFor="application-address-line-1">
-            <input id="application-address-line-1" name="address_line_1" className="input" defaultValue={draft?.addressLine1 ?? ""} />
+          <Field label="Address line 1" htmlFor="application-address-line-1" required>
+            <input id="application-address-line-1" name="address_line_1" className="input" defaultValue={draft?.addressLine1 ?? ""} required />
           </Field>
           <Field label="Address line 2" htmlFor="application-address-line-2">
             <input id="application-address-line-2" name="address_line_2" className="input" defaultValue={draft?.addressLine2 ?? ""} />
           </Field>
-          <Field label="City/town" htmlFor="application-city">
-            <input id="application-city" name="city" className="input" defaultValue={draft?.city ?? ""} />
+          <Field label="City/town" htmlFor="application-city" required>
+            <input id="application-city" name="city" className="input" defaultValue={draft?.city ?? ""} required />
           </Field>
-          <Field label="Postcode" htmlFor="application-postcode">
-            <input id="application-postcode" name="postcode" className="input" defaultValue={draft?.postcode ?? ""} />
+          <Field label="Postcode" htmlFor="application-postcode" required>
+            <input id="application-postcode" name="postcode" className="input" defaultValue={draft?.postcode ?? ""} required />
           </Field>
-          <Field label="Country" htmlFor="application-country">
-            <input id="application-country" name="country" className="input" defaultValue={draft?.country ?? ""} />
+          <Field label="Country" htmlFor="application-country" required>
+            <input id="application-country" name="country" className="input" defaultValue={draft?.country ?? ""} required />
           </Field>
         </FormGrid>
       </ApplicationSection>
 
       <ApplicationSection title="Employment">
         <FormGrid>
-          <Field label="Current clinical role" htmlFor="application-clinical-role">
-            <input id="application-clinical-role" name="clinical_role" className="input" defaultValue={draft?.clinicalRole ?? ""} />
+          <Field label="Current clinical role" htmlFor="application-clinical-role" required>
+            <input id="application-clinical-role" name="clinical_role" className="input" defaultValue={draft?.clinicalRole ?? ""} required />
           </Field>
-          <Field label="Employer/organisation" htmlFor="application-employer">
-            <input id="application-employer" name="employer" className="input" defaultValue={draft?.employer ?? ""} />
+          <Field label="Employer/organisation" htmlFor="application-employer" required>
+            <input id="application-employer" name="employer" className="input" defaultValue={draft?.employer ?? ""} required />
           </Field>
-          <Field label="Department/specialty" htmlFor="application-department-specialty">
-            <input id="application-department-specialty" name="department_specialty" className="input" defaultValue={draft?.departmentSpecialty ?? ""} />
+          <Field label="Department/specialty" htmlFor="application-department-specialty" required>
+            <input id="application-department-specialty" name="department_specialty" className="input" defaultValue={draft?.departmentSpecialty ?? ""} required />
           </Field>
-          <Field label="Registration body" htmlFor="application-registration-body">
-            <input id="application-registration-body" name="professional_registration_body" className="input" defaultValue={draft?.professionalRegistrationBody ?? ""} />
+          <Field label="Registration body" htmlFor="application-registration-body" required>
+            <input id="application-registration-body" name="professional_registration_body" className="input" defaultValue={draft?.professionalRegistrationBody ?? ""} required />
           </Field>
-          <Field label="Registration number" htmlFor="application-registration-number">
-            <input id="application-registration-number" name="professional_registration_number" className="input" defaultValue={draft?.professionalRegistrationNumber ?? ""} />
+          <Field label="Registration number" htmlFor="application-registration-number" required>
+            <input id="application-registration-number" name="professional_registration_number" className="input" defaultValue={draft?.professionalRegistrationNumber ?? ""} required />
           </Field>
         </FormGrid>
-        <Field label="Relevant clinical experience" htmlFor="application-work-experience">
+        <Field label="Relevant clinical experience" htmlFor="application-work-experience" required>
           <textarea
             id="application-work-experience"
             name="work_experience"
             className="textarea"
             defaultValue={draft?.workExperience ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
       </ApplicationSection>
 
       <ApplicationSection title="Qualifications">
         <FormGrid>
-          <Field label="Qualification title/level" htmlFor="application-highest-qualification">
-            <input id="application-highest-qualification" name="highest_qualification" className="input" defaultValue={draft?.highestQualification ?? ""} />
+          <Field label="Qualification title/level" htmlFor="application-highest-qualification" required>
+            <input id="application-highest-qualification" name="highest_qualification" className="input" defaultValue={draft?.highestQualification ?? ""} required />
           </Field>
-          <Field label="Awarding body" htmlFor="application-awarding-body">
-            <input id="application-awarding-body" name="qualification_awarding_body" className="input" defaultValue={draft?.qualificationAwardingBody ?? ""} />
+          <Field label="Awarding body" htmlFor="application-awarding-body" required>
+            <input id="application-awarding-body" name="qualification_awarding_body" className="input" defaultValue={draft?.qualificationAwardingBody ?? ""} required />
           </Field>
-          <Field label="Award year" htmlFor="application-qualification-year">
+          <Field label="Award year" htmlFor="application-qualification-year" required>
             <input
               id="application-qualification-year"
               name="qualification_year"
@@ -740,6 +999,7 @@ function ApplicationDraftForm({
               min="1900"
               max="2100"
               defaultValue={draft?.qualificationYear ?? ""}
+              required
             />
           </Field>
           <Field label="Result/classification" htmlFor="application-qualification-result">
@@ -761,14 +1021,14 @@ function ApplicationDraftForm({
 
       <ApplicationSection title="Nationality And Visa">
         <FormGrid>
-          <Field label="Nationality" htmlFor="application-nationality">
-            <input id="application-nationality" name="nationality" className="input" defaultValue={draft?.nationality ?? ""} />
+          <Field label="Nationality" htmlFor="application-nationality" required>
+            <input id="application-nationality" name="nationality" className="input" defaultValue={draft?.nationality ?? ""} required />
           </Field>
           <Field label="Country of birth" htmlFor="application-country-of-birth">
             <input id="application-country-of-birth" name="country_of_birth" className="input" defaultValue={draft?.countryOfBirth ?? ""} />
           </Field>
-          <Field label="Country of ordinary residence" htmlFor="application-country-of-residence">
-            <input id="application-country-of-residence" name="country_of_residence" className="input" defaultValue={draft?.countryOfResidence ?? ""} />
+          <Field label="Country of ordinary residence" htmlFor="application-country-of-residence" required>
+            <input id="application-country-of-residence" name="country_of_residence" className="input" defaultValue={draft?.countryOfResidence ?? ""} required />
           </Field>
         </FormGrid>
         <label className="check-option inline-check">
@@ -821,34 +1081,37 @@ function ApplicationDraftForm({
       </ApplicationSection>
 
       <ApplicationSection title="POCUS Questions">
-        <Field label="Your previous experience in POCUS" htmlFor="application-pocus-experience">
+        <Field label="Your previous experience in POCUS" htmlFor="application-pocus-experience" required>
           <textarea
             id="application-pocus-experience"
             name="pocus_previous_experience"
             className="textarea"
             defaultValue={draft?.pocusPreviousExperience ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
-        <Field label="Your motivation to enrol in this course" htmlFor="application-pocus-motivation">
-          <textarea id="application-pocus-motivation" name="pocus_motivation" className="textarea" defaultValue={draft?.pocusMotivation ?? ""} maxLength={4000} />
+        <Field label="Your motivation to enrol in this course" htmlFor="application-pocus-motivation" required>
+          <textarea id="application-pocus-motivation" name="pocus_motivation" className="textarea" defaultValue={draft?.pocusMotivation ?? ""} maxLength={4000} required />
         </Field>
-        <Field label="Case where POCUS improved clinical management" htmlFor="application-pocus-case-improved">
+        <Field label="Case where POCUS improved clinical management" htmlFor="application-pocus-case-improved" required>
           <textarea
             id="application-pocus-case-improved"
             name="pocus_case_improved_management"
             className="textarea"
             defaultValue={draft?.pocusCaseImprovedManagement ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
-        <Field label="Case where you recognised POCUS limitations" htmlFor="application-pocus-limitations">
+        <Field label="Case where you recognised POCUS limitations" htmlFor="application-pocus-limitations" required>
           <textarea
             id="application-pocus-limitations"
             name="pocus_limitations_case"
             className="textarea"
             defaultValue={draft?.pocusLimitationsCase ?? ""}
             maxLength={4000}
+            required
           />
         </Field>
       </ApplicationSection>
@@ -863,7 +1126,12 @@ function ApplicationDraftForm({
             maxLength={2000}
           />
         </Field>
-        <ApplicationSubmitControls applicationId={draft?.id} declarationText={applicationDeclarationText} />
+        <ApplicationSubmitControls
+          applicationId={draft?.id}
+          declarationText={applicationDeclarationText}
+          applicationDeadlineAt={applicationDeadlineAt}
+          applicationDeadlinePassed={applicationDeadlinePassed}
+        />
       </ApplicationSection>
     </form>
   );
@@ -872,11 +1140,29 @@ function ApplicationDraftForm({
 export default async function ApplicationAccessPage({
   searchParams
 }: {
-  searchParams: Promise<{ saved?: string; submitted?: string; document?: string }>;
+  searchParams: Promise<{
+    saved?: string;
+    submitted?: string;
+    document?: string;
+    submit_error?: string;
+    correction_saved?: string;
+    correction_document?: string;
+    correction_submitted?: string;
+    correction_error?: string;
+  }>;
 }) {
   const profile = await requireApplicantProfile("/apply/application");
-  const { saved, submitted, document } = await searchParams;
-  const { invitations, draft, documentSlots, terms, offerings } = await getApplicantApplicationContext(profile.personId);
+  const {
+    saved,
+    submitted,
+    document,
+    submit_error: submitError,
+    correction_saved: correctionSaved,
+    correction_document: correctionDocument,
+    correction_submitted: correctionSubmitted,
+    correction_error: correctionError
+  } = await searchParams;
+  const { invitations, draft, documentSlots, correctionRequest, terms, offerings, applicationDeadlineAt, applicationDeadlinePassed } = await getApplicantApplicationContext(profile.personId);
   const latestInvitation = invitations[0];
   const claimedInvitation =
     invitations.find((invitation) => invitation.status === "claimed" && invitation.admissionLeadId === draft?.admissionLeadId) ??
@@ -901,7 +1187,27 @@ export default async function ApplicationAccessPage({
             <CheckCircle2 size={22} />
             <div>
               <h2>Draft saved</h2>
-              <p>{saved === "demo" ? "Demo mode is running without a Supabase database, so no live draft was saved." : "Your latest changes have been saved."}</p>
+              <p>{saved === "demo" ? "Demo mode is running without a Supabase database, so no live draft was saved." : "Your latest changes have been saved. To return later, request a fresh sign-in link from the applicant login page; invitation links are single-use."}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {submitError ? (
+          <div className="apply-error" role="alert">
+            <LockKeyhole size={22} />
+            <div>
+              <h2>Application not submitted</h2>
+              <p>
+                {submitError === "unsaved"
+                  ? "Save your latest changes before submitting."
+                  : submitError === "study_plan"
+                    ? "Choose a current published start term and one or two available module offerings."
+                    : submitError === "deadline"
+                      ? "The cohort application deadline has passed or is not configured. Your draft is still saved; contact admissions if you need the deadline extended."
+                    : submitError === "incomplete"
+                      ? "Complete every field marked with a red asterisk and upload both required evidence documents."
+                      : "The application could not be submitted. Your saved draft is unchanged; please try again or contact admissions."}
+              </p>
             </div>
           </div>
         ) : null}
@@ -930,11 +1236,65 @@ export default async function ApplicationAccessPage({
           </div>
         ) : null}
 
+        {correctionSaved || correctionDocument ? (
+          <div className="apply-success" role="status">
+            <CheckCircle2 size={22} />
+            <div>
+              <h2>Correction response saved</h2>
+              <p>{correctionDocument ? "Your replacement evidence has been saved. Address every remaining item, then resubmit the corrections." : "Your corrected information has been saved. Address every remaining item, then resubmit the corrections."}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {correctionSubmitted ? (
+          <div className="apply-success" role="status">
+            <CheckCircle2 size={22} />
+            <div>
+              <h2>Corrections resubmitted</h2>
+              <p>Your responses are now locked and have been returned to admissions for review.</p>
+            </div>
+          </div>
+        ) : null}
+
+        {correctionError ? (
+          <div className="apply-error" role="alert">
+            <LockKeyhole size={22} />
+            <div>
+              <h2>Correction response not saved</h2>
+              <p>
+                {correctionError === "invalid_file"
+                  ? "Choose one of the accepted file types within the stated size limit. Converting the document to PDF may help."
+                  : correctionError === "incomplete"
+                    ? "Address and save every requested item before resubmitting."
+                    : correctionError === "invalid_response"
+                      ? "Enter a corrected value or deliberately clear an optional value."
+                      : "The correction response could not be saved. Please try again or contact admissions."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {draft?.status !== "submitted" ? (
+          <div className={applicationDeadlinePassed ? "apply-error" : "apply-success"} role="status">
+            <Clock3 size={22} />
+            <div>
+              <h2>{applicationDeadlinePassed ? "Application deadline passed" : "Application deadline"}</h2>
+              <p>
+                {applicationDeadlineAt
+                  ? applicationDeadlinePassed
+                    ? `The deadline was ${new Date(applicationDeadlineAt).toLocaleString("en-GB")}. You can continue saving your draft, but final submission is blocked until admissions extends the cohort deadline.`
+                    : `Submit your completed application by ${new Date(applicationDeadlineAt).toLocaleString("en-GB")}.`
+                  : "Admissions has not yet configured the application deadline. You can save a draft, but final submission is unavailable."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="apply-form-panel">
           <div className="section-header">
             <div>
               <h2>Invitation</h2>
-              <p>Magic-link access is active for this applicant identity.</p>
+              <p>Invitation links are single-use. For later visits, use the applicant login page to request a fresh sign-in link.</p>
             </div>
             <div className="icon-box">
               <LockKeyhole size={18} />
@@ -958,7 +1318,8 @@ export default async function ApplicationAccessPage({
 
         {draft?.status === "submitted" ? (
           <>
-            <ApplicationSubmittedPanel draft={draft} />
+            {correctionRequest ? <ApplicationCorrectionPanel request={correctionRequest} /> : null}
+            <ApplicationSubmittedPanel draft={draft} hasActiveCorrections={Boolean(correctionRequest)} />
             <ApplicationDocumentSlotsPanel applicationId={draft.id} documentSlots={documentSlots} editable={false} />
           </>
         ) : claimedInvitation ? (
@@ -969,6 +1330,8 @@ export default async function ApplicationAccessPage({
               profile={profile}
               terms={terms}
               offerings={offerings}
+              applicationDeadlineAt={applicationDeadlineAt}
+              applicationDeadlinePassed={applicationDeadlinePassed}
             />
             {draft ? (
               <ApplicationDocumentSlotsPanel applicationId={draft.id} documentSlots={documentSlots} editable />

@@ -823,8 +823,8 @@ describe("admissions registration conversion", () => {
     expect(admissionsRecords).not.toContain("ConvertLeadForm");
     expect(admissionsRecords).toContain('"registration_in_progress"');
     expect(admissionsRecords).toContain('"registered"');
-    expect(adminActions).toContain('"registration_in_progress"');
-    expect(adminActions).toContain('"registered"');
+    expect(adminActions).not.toContain("leadStageSchema");
+    expect(adminActions).toContain('supabase.rpc("update_admission_lead_administrative_details"');
     expect(legacyConversionAction).toContain("Admissions conversion must be completed from a submitted registration review.");
     expect(legacyConversionAction).not.toContain(".from(\"students\").insert(parsed).select(\"id\").single()");
   });

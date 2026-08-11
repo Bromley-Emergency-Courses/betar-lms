@@ -1,0 +1,999 @@
+.workspace {
+  --admissions-navy: #173f46;
+  --admissions-teal: #087f8c;
+  --admissions-red: #a1362d;
+  --admissions-purple: #6a4790;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.localNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ecefeb;
+}
+
+.localNav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  color: #56615b;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.localNav a:hover {
+  background: rgb(255 255 255 / 58%);
+}
+
+.localNav .activeNav {
+  background: white;
+  color: var(--admissions-navy);
+  box-shadow: 0 1px 4px rgb(31 36 33 / 12%);
+}
+
+.navBadge,
+.countBadge {
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f8dfdc;
+  color: var(--admissions-red);
+  font-size: 10px;
+  text-align: center;
+}
+
+.pageIntro,
+.workspaceHeader,
+.cardHeader,
+.cardFooter,
+.exceptionRow,
+.surfaceHeader,
+.filterRow,
+.selectionBar,
+.pagination,
+.drawerHeader,
+.resultHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.pageIntro,
+.workspaceHeader,
+.surfaceHeader,
+.drawerHeader {
+  align-items: flex-start;
+}
+
+.pageIntro h2,
+.workspaceHeader h2,
+.surfaceHeader h2,
+.drawerHeader h2 {
+  margin: 0;
+  color: var(--admissions-navy);
+}
+
+.pageIntro h2,
+.workspaceHeader h2 {
+  font-size: 21px;
+}
+
+.pageIntro p,
+.workspaceHeader p,
+.surfaceHeader p,
+.drawerHeader p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.modeBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid #d9c993;
+  border-radius: 8px;
+  background: #fff9e7;
+  color: #6f510b;
+  font-size: 13px;
+}
+
+.modeBanner strong,
+.modeBanner span {
+  display: block;
+}
+
+.modeBanner span {
+  margin-top: 2px;
+}
+
+.workspaceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workspaceCard,
+.surface,
+.exceptionSurface,
+.batchSummary {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.cardHeader {
+  align-items: flex-start;
+  padding: 17px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cardIdentity {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.cardIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: #e5f3f1;
+  color: var(--admissions-teal);
+}
+
+.returningIcon {
+  background: #eee9f7;
+  color: var(--admissions-purple);
+}
+
+.cardHeader h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.cardHeader p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspaceBadge,
+.phaseBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e6f3f1;
+  color: #16646b;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.returningBadge {
+  background: #eee9f7;
+  color: var(--admissions-purple);
+}
+
+.cardMetrics,
+.metrics,
+.batchMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.batchMetrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  overflow: hidden;
+}
+
+.cardMetrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.cardMetric,
+.metric,
+.batchMetric {
+  padding: 13px 15px;
+  border-right: 1px solid var(--line);
+}
+
+.cardMetric:last-child,
+.metric:last-child,
+.batchMetric:last-child {
+  border-right: 0;
+}
+
+.cardMetric span,
+.metric span,
+.batchMetric span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cardMetric strong,
+.metric strong,
+.batchMetric strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--admissions-navy);
+  font-size: 23px;
+}
+
+.metric small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.alertMetric strong {
+  color: var(--admissions-red);
+}
+
+.queueList {
+  display: grid;
+  padding: 7px 16px 12px;
+}
+
+.queueTitle {
+  padding: 10px 0 5px;
+  color: #758078;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.queueRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  border-bottom: 1px solid #e8ebe8;
+  font-size: 12px;
+}
+
+.queueRow:last-child {
+  border-bottom: 0;
+}
+
+.queueRow strong {
+  min-width: 28px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #edf1ee;
+  font-size: 11px;
+  text-align: center;
+}
+
+.cardFooter {
+  padding: 13px 16px;
+  border-top: 1px solid var(--line);
+  background: #fafbf9;
+}
+
+.primaryLink,
+.secondaryButton,
+.smallButton,
+.iconButton,
+.filterButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 35px;
+  border: 1px solid #ccd5d0;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: white;
+  color: #29332e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.primaryLink {
+  border-color: var(--admissions-teal);
+  background: var(--admissions-teal);
+  color: white;
+}
+
+.primaryLink:disabled,
+.secondaryButton:disabled,
+.smallButton:disabled,
+.iconButton:disabled,
+.filterButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.smallButton {
+  min-height: 29px;
+  padding: 4px 8px;
+}
+
+.iconButton {
+  width: 35px;
+  padding: 0;
+}
+
+.iconButton[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.exceptionSurface {
+  padding: 16px;
+}
+
+.exceptionSurface h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.exceptionSurface > p {
+  margin: 4px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.exceptionList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.exceptionRow {
+  justify-content: flex-start;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid #e2d39c;
+  border-radius: 7px;
+  background: #fffaf0;
+}
+
+.exceptionRow strong,
+.exceptionRow span {
+  display: block;
+  font-size: 12px;
+}
+
+.exceptionRow span {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.stageStrip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.stageButton {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: #3f4a44;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stageButton strong {
+  font-size: 18px;
+}
+
+.stageButton span {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageActive {
+  border-color: #80bbc0;
+  background: #edf8f8;
+  color: #125f67;
+}
+
+.surfaceHeader {
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.surfaceHeader h2 {
+  font-size: 17px;
+}
+
+.filterRow {
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fafbf9;
+}
+
+.filterGroup,
+.selectionActions,
+.paginationControls,
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.search {
+  position: relative;
+  display: block;
+  width: min(330px, 100%);
+}
+
+.search svg {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  color: var(--muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.search input,
+.filterSelect,
+.pageSelect {
+  width: 100%;
+  min-height: 35px;
+  border: 1px solid #cbd3ce;
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.search input {
+  padding: 7px 10px 7px 32px;
+}
+
+.filterSelect,
+.pageSelect {
+  width: auto;
+  padding: 6px 28px 6px 9px;
+}
+
+.filterButtonActive {
+  border-color: #80bbc0;
+  background: #edf8f8;
+  color: #125f67;
+}
+
+.selectionBar {
+  position: sticky;
+  top: 78px;
+  z-index: 3;
+  flex-wrap: wrap;
+  min-height: 50px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #89b8bd;
+  background: #eaf6f6;
+  color: #164f55;
+}
+
+.selectionBar p {
+  margin: 2px 0 0;
+  font-size: 11px;
+}
+
+.selectionLimit {
+  max-width: 260px;
+  color: var(--admissions-red);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.dialogBackdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(18 37 40 / 52%);
+}
+
+.reviewDialog {
+  display: grid;
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid #c8d1cc;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 22px 65px rgb(18 37 40 / 28%);
+}
+
+.reviewDialog .drawerHeader {
+  padding: 17px 19px;
+  border-bottom: 1px solid var(--line);
+}
+
+.reviewBody {
+  display: grid;
+  gap: 15px;
+  padding: 18px 19px;
+  overflow-y: auto;
+}
+
+.reviewScope,
+.previewResults,
+.exclusionList {
+  display: grid;
+  gap: 6px;
+}
+
+.reviewScope {
+  padding: 11px 13px;
+  border: 1px solid #d9dfdc;
+  border-radius: 7px;
+  background: #f7f9f7;
+}
+
+.reviewScope span,
+.previewCounts span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reviewFields {
+  display: grid;
+  gap: 11px;
+}
+
+.reviewFields label {
+  display: grid;
+  gap: 5px;
+  color: var(--admissions-navy);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reviewFields input,
+.reviewFields textarea {
+  width: 100%;
+  border: 1px solid #bdc9c3;
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: white;
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 450;
+}
+
+.dialogHelp {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.previewCounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.previewCounts div {
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.previewCounts div:last-child {
+  border-right: 0;
+}
+
+.previewCounts strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 20px;
+}
+
+.exclusionList {
+  padding: 11px 13px;
+  border: 1px solid #e7c8c3;
+  border-radius: 7px;
+  background: #fff7f5;
+}
+
+.exclusionList p {
+  margin: 0;
+  color: #71352f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.dialogError {
+  padding: 10px 12px;
+  border: 1px solid #dba9a3;
+  border-radius: 6px;
+  background: #fff2f0;
+  color: #7c2821;
+  font-size: 12px;
+}
+
+.dialogError p {
+  margin: 4px 0 0;
+  line-height: 1.45;
+}
+
+.reviewFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 13px 19px;
+  border-top: 1px solid var(--line);
+  background: #fafbf9;
+}
+
+.batchReviewFact {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.retryAction {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.retryAction span {
+  color: var(--admissions-red);
+  font-size: 11px;
+}
+
+.linkButton {
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  color: #0a737f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.operationsTable,
+.resultsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.operationsTable th,
+.operationsTable td,
+.resultsTable th,
+.resultsTable td {
+  padding: 11px 10px;
+  border-bottom: 1px solid #e6eae6;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.operationsTable th,
+.resultsTable th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f2f5f2;
+  color: #5b665f;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.operationsTable tbody tr:hover,
+.focusedRow {
+  background: #f7fbfa;
+}
+
+.nameCell,
+.detailCell {
+  display: grid;
+  gap: 3px;
+  min-width: 150px;
+}
+
+.nameCell small,
+.detailCell small,
+.resultReason {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #edf1ee;
+  color: #46514b;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.pillAttention,
+.pillFailed {
+  background: #fdecea;
+  color: var(--admissions-red);
+}
+
+.pillReady,
+.pillSent,
+.pillSucceeded {
+  background: #e5f3e8;
+  color: #266a39;
+}
+
+.pillQueued,
+.pillRunning {
+  background: #e9f1fa;
+  color: #2f5f8f;
+}
+
+.pillExcluded,
+.pillWaiting {
+  background: #fff1d4;
+  color: #80570d;
+}
+
+.pagination {
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  background: #fafbf9;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.emptyRows {
+  padding: 36px 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.drawerBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  border: 0;
+  background: rgb(20 32 29 / 34%);
+  cursor: default;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: min(520px, 94vw);
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: white;
+  box-shadow: -18px 0 48px rgb(31 36 33 / 18%);
+}
+
+.drawerHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 17px;
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 96%);
+}
+
+.drawerBody {
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+}
+
+.nextAction,
+.drawerSection,
+.fact {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fafbf9;
+}
+
+.nextAction {
+  border-color: #add1d4;
+  background: #f1f9f9;
+}
+
+.nextAction span,
+.drawerSection > span,
+.fact span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.drawerSection p,
+.drawerSection h3 {
+  margin: 0;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.batchSummary {
+  padding: 16px;
+}
+
+.batchSummary h2,
+.batchSummary p {
+  margin: 0;
+}
+
+.batchSummary p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.progressTrack {
+  height: 9px;
+  margin: 14px 0 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5e9e5;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--admissions-teal);
+}
+
+.batchMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1050px) {
+  .workspaceGrid,
+  .exceptionList {
+    grid-template-columns: 1fr;
+  }
+
+  .stageStrip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .dialogBackdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .reviewDialog {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .previewCounts {
+    grid-template-columns: 1fr;
+  }
+
+  .previewCounts div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .previewCounts div:last-child {
+    border-bottom: 0;
+  }
+
+  .cardMetrics,
+  .metrics,
+  .batchMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cardMetric:nth-child(2),
+  .metric:nth-child(2),
+  .batchMetric:nth-child(2) {
+    border-right: 0;
+  }
+
+  .stageStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pageIntro,
+  .workspaceHeader,
+  .cardHeader,
+  .cardFooter,
+  .surfaceHeader,
+  .filterRow,
+  .selectionBar,
+  .pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .facts {
+    grid-template-columns: 1fr;
+  }
+}

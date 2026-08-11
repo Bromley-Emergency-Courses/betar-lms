@@ -10,6 +10,8 @@ import {
   isIssuedApplicationInvitation,
   parseStaffInvitationForm
 } from "@/lib/application-invitations";
+import { parseAdmissionLeadAdministrativeDetails } from "@/lib/admission-lead-administration";
+import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
 import { requirePermission } from "@/lib/auth";
 import { correspondenceEmailFailed } from "@/lib/email-delivery";
 import {
@@ -28,6 +30,13 @@ import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
+}
+
+function admissionLeadRedirect(leadId: string, result: string): never {
+  if (admissionsStaffWorkspacesEnabled()) {
+    redirect(`/admissions/new-students/${leadId}?${result}`);
+  }
+  redirect(`/admissions?mode=edit&${result}`);
 }
 
 function optionalValue(formData: FormData, key: string): string | null {
@@ -491,96 +500,70 @@ export async function updateStudentLifecycle(formData: FormData) {
   revalidatePath("/admissions");
 }
 
-const leadStageSchema = z.enum([
-  "interest",
-  "application_invited",
-  "submitted",
-  "reviewed",
-  "offered",
-  "rejected",
-  "accepted",
-  "registration_in_progress",
-  "registration_lapsed",
-  "registered",
-  "offer_declined",
-  "offer_lapsed",
-  "archived"
-]);
-
-function moduleInterestIds(formData: FormData): string[] {
-  return formData
-    .getAll("module_interest_ids")
-    .map((entryValue) => String(entryValue).trim())
-    .filter(Boolean);
-}
-
-const admissionLeadSchema = z.object({
-  first_name: z.string().min(1).max(80),
-  last_name: z.string().min(1).max(80),
-  email: z.string().email(),
-  phone: z.string().nullable(),
-  stage: leadStageSchema,
-  programme: z.enum(["pgcert", "microcredential"]),
-  module_interest_ids: z.array(z.string().uuid()),
-  source: z.string().nullable(),
-  last_contacted_on: z.string().nullable(),
-  next_action_on: z.string().nullable(),
-  notes: z.string().nullable(),
-  archived: z.boolean()
-});
-
-function parseAdmissionLeadForm(formData: FormData) {
-  const stage = (value(formData, "stage") || "interest") as z.infer<typeof leadStageSchema>;
-  return admissionLeadSchema.parse({
-    first_name: value(formData, "first_name"),
-    last_name: value(formData, "last_name"),
-    email: value(formData, "email"),
-    phone: optionalValue(formData, "phone"),
-    stage,
-    programme: value(formData, "programme") || "pgcert",
-    module_interest_ids: moduleInterestIds(formData),
-    source: optionalValue(formData, "source"),
-    last_contacted_on: optionalValue(formData, "last_contacted_on"),
-    next_action_on: optionalValue(formData, "next_action_on"),
-    notes: optionalValue(formData, "notes"),
-    archived: stage === "archived" || formData.get("archived") === "on"
-  });
-}
-
 export async function createAdmissionLead(formData: FormData) {
   await requirePermission("manage_admissions");
-  const parsed = parseAdmissionLeadForm(formData);
+  const parsed = parseAdmissionLeadAdministrativeDetails(formData);
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("admission_leads").insert(parsed);
+  const { data, error } = await supabase.rpc("record_staff_admission_enquiry", {
+    p_first_name: parsed.first_name,
+    p_last_name: parsed.last_name,
+    p_email: parsed.email,
+    p_phone: parsed.phone,
+    p_programme: parsed.programme,
+    p_module_interest_ids: parsed.module_interest_ids,
+    p_source: parsed.source,
+    p_last_contacted_on: parsed.last_contacted_on,
+    p_next_action_on: parsed.next_action_on,
+    p_notes: parsed.notes
+  });
   if (error) {
     throw new Error(error.message);
   }
 
   revalidatePath("/admissions");
+  revalidatePath("/admissions/new-students");
+  if (admissionsStaffWorkspacesEnabled() && typeof data === "string" && idSchema.safeParse(data).success) {
+    redirect(`/admissions/new-students/${data}?created=1`);
+  }
   redirect("/admissions?mode=edit");
 }
 
 export async function updateAdmissionLead(formData: FormData) {
   await requirePermission("manage_admissions");
   const leadId = idSchema.parse(value(formData, "lead_id"));
-  const parsed = parseAdmissionLeadForm(formData);
+  const parsed = parseAdmissionLeadAdministrativeDetails(formData);
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("admission_leads").update(parsed).eq("id", leadId);
+  const { error } = await supabase.rpc("update_admission_lead_administrative_details", {
+    p_lead_id: leadId,
+    p_first_name: parsed.first_name,
+    p_last_name: parsed.last_name,
+    p_email: parsed.email,
+    p_phone: parsed.phone,
+    p_programme: parsed.programme,
+    p_module_interest_ids: parsed.module_interest_ids,
+    p_source: parsed.source,
+    p_last_contacted_on: parsed.last_contacted_on,
+    p_next_action_on: parsed.next_action_on,
+    p_notes: parsed.notes
+  });
   if (error) {
     throw new Error(error.message);
   }
 
   revalidatePath("/admissions");
-  redirect("/admissions?mode=edit");
+  revalidatePath("/admissions/new-students");
+  revalidatePath(`/admissions/new-students/${leadId}`);
+  admissionLeadRedirect(leadId, "updated=1");
 }
 
 export async function inviteAdmissionLeadToApply(formData: FormData) {
   await requirePermission("manage_admissions");
 
   if (!isSupabaseConfigured()) {
-    redirect("/admissions?mode=edit&invited=demo");
+    const leadId = parseStaffInvitationForm(formData).lead_id;
+    admissionLeadRedirect(leadId, "invited=demo");
   }
 
   const parsed = parseStaffInvitationForm(formData);
@@ -597,29 +580,50 @@ export async function inviteAdmissionLeadToApply(formData: FormData) {
     throw new Error("Application invitation response was not valid.");
   }
 
+  const deadlineResult = await supabase
+    .from("terms")
+    .select("id, application_deadline_at")
+    .eq("status", "published")
+    .maybeSingle();
+  if (deadlineResult.error) throw new Error(deadlineResult.error.message);
+  if (!deadlineResult.data?.application_deadline_at) {
+    throw new Error("The published target term application deadline is not configured.");
+  }
+
   const deliveryResult = await sendPortalMagicLinkEmail({
     email: data.email,
+    personId: data.person_id,
+    admissionLeadId: data.lead_id,
     subject: "Your BETAR application invitation",
     templateKey: "application_invitation",
     redirectTo: applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application", data),
     metadata: {
       admission_lead_id: data.lead_id,
-      invitation_id: data.invitation_id
+      invitation_id: data.invitation_id,
+      application_target_term_id: String(deadlineResult.data.id),
+      application_deadline_at: String(deadlineResult.data.application_deadline_at),
+      application_deadline_state: "due"
     }
   });
 
   if (deliveryResult.status === "disabled") {
     revalidatePath("/admissions");
-    redirect("/admissions?mode=edit&invited=email_disabled");
+    revalidatePath("/admissions/new-students");
+    revalidatePath(`/admissions/new-students/${parsed.lead_id}`);
+    admissionLeadRedirect(parsed.lead_id, "invited=email_disabled");
   }
 
   if (correspondenceEmailFailed(deliveryResult)) {
     revalidatePath("/admissions");
-    redirect("/admissions?mode=edit&invited=email_failed");
+    revalidatePath("/admissions/new-students");
+    revalidatePath(`/admissions/new-students/${parsed.lead_id}`);
+    admissionLeadRedirect(parsed.lead_id, "invited=email_failed");
   }
 
   revalidatePath("/admissions");
-  redirect("/admissions?mode=edit&invited=1");
+  revalidatePath("/admissions/new-students");
+  revalidatePath(`/admissions/new-students/${parsed.lead_id}`);
+  admissionLeadRedirect(parsed.lead_id, "invited=1");
 }
 
 export async function convertAdmissionLeadToStudent(formData: FormData) {

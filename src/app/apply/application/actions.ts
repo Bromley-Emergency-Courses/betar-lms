@@ -10,6 +10,11 @@ import {
   parseApplicationDocumentUploadForm,
   validateApplicationDocumentUpload
 } from "@/lib/application-documents";
+import {
+  parseApplicationCorrectionDocumentUploadForm,
+  parseResubmitApplicationCorrectionsForm,
+  parseSaveApplicationCorrectionResponseForm
+} from "@/lib/application-corrections";
 import { parseApplicationDraftForm } from "@/lib/application-drafts";
 import {
   findUnsavedApplicationDraftChanges,
@@ -148,6 +153,74 @@ export async function uploadApplicationDocument(formData: FormData) {
 
   revalidatePath("/apply/application");
   redirect("/apply/application?document=uploaded");
+}
+
+export async function uploadApplicationCorrectionDocument(formData: FormData) {
+  const profile = await requireApplicantProfile("/apply/application");
+  let parsed;
+  try {
+    parsed = parseApplicationCorrectionDocumentUploadForm(formData);
+  } catch {
+    redirect("/apply/application?correction_error=invalid_upload");
+  }
+  const file = formData.get("document");
+
+  if (!(file instanceof File)) {
+    redirect("/apply/application?correction_error=invalid_upload");
+  }
+
+  const definition = getApplicationDocumentSlotDefinition(parsed.slot_key);
+  const validation = validateApplicationDocumentUpload({ file, slotKey: parsed.slot_key });
+  if (!validation.valid) {
+    redirect("/apply/application?correction_error=invalid_file");
+  }
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?correction_document=demo");
+  }
+
+  if (!isSupabaseServiceRoleConfigured()) {
+    throw new Error("Supabase service role storage is required for correction document uploads.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const supabaseAdmin = createSupabaseServiceRoleClient();
+  const objectPath = buildApplicationDocumentObjectPath(
+    profile.personId,
+    parsed.application_id,
+    parsed.slot_key,
+    validation.sanitizedFilename,
+    randomUUID()
+  );
+
+  const { error: uploadError } = await supabaseAdmin.storage.from(definition.bucket).upload(objectPath, file, {
+    contentType: validation.contentType,
+    upsert: false
+  });
+
+  if (uploadError) {
+    redirect("/apply/application?correction_error=upload_failed");
+  }
+
+  const { error: recordError } = await supabase.rpc("record_application_correction_document_upload", {
+    p_item_id: parsed.item_id,
+    p_bucket: definition.bucket,
+    p_object_path: objectPath,
+    p_original_filename: file.name,
+    p_sanitized_filename: validation.sanitizedFilename,
+    p_content_type: validation.contentType,
+    p_size_bytes: file.size,
+    p_response_note: parsed.response_note
+  });
+
+  if (recordError) {
+    await supabaseAdmin.storage.from(definition.bucket).remove([objectPath]);
+    redirect("/apply/application?correction_error=upload_failed");
+  }
+
+  revalidatePath("/apply/application");
+  revalidatePath("/admissions/reviews");
+  redirect("/apply/application?correction_document=uploaded");
 }
 
 export async function submitApplication(formData: FormData) {
@@ -299,7 +372,7 @@ export async function submitApplication(formData: FormData) {
 
   const changedFields = findUnsavedApplicationDraftChanges(currentDraft, savedDraft);
   if (changedFields.length > 0) {
-    throw new Error("Save your latest changes before submitting your application.");
+    redirect("/apply/application?submit_error=unsaved");
   }
 
   const { error } = await supabase.rpc("submit_application", {
@@ -310,9 +383,76 @@ export async function submitApplication(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(error.message);
+    const code = error.message.includes("required fields are complete")
+      ? "incomplete"
+      : error.message.includes("application submission deadline") || error.message.includes("application deadline has not")
+        ? "deadline"
+      : error.message.includes("future term") || error.message.includes("module offerings")
+        ? "study_plan"
+        : "failed";
+    redirect(`/apply/application?submit_error=${code}`);
   }
 
   revalidatePath("/apply/application");
   redirect("/apply/application?submitted=1");
+}
+
+export async function saveApplicationCorrectionResponse(formData: FormData) {
+  await requireApplicantProfile("/apply/application");
+  let parsed;
+  try {
+    parsed = parseSaveApplicationCorrectionResponseForm(formData);
+  } catch {
+    redirect("/apply/application?correction_error=invalid_response");
+  }
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?correction_saved=demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("save_application_correction_response", {
+    p_item_id: parsed.item_id,
+    p_proposed_value: parsed.proposed_value ?? null,
+    p_replacement_managed_file_id: parsed.replacement_managed_file_id,
+    p_response_note: parsed.response_note,
+    p_clear_value: parsed.clear_value
+  });
+
+  if (error) {
+    redirect("/apply/application?correction_error=save_failed");
+  }
+
+  revalidatePath("/apply/application");
+  revalidatePath("/admissions/reviews");
+  redirect("/apply/application?correction_saved=1");
+}
+
+export async function resubmitApplicationCorrections(formData: FormData) {
+  await requireApplicantProfile("/apply/application");
+  let parsed;
+  try {
+    parsed = parseResubmitApplicationCorrectionsForm(formData);
+  } catch {
+    redirect("/apply/application?correction_error=invalid_request");
+  }
+
+  if (!isSupabaseConfigured()) {
+    redirect("/apply/application?correction_submitted=demo");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("resubmit_application_corrections", {
+    p_request_id: parsed.request_id
+  });
+
+  if (error) {
+    const code = error.message.includes("Every correction item must be addressed") ? "incomplete" : "resubmit_failed";
+    redirect(`/apply/application?correction_error=${code}`);
+  }
+
+  revalidatePath("/apply/application");
+  revalidatePath("/admissions/reviews");
+  revalidatePath("/admissions");
+  redirect("/apply/application?correction_submitted=1");
 }

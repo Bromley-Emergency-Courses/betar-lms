@@ -60,7 +60,7 @@ export function StudyPlanFields({
         <span>{selectedIds.length > 0 ? "Started" : "Required before submission"}</span>
       </div>
       <FormGrid>
-        <Field label="Programme choice" htmlFor="application-programme">
+        <Field label="Programme choice" htmlFor="application-programme" required>
           <select
             id="application-programme"
             name="programme"
@@ -75,11 +75,12 @@ export function StudyPlanFields({
             <option value="microcredential">Microcredential</option>
           </select>
         </Field>
-        <Field label="Intended start term" htmlFor="application-start-term">
+        <Field label="Intended start term" htmlFor="application-start-term" required>
           <select
             id="application-start-term"
             name="intended_start_term_id"
             className="select"
+            required
             value={selectedTermId}
             onChange={(event) => {
               setSelectedTermId(event.target.value);
@@ -97,7 +98,7 @@ export function StudyPlanFields({
       </FormGrid>
 
       <fieldset className="checkbox-fieldset">
-        <legend>First-term module offerings</legend>
+        <legend>First-term module offerings <span className="required-marker" aria-label="required">*</span></legend>
         {!canSelectOfferings ? (
           <p className="muted small">Choose a programme and intended start term to select module offerings.</p>
         ) : termOfferings.length === 0 ? (
@@ -114,6 +115,7 @@ export function StudyPlanFields({
                     value={offering.id}
                     checked={checked}
                     disabled={!checked && maxSelected}
+                    required={selectedIds.length === 0}
                     onChange={(event) => updateOffering(offering.id, event.target.checked)}
                   />
                   <span>

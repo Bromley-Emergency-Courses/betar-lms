@@ -3,7 +3,7 @@
 import { ExternalLink } from "lucide-react";
 import { useState, useTransition } from "react";
 
-export function DocumentOpenButton({ fileId }: { fileId?: string }) {
+export function DocumentOpenButton({ fileId, label = "Open" }: { fileId?: string; label?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -36,7 +36,7 @@ export function DocumentOpenButton({ fileId }: { fileId?: string }) {
     <span className="document-open-control">
       <button className="button secondary" type="button" onClick={openDocument} disabled={!fileId || isPending}>
         <ExternalLink size={16} />
-        {isPending ? "Opening" : "Open"}
+        {isPending ? "Opening" : label}
       </button>
       {error ? <span className="muted small">{error}</span> : null}
     </span>

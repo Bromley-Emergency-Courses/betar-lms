@@ -14,10 +14,12 @@ import {
   buildAdmissionsRegistrationDocumentObjectPath,
   canAccessAcceptedOfferRegistration,
   parseAdmissionsRegistrationDraftForm,
+  parseAdmissionsRegistrationDocumentVerificationRouteForm,
   parseAdmissionsRegistrationDocumentUploadForm,
   parseBeginAdmissionsRegistrationForm,
   parseProcessAdmissionsRegistrationDeadlineWorkflowForm,
   parseReopenLapsedAdmissionsRegistrationForm,
+  parseStaffRegistrationDocumentVerificationForm,
   parseSubmitAdmissionsRegistrationForm,
   validateAdmissionsRegistrationDocumentUpload
 } from "@/lib/admissions-registration";
@@ -33,6 +35,10 @@ function uploadFile(overrides: Partial<Pick<File, "name" | "size" | "type">> = {
 
 const lapseMigration = readFileSync(
   join(process.cwd(), "supabase/migrations/0031_registration_lapse_reopen_workflow.sql"),
+  "utf8"
+);
+const documentVerificationRouteMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/0044_registration_document_verification_routes.sql"),
   "utf8"
 );
 
@@ -641,6 +647,26 @@ describe("admissions registration", () => {
       slot_key: "identity_evidence"
     });
 
+    formData.set("verification_route", "in_person");
+    expect(parseAdmissionsRegistrationDocumentVerificationRouteForm(formData)).toEqual({
+      registration_id: "88888888-8888-4888-8888-888888888888",
+      slot_key: "identity_evidence",
+      verification_route: "in_person"
+    });
+
+    formData.set("application_id", "66666666-6666-4666-8666-666666666666");
+    formData.set("slot_id", "99999999-9999-4999-8999-999999999999");
+    formData.set("verification_status", "unverified");
+    formData.set("verification_note", "Bring the original passport to induction.");
+    expect(parseStaffRegistrationDocumentVerificationForm(formData)).toEqual({
+      application_id: "66666666-6666-4666-8666-666666666666",
+      registration_id: "88888888-8888-4888-8888-888888888888",
+      slot_id: "99999999-9999-4999-8999-999999999999",
+      verification_route: "in_person",
+      verification_status: "unverified",
+      verification_note: "Bring the original passport to induction."
+    });
+
     formData.set("terms_accepted", "on");
     expect(parseSubmitAdmissionsRegistrationForm(formData)).toEqual({
       registration_id: "88888888-8888-4888-8888-888888888888",
@@ -965,5 +991,17 @@ describe("admissions registration", () => {
     const actions = readFileSync(join(process.cwd(), "src/app/portal/registration/actions.ts"), "utf8");
     expect(actions.indexOf("save_admissions_registration")).toBeLessThan(actions.indexOf("submit_admissions_registration"));
     expect(actions).toContain("from(\"admissions_registration_terms_versions\")");
+  });
+
+  it("adds auditable upload or induction verification routes without placeholder files", () => {
+    expect(documentVerificationRouteMigration).toContain("add column verification_route text not null default 'upload'");
+    expect(documentVerificationRouteMigration).toContain("set_admissions_registration_document_verification_route");
+    expect(documentVerificationRouteMigration).toContain("verify_admissions_registration_document_slot");
+    expect(documentVerificationRouteMigration).toContain("registration.document_verification_route_selected");
+    expect(documentVerificationRouteMigration).toContain("registration.document_verification_recorded");
+    expect(documentVerificationRouteMigration).toContain("document_slot.verification_route = 'in_person'");
+    expect(documentVerificationRouteMigration).toContain("requires_staff_follow_up");
+    expect(documentVerificationRouteMigration).not.toContain("insert into storage.objects");
+    expect(documentVerificationRouteMigration).not.toContain("insert into public.managed_files");
   });
 });

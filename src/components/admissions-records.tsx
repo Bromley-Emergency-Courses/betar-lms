@@ -84,15 +84,6 @@ function LeadFields({ data, lead }: { data: AppData; lead?: AdmissionLead }) {
         <Field label="Phone" htmlFor={`lead-phone-${lead?.id ?? "new"}`}>
           <input id={`lead-phone-${lead?.id ?? "new"}`} name="phone" className="input" defaultValue={lead?.phone ?? ""} />
         </Field>
-        <Field label="Stage" htmlFor={`lead-stage-${lead?.id ?? "new"}`}>
-          <select id={`lead-stage-${lead?.id ?? "new"}`} name="stage" className="select" defaultValue={lead?.stage ?? "interest"}>
-            {leadStages.map((stage) => (
-              <option key={stage} value={stage}>
-                {stageLabel(stage)}
-              </option>
-            ))}
-          </select>
-        </Field>
         <Field label="Programme" htmlFor={`lead-programme-${lead?.id ?? "new"}`}>
           <select id={`lead-programme-${lead?.id ?? "new"}`} name="programme" className="select" defaultValue={lead?.programme ?? "pgcert"}>
             <option value="pgcert">PGCert</option>
@@ -212,7 +203,7 @@ function ApplicationInvitationForm({ lead }: { lead: AdmissionLead }) {
       <form className="grid session-form" action={inviteAdmissionLeadToApply}>
         <input type="hidden" name="lead_id" value={lead.id} />
         <p className="muted small">
-          Sends a Supabase magic link to {lead.email} and opens only the applicant access area. The full application form is still a later Phase 1 slice.
+          Sends a secure magic link to {lead.email} and opens the applicant application portal.
           {lead.applicationInvitationExpiresAt ? ` Current link expires ${new Date(lead.applicationInvitationExpiresAt).toLocaleDateString("en-GB")}.` : ""}
         </p>
         <button className="button primary">Send application invitation</button>

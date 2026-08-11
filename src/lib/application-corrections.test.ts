@@ -1,0 +1,167 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  applicationCorrectionFieldLabel,
+  parseApplicationCorrectionDocumentUploadForm,
+  parseApplicationEvidenceOverrideForm,
+  parseCancelApplicationCorrectionForm,
+  parseRequestApplicationCorrectionsForm,
+  parseReviewApplicationCorrectionsForm,
+  parseSaveApplicationCorrectionResponseForm
+} from "@/lib/application-corrections";
+
+const applicationId = "11111111-1111-4111-8111-111111111111";
+const requestId = "22222222-2222-4222-8222-222222222222";
+const itemId = "33333333-3333-4333-8333-333333333333";
+const slotId = "44444444-4444-4444-8444-444444444444";
+
+describe("application corrections", () => {
+  it("parses a structured request and rejects duplicate or unknown targets", () => {
+    const formData = new FormData();
+    formData.set("application_id", applicationId);
+    formData.set("summary", "Please correct the identity details and replace the certificate.");
+    formData.set("due_at", "2027-02-01T12:00:00Z");
+    formData.set(
+      "items_json",
+      JSON.stringify([
+        { target_type: "application_field", target_key: "last_name", instructions: "Use your legal surname." },
+        {
+          target_type: "document_slot",
+          target_key: "qualification_evidence",
+          instructions: "Upload the complete certificate."
+        }
+      ])
+    );
+
+    expect(parseRequestApplicationCorrectionsForm(formData)).toMatchObject({
+      application_id: applicationId,
+      summary: "Please correct the identity details and replace the certificate.",
+      due_at: "2027-02-01T12:00:00.000Z",
+      items: [
+        { target_type: "application_field", target_key: "last_name" },
+        { target_type: "document_slot", target_key: "qualification_evidence" }
+      ]
+    });
+
+    formData.set(
+      "items_json",
+      JSON.stringify([
+        { target_type: "application_field", target_key: "last_name", instructions: "First request." },
+        { target_type: "application_field", target_key: "last_name", instructions: "Duplicate request." }
+      ])
+    );
+    expect(() => parseRequestApplicationCorrectionsForm(formData)).toThrow();
+  });
+
+  it("requires exactly one corrected value or replacement file", () => {
+    const formData = new FormData();
+    formData.set("item_id", itemId);
+    formData.set("proposed_value_json", JSON.stringify("Corrected surname"));
+    formData.set("response_note", "Matches my passport.");
+
+    expect(parseSaveApplicationCorrectionResponseForm(formData)).toEqual({
+      item_id: itemId,
+      proposed_value: "Corrected surname",
+      replacement_managed_file_id: null,
+      clear_value: false,
+      response_note: "Matches my passport."
+    });
+
+    formData.set("replacement_managed_file_id", slotId);
+    expect(() => parseSaveApplicationCorrectionResponseForm(formData)).toThrow();
+
+    formData.delete("proposed_value_json");
+    formData.delete("replacement_managed_file_id");
+    formData.set("clear_value", "on");
+    expect(parseSaveApplicationCorrectionResponseForm(formData)).toMatchObject({
+      proposed_value: undefined,
+      replacement_managed_file_id: null,
+      clear_value: true
+    });
+  });
+
+  it("parses a targeted replacement-document upload", () => {
+    const formData = new FormData();
+    formData.set("application_id", applicationId);
+    formData.set("item_id", itemId);
+    formData.set("slot_key", "qualification_evidence");
+    formData.set("response_note", "The complete certificate is attached.");
+
+    expect(parseApplicationCorrectionDocumentUploadForm(formData)).toEqual({
+      application_id: applicationId,
+      item_id: itemId,
+      slot_key: "qualification_evidence",
+      response_note: "The complete certificate is attached."
+    });
+
+    formData.set("slot_key", "passport");
+    expect(() => parseApplicationCorrectionDocumentUploadForm(formData)).toThrow();
+  });
+
+  it("requires instructions for revisions and reasons for cancellation or overrides", () => {
+    const review = new FormData();
+    review.set("application_id", applicationId);
+    review.set("request_id", requestId);
+    review.set("reviews_json", JSON.stringify([{ item_id: itemId, outcome: "revise", review_note: "" }]));
+    expect(() => parseReviewApplicationCorrectionsForm(review)).toThrow();
+
+    const cancel = new FormData();
+    cancel.set("application_id", applicationId);
+    cancel.set("request_id", requestId);
+    cancel.set("reason", " ");
+    expect(() => parseCancelApplicationCorrectionForm(cancel)).toThrow();
+
+    const evidenceOverride = new FormData();
+    evidenceOverride.set("application_id", applicationId);
+    evidenceOverride.set("slot_id", slotId);
+    evidenceOverride.set("reason", "Original verified directly with the awarding body.");
+    expect(parseApplicationEvidenceOverrideForm(evidenceOverride)).toEqual({
+      application_id: applicationId,
+      slot_id: slotId,
+      reason: "Original verified directly with the awarding body."
+    });
+  });
+
+  it("delivers a correction request through a transient portal magic link", () => {
+    const actions = readFileSync(join(process.cwd(), "src/app/admissions/reviews/actions.ts"), "utf8");
+
+    expect(actions).toContain("sendPortalMagicLinkEmail({");
+    expect(actions).toContain("correspondenceLogId,");
+    expect(actions).toContain('templateKey: "application_correction_requested"');
+    expect(actions).toContain('applicationMagicLinkRedirectUrl(await requestOrigin(), "/apply/application")');
+  });
+
+  it("renders active correction requests as targeted applicant responses instead of unlocking the submission", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/apply/application/page.tsx"), "utf8");
+    const fieldResponse = readFileSync(
+      join(process.cwd(), "src/app/apply/application/application-correction-field-response.tsx"),
+      "utf8"
+    );
+
+    expect(applicationCorrectionFieldLabel("professional_registration_number")).toBe("Registration number");
+    expect(page).toContain('from("application_correction_requests")');
+    expect(page).toContain('from("application_correction_items")');
+    expect(page).toContain("<ApplicationCorrectionPanel request={correctionRequest} />");
+    expect(page).toContain("uploadApplicationCorrectionDocument");
+    expect(page).toContain("resubmitApplicationCorrections");
+    expect(page).toContain("Only the specific corrections requested by admissions can be changed below.");
+    expect(fieldResponse).toContain("saveApplicationCorrectionResponse");
+    expect(fieldResponse).toContain('name="proposed_value_json"');
+    expect(fieldResponse).toContain('name="clear_value"');
+  });
+
+  it("lets staff securely open replacement evidence from correction history and review", () => {
+    const recordLoader = readFileSync(join(process.cwd(), "src/lib/new-student-admissions-record.ts"), "utf8");
+    const recordPage = readFileSync(
+      join(process.cwd(), "src/app/admissions/new-students/[admissionId]/page.tsx"),
+      "utf8"
+    );
+    const reviewForm = readFileSync(join(process.cwd(), "src/components/admissions-record-actions.tsx"), "utf8");
+
+    expect(recordLoader).toContain('.from("managed_files")');
+    expect(recordLoader).toContain("replacementFilename:");
+    expect(recordPage).toContain('label="Open replacement"');
+    expect(reviewForm).toContain('<DocumentOpenButton fileId={item.replacementManagedFileId} label="Open replacement" />');
+  });
+});

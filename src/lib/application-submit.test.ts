@@ -274,4 +274,15 @@ describe("application final submit", () => {
     expect(applicationSubmittedAction).toBe("application.submitted");
     expect(applicationSubmitEntityType).toBe("application");
   });
+
+  it("marks required application fields in the form and redirects expected validation failures into the UI", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/apply/application/page.tsx"), "utf8");
+    const actions = readFileSync(join(process.cwd(), "src/app/apply/application/actions.ts"), "utf8");
+
+    expect(page).toContain('htmlFor="application-first-name" required');
+    expect(page).toContain('htmlFor="application-pocus-motivation" required');
+    expect(page).toContain("Application not submitted");
+    expect(actions).toContain('redirect("/apply/application?submit_error=unsaved")');
+    expect(actions).toContain('error.message.includes("required fields are complete")');
+  });
 });

@@ -103,6 +103,10 @@ describe("application invitations", () => {
       join(process.cwd(), "supabase/migrations/0020_application_invitations_magic_link.sql"),
       "utf8"
     );
+    const pgcryptoFixMigration = readFileSync(
+      join(process.cwd(), "supabase/migrations/0043_fix_application_invitation_pgcrypto_resolution.sql"),
+      "utf8"
+    );
 
     expect(migration).toContain("create table public.application_invitations");
     expect(migration).toContain("claim_nonce_hash text not null");
@@ -133,5 +137,8 @@ describe("application invitations", () => {
     expect(migration).not.toContain("create table public.applications");
     expect(migration).not.toContain("create table public.offers");
     expect(migration).not.toContain("create table public.registrations");
+    expect(pgcryptoFixMigration).toContain("alter function public.issue_application_invitation(uuid, timestamptz)");
+    expect(pgcryptoFixMigration).toContain("alter function public.claim_application_invitation_for_auth_user(uuid, text)");
+    expect(pgcryptoFixMigration.match(/set search_path = public, extensions/g)).toHaveLength(2);
   });
 });
