@@ -1,5 +1,9 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  renderPortalAuthConfirmationPage,
+  shouldConfirmPortalEmailCallback
+} from "@/lib/portal-auth-confirmation";
 import { safePortalNextPath } from "@/lib/portal-access";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -10,19 +14,20 @@ function loginRedirect(request: NextRequest, message: string, next: string): Nex
   return NextResponse.redirect(redirectUrl);
 }
 
-export async function GET(request: NextRequest) {
-  const requestUrl = new URL(request.url);
-  const next = safePortalNextPath(requestUrl.searchParams.get("next") ?? "/apply/application");
-
+async function completePortalCallback(
+  request: NextRequest,
+  params: URLSearchParams
+): Promise<NextResponse> {
+  const next = safePortalNextPath(params.get("next") ?? "/apply/application");
   if (!isSupabaseConfigured()) {
     return NextResponse.redirect(new URL(next, request.url));
   }
 
   const supabase = await createSupabaseServerClient();
-  const code = requestUrl.searchParams.get("code");
-  const tokenHash = requestUrl.searchParams.get("token_hash");
-  const invitationId = requestUrl.searchParams.get("invitation_id");
-  const claimNonce = requestUrl.searchParams.get("claim_nonce");
+  const code = params.get("code");
+  const tokenHash = params.get("token_hash");
+  const invitationId = params.get("invitation_id");
+  const claimNonce = params.get("claim_nonce");
 
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -30,7 +35,7 @@ export async function GET(request: NextRequest) {
       return loginRedirect(request, error.message, next);
     }
   } else if (tokenHash) {
-    const type = (requestUrl.searchParams.get("type") ?? "email") as EmailOtpType;
+    const type = (params.get("type") ?? "email") as EmailOtpType;
     const { error } = await supabase.auth.verifyOtp({
       type,
       token_hash: tokenHash
@@ -56,4 +61,32 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.redirect(new URL(next, request.url));
+}
+
+export async function GET(request: NextRequest) {
+  const requestUrl = new URL(request.url);
+
+  if (shouldConfirmPortalEmailCallback(requestUrl.searchParams)) {
+    return new NextResponse(renderPortalAuthConfirmationPage(requestUrl.searchParams), {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store"
+      }
+    });
+  }
+
+  return completePortalCallback(request, requestUrl.searchParams);
+}
+
+export async function POST(request: NextRequest) {
+  const formData = await request.formData();
+  const params = new URLSearchParams();
+
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === "string") {
+      params.set(key, value);
+    }
+  }
+
+  return completePortalCallback(request, params);
 }
