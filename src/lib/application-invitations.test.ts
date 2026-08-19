@@ -107,6 +107,10 @@ describe("application invitations", () => {
       join(process.cwd(), "supabase/migrations/0043_fix_application_invitation_pgcrypto_resolution.sql"),
       "utf8"
     );
+    const identityReclaimMigration = readFileSync(
+      join(process.cwd(), "supabase/migrations/0048_reclaim_application_invitation_identity.sql"),
+      "utf8"
+    );
 
     expect(migration).toContain("create table public.application_invitations");
     expect(migration).toContain("claim_nonce_hash text not null");
@@ -140,5 +144,10 @@ describe("application invitations", () => {
     expect(pgcryptoFixMigration).toContain("alter function public.issue_application_invitation(uuid, timestamptz)");
     expect(pgcryptoFixMigration).toContain("alter function public.claim_application_invitation_for_auth_user(uuid, text)");
     expect(pgcryptoFixMigration.match(/set search_path = public, extensions/g)).toHaveLength(2);
+    expect(identityReclaimMigration).toContain("create or replace function public.claim_application_invitation_for_auth_user(");
+    expect(identityReclaimMigration).toContain("and actor_type = 'applicant'");
+    expect(identityReclaimMigration).toContain("and auth_user_id <> v_auth_user_id");
+    expect(identityReclaimMigration).toContain("set active = false");
+    expect(identityReclaimMigration).toContain("grant execute on function public.claim_application_invitation_for_auth_user(uuid, text) to authenticated");
   });
 });
