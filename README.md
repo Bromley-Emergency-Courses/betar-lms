@@ -41,6 +41,10 @@ The script prints a generated temporary password unless you pass one as the thir
 
 ## Verification
 
+Assessment workflow setup, local Docker rehearsal and rollout gates are documented in [docs/assessment-workflow-rollout.md](docs/assessment-workflow-rollout.md). The workflow defaults to disabled; no production cutover is part of its installation.
+
+The isolated student-workspace integration checkpoint, saved assessment actions, guarded launcher and browser checks are documented in [docs/student-workspace-development.md](docs/student-workspace-development.md). The broader workspace integration and production acceptance remain incomplete.
+
 ```bash
 npm run lint
 npm run test

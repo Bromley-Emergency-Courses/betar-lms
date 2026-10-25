@@ -79,6 +79,7 @@ export interface Person {
 
 export interface Student {
   id: string;
+  profileRevision?: number;
   personId?: string;
   cccuStudentId?: string;
   temporaryId: string;
@@ -174,6 +175,7 @@ export interface ModuleOffering {
 }
 
 export interface Enrolment {
+  assessment?: import("@/lib/assessment/types").AssessmentEvaluation;
   id: string;
   studentId: string;
   offeringId: string;

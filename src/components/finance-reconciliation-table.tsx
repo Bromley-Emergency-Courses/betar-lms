@@ -1,7 +1,7 @@
 "use client";
 
 import { SlidersHorizontal } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useSyncExternalStore } from "react";
 import { StatusPill } from "@/components/status-pill";
 import { StudentLink } from "@/components/student-link";
 import { deleteFinanceRecord, updateFinanceRecord } from "@/lib/admin-actions";
@@ -10,6 +10,10 @@ import type { AppData, FinanceRecord, Student, Term } from "@/lib/types";
 
 type BalanceFilter = "all" | "problem" | "due" | "balanced" | "overpaid";
 type SortMode = "issues" | "balance" | "student" | "term";
+
+const subscribeToHydration = () => () => {};
+const hydratedSnapshot = () => true;
+const serverHydratedSnapshot = () => false;
 
 interface FinanceRow {
   record: FinanceRecord;
@@ -109,15 +113,18 @@ function AmountInput({
 export function FinanceReconciliationTable({
   data,
   editable = false,
-  initialStudentId = "all"
+  initialStudentId = "all",
+  initialTermId = "all"
 }: {
   data: AppData;
   editable?: boolean;
   initialStudentId?: string;
+  initialTermId?: string;
 }) {
+  const hydrated = useSyncExternalStore(subscribeToHydration, hydratedSnapshot, serverHydratedSnapshot);
   const [query, setQuery] = useState("");
   const [studentFilter, setStudentFilter] = useState(initialStudentId);
-  const [termFilter, setTermFilter] = useState("all");
+  const [termFilter, setTermFilter] = useState(initialTermId);
   const [invoiceFilter, setInvoiceFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [balanceFilter, setBalanceFilter] = useState<BalanceFilter>("all");
@@ -214,7 +221,7 @@ export function FinanceReconciliationTable({
   }
 
   return (
-    <div className="finance-reconciliation">
+    <fieldset className="finance-reconciliation" disabled={!hydrated} aria-label="Finance reconciliation">
       <div className="finance-filter-panel">
         <div className="finance-filter-title">
           <SlidersHorizontal size={18} />
@@ -583,6 +590,6 @@ export function FinanceReconciliationTable({
           </table>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }

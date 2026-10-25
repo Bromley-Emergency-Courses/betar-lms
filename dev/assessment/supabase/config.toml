@@ -1,0 +1,38 @@
+project_id = "assessment-yangon-49"
+
+[api]
+enabled = true
+port = 56321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 56322
+shadow_port = 56320
+major_version = 17
+
+[db.seed]
+enabled = false
+
+[studio]
+enabled = false
+
+[inbucket]
+enabled = true
+port = 56324
+
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3100"
+additional_redirect_urls = ["http://127.0.0.1:3100", "http://localhost:3100", "http://127.0.0.1:3102"]
+minimum_password_length = 8
+
+[analytics]
+enabled = false
+
+[edge_runtime]
+enabled = false

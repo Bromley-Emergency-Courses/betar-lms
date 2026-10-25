@@ -3,6 +3,9 @@ import "server-only";
 import { cache } from "react";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 import { getAppData } from "@/lib/seed";
+import { assessmentWorkflowMode } from "@/lib/assessment/feature";
+import { readAssessmentTable } from "@/lib/assessment";
+import type { AssessmentOutcome, AssessmentAttempt as RecordedAssessmentAttempt } from "@/lib/assessment/types";
 import type {
   AppData,
   AdmissionLead,
@@ -41,6 +44,7 @@ function booleanValue(value: unknown): boolean | undefined {
 function mapStudent(row: DbRow): Student {
   return {
     id: String(row.id),
+    profileRevision: typeof row.profile_revision === "number" ? row.profile_revision : undefined,
     personId: optionalString(row.person_id),
     cccuStudentId: optionalString(row.cccu_student_id),
     temporaryId: String(row.temporary_id),
@@ -357,7 +361,7 @@ export const getLmsData = cache(async (): Promise<AppData> => {
     selectRows("terms", "*", { column: "starts_on", ascending: false }),
     selectRows("course_modules", "*", { column: "code" }),
     selectRows("module_offerings"),
-    selectRows("enrolments"),
+    selectRows("active_module_enrolments"),
     selectRows("attendance_sessions", "*", { column: "session_date", ascending: false }),
     selectRows("expected_attendance"),
     selectRows("attendance_records"),
@@ -378,6 +382,9 @@ export const getLmsData = cache(async (): Promise<AppData> => {
     expectedBySession.set(sessionId, [...(expectedBySession.get(sessionId) ?? []), String(row.student_id)]);
   });
 
+  const assessmentOutcomes = assessmentWorkflowMode() === "live" ? await readAssessmentTable<AssessmentOutcome>("assessment_outcomes") : [];
+  const assessmentAttempts = assessmentWorkflowMode() === "live" ? await readAssessmentTable<RecordedAssessmentAttempt>("assessment_attempt_history") : [];
+
   return {
     admissionLeads: admissionLeadRows.map(mapAdmissionLead),
     staffUsers: staffRows.map(mapStaff),
@@ -385,7 +392,11 @@ export const getLmsData = cache(async (): Promise<AppData> => {
     terms: termRows.map(mapTerm),
     modules: moduleRows.map(mapCourseModule),
     offerings: offeringRows.map(mapOffering),
-    enrolments: enrolmentRows.map(mapEnrolment),
+    enrolments: enrolmentRows.map(row => {
+      const enrolment = mapEnrolment(row);
+      const assessment = assessmentOutcomes.find(outcome=>outcome.enrolment_id===enrolment.id)?.assessment;
+      return assessment ? {...enrolment,assessment,creditsAwarded:assessment.awarded_credits ?? 0} : enrolment;
+    }),
     sessions: sessionRows.map((row) => mapAttendanceSession(row, expectedBySession.get(String(row.id)) ?? [])),
     attendance: attendanceRows.map(mapAttendanceRecord),
     assessmentDefinitions: assessmentDefinitionRows.map((row) => ({
@@ -401,7 +412,13 @@ export const getLmsData = cache(async (): Promise<AppData> => {
     assessmentAttempts: assessmentAttemptRows.map(mapAssessmentAttempt),
     presentationScores: presentationRows.map(mapPresentation),
     financeRecords: financeRows.map(mapFinance),
-    examResults: examRows.map(mapExamResult),
+    examResults: assessmentWorkflowMode() === "live" ? assessmentAttempts.filter(attempt=>attempt.active && attempt.is_current).map(attempt=>{
+      const enrolment=enrolmentRows.find(row=>String(row.id)===attempt.enrolment_id);
+      return {id:attempt.id,studentId:String(enrolment?.student_id),offeringId:String(enrolment?.offering_id),componentType:attempt.component,
+        sourceSystem:(attempt.origin==="Manual"?"manual":attempt.origin==="Portal"?"theory_portal":"practical_osce") as ExamResult["sourceSystem"],sourceAttemptId:attempt.id,
+        score:attempt.score,passMark:attempt.pass_mark,passed:attempt.passed,resitRequired:!attempt.passed,isResit:attempt.ordinal>1||Boolean(attempt.previous_result_unavailable),
+        attemptNumber:attempt.sequence??1,priorAttemptMissing:Boolean(attempt.previous_result_unavailable),takenOn:attempt.sitting_date,importedAt:attempt.sitting_date};
+    }) : examRows.map(mapExamResult),
     examPortalMappings: examPortalMappingRows.map(mapExamPortalMapping),
     examPortalSubmissions: examPortalSubmissionRows.map(mapExamPortalSubmission),
     managedFiles: managedFileRows.map(mapManagedFile)

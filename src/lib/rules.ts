@@ -62,7 +62,7 @@ export function hasCompletedMandatoryModule(
 ): boolean {
   const mandatoryModuleIds = new Set(modules.filter((module) => module.mandatory).map((module) => module.id));
   return enrolments.some((enrolment) => {
-    if (enrolment.studentId !== studentId || enrolment.status !== "completed") {
+    if (enrolment.studentId !== studentId || (enrolment.assessment ? enrolment.assessment.effective_status !== "Pass" : enrolment.status !== "completed")) {
       return false;
     }
     const offering = offerings.find((candidate) => candidate.id === enrolment.offeringId);
@@ -110,6 +110,7 @@ function attendanceRequirementOverride(enrolment: Enrolment): number {
 }
 
 export function isEnrolmentComplianceRelevant(enrolment: Enrolment): boolean {
+  if (enrolment.assessment) return !["Abandoned", "Module deferred"].includes(enrolment.assessment.effective_status);
   return REQUIREMENT_RELEVANT_ENROLMENT_STATUSES.includes(enrolment.status);
 }
 
@@ -224,6 +225,8 @@ function carriedAttendanceDaysForTerm(studentId: string, termId: string, data: A
 }
 
 export function requiredAttendanceDaysForTerm(studentId: string, termId: string, data: AppData): number {
+  const projected = enrolmentsInTerm(studentId, termId, data).map(enrolment=>enrolment.assessment).filter(assessment=>assessment?.plan?.mode === "practical");
+  if (projected.length) return Math.max(...projected.map(assessment=>assessment?.attendance_required ?? 0));
   const practicalEnrolments = practicalEnrolmentsInTerm(studentId, termId, data);
   if (practicalEnrolments.length === 0) {
     return 0;
@@ -261,6 +264,8 @@ export function requiredAttendanceDaysForTerm(studentId: string, termId: string,
 }
 
 export function requiredAttendanceDays(studentId: string, offering: ModuleOffering, data: AppData): number {
+  const projected = enrolmentForOffering(studentId, offering.id, data)?.assessment;
+  if (projected) return projected.attendance_required ?? 0;
   if (!isStudentComplianceRelevant(data.students.find((student) => student.id === studentId))) {
     return 0;
   }
@@ -282,6 +287,8 @@ export function requiredAttendanceDays(studentId: string, offering: ModuleOfferi
 }
 
 export function attendedDaysInTerm(studentId: string, termId: string, data: AppData): number {
+  const projected = enrolmentsInTerm(studentId, termId, data).map(enrolment=>enrolment.assessment).filter(assessment=>assessment?.plan?.mode === "practical");
+  if (projected.length) return Math.max(...projected.map(assessment=>assessment?.attendance_actual ?? 0));
   if (!isStudentComplianceRelevant(data.students.find((student) => student.id === studentId))) {
     return 0;
   }
@@ -302,6 +309,8 @@ export function attendedDaysInTerm(studentId: string, termId: string, data: AppD
 }
 
 export function attendedDays(studentId: string, offeringId: string, data: AppData): number {
+  const projected = enrolmentForOffering(studentId, offeringId, data)?.assessment;
+  if (projected) return projected.attendance_actual ?? 0;
   const offering = data.offerings.find((candidate) => candidate.id === offeringId);
   if (!offering || !isPracticalOffering(offering, data)) {
     return 0;
@@ -319,6 +328,8 @@ export function hasTermAttendanceGap(studentId: string, termId: string, data: Ap
 }
 
 export function hasAttendanceGap(studentId: string, offering: ModuleOffering, data: AppData): boolean {
+  const projected = enrolmentForOffering(studentId, offering.id, data)?.assessment;
+  if (projected) return projected.effective_indicators?.includes("Attendance non-compliance") ?? false;
   if (!isPracticalOffering(offering, data)) {
     return false;
   }
@@ -495,7 +506,7 @@ export function normalizeExamResultScore(score: number, passMark = PASS_MARK): P
   return { passed, resitRequired: !passed };
 }
 
-export function studentAcademicRisk(studentId: string, data: AppData): "none" | "watch" | "support_needed" {
+export function studentAcademicRisk(studentId: string, data: Pick<AppData, "encounters" | "enrolments" | "examResults">): "none" | "watch" | "support_needed" {
   const hasSupportConcern = data.encounters.some(
     (encounter) => encounter.studentId === studentId && encounter.concernLevel === "support_needed"
   );
@@ -503,7 +514,11 @@ export function studentAcademicRisk(studentId: string, data: AppData): "none" | 
     return "support_needed";
   }
 
-  const hasFailedExam = data.examResults.some((result) => result.studentId === studentId && result.resitRequired);
+  const assessmentEnrolments = data.enrolments.filter(enrolment=>enrolment.studentId===studentId && enrolment.assessment);
+  const hasFailedExam = assessmentEnrolments.length
+    ? assessmentEnrolments.some(enrolment=>enrolment.assessment && !["Abandoned","Module deferred","Assessment deferred"].includes(enrolment.assessment.effective_status)
+      && (enrolment.assessment.effective_status === "Fail" || Boolean(enrolment.assessment.effective_indicators?.length)))
+    : data.examResults.some((result) => result.studentId === studentId && result.resitRequired);
   const hasWatchConcern = data.encounters.some(
     (encounter) => encounter.studentId === studentId && encounter.concernLevel === "watch"
   );
@@ -520,6 +535,7 @@ export function dashboardMetrics(data: AppData): DashboardMetrics {
     (student) => studentAcademicRisk(student.id, data) !== "none"
   ).length;
   const attendanceGaps = data.enrolments.filter((enrolment) => {
+    if (enrolment.assessment) return enrolment.assessment.effective_indicators?.includes("Attendance non-compliance");
     const student = data.students.find((candidate) => candidate.id === enrolment.studentId);
     const offering = data.offerings.find((candidate) => candidate.id === enrolment.offeringId);
     return isStudentComplianceRelevant(student) && isEnrolmentComplianceRelevant(enrolment) && offering

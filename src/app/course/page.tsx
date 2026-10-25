@@ -12,6 +12,9 @@ import { Field, FormGrid } from "@/components/forms";
 import { requirePermission } from "@/lib/auth";
 import { createCourseModule, createModuleOffering, createTerm } from "@/lib/admin-actions";
 import { getLmsData } from "@/lib/lms-data";
+import { assessmentWorkflowEnabled } from "@/lib/assessment/feature";
+import { readAssessmentTable } from "@/lib/assessment";
+import type { AssessmentPlan } from "@/lib/assessment/types";
 
 export default async function CoursePage({
   searchParams
@@ -22,6 +25,7 @@ export default async function CoursePage({
   const { mode } = await searchParams;
   const editMode = mode === "edit";
   const data = await getLmsData();
+  const assessmentPlans = editMode && assessmentWorkflowEnabled() ? await readAssessmentTable<AssessmentPlan>("module_assessment_plans") : undefined;
 
   return (
     <AppShell
@@ -212,7 +216,7 @@ export default async function CoursePage({
             <AssessmentDefinitionCreator data={data} />
           </section>
 
-          <CourseRecords data={data} />
+          <CourseRecords data={data} assessmentPlans={assessmentPlans} />
           <AssessmentDefinitionRecords data={data} />
         </>
       ) : data.modules.length === 0 && data.terms.length === 0 ? (

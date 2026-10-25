@@ -11,6 +11,24 @@ import {
 } from "@/lib/admin-actions";
 import { externalStudentIdentifier, formatCurrency, studentDisplayName } from "@/lib/rules";
 import type { AppData } from "@/lib/types";
+import { DeferredDetails } from "./deferred-details";
+import { AssessmentPlanForm } from "@/components/assessment-forms";
+import type { AssessmentPlan } from "@/lib/assessment/types";
+
+function ModuleExamRules({ courseModule, plans }: { courseModule: AppData["modules"][number]; plans: AssessmentPlan[] }) {
+  const currentPlan = plans.filter(plan => plan.module_id === courseModule.id).sort((first, second) => second.version - first.version)[0];
+  return (
+    <DeferredDetails id={`assessment-plan-${courseModule.id}`} summary={`Exam rules · ${currentPlan ? `Plan v${currentPlan.version}` : "Review required"}`}>
+      <p>Set the exam format and pass marks for this module. These are separate from formative teaching assessments.</p>
+      <AssessmentPlanForm key={currentPlan?.id ?? "new"} moduleId={courseModule.id} mode={courseModule.mode} currentPlan={currentPlan} />
+      <details>
+        <summary>Advanced: existing enrolments</summary>
+        <p>Existing enrolments keep their original exam rules. Only use this if an existing enrolment needs a reviewed change; a reason and impact preview are required.</p>
+        <Link className="button" href={`/course/assessment-plans/${courseModule.id}`}>Review rules for existing enrolments</Link>
+      </details>
+    </DeferredDetails>
+  );
+}
 
 export function DeleteWarning({
   name,
@@ -32,7 +50,7 @@ export function DeleteWarning({
   );
 }
 
-export function CourseRecords({ data }: { data: AppData }) {
+export function CourseRecords({ data, assessmentPlans }: { data: AppData; assessmentPlans?: AssessmentPlan[] }) {
   const studentsById = new Map(data.students.map((student) => [student.id, student]));
   const enrolmentsByOfferingId = new Map<string, AppData["enrolments"]>();
   data.enrolments.forEach((enrolment) => {
@@ -85,6 +103,7 @@ export function CourseRecords({ data }: { data: AppData }) {
                 </FormGrid>
                 <button className="button primary">Save module</button>
               </form>
+              {assessmentPlans ? <ModuleExamRules courseModule={courseModule} plans={assessmentPlans} /> : null}
               <form action={deleteCourseModule}>
                 <DeleteWarning name={courseModule.code} idName="module_id" idValue={courseModule.id} />
                 <button className="button danger">Delete module</button>
@@ -155,14 +174,13 @@ export function CourseRecords({ data }: { data: AppData }) {
           {data.terms.map((term) => {
             const offerings = data.offerings.filter((offering) => offering.termId === term.id);
             return (
-              <details className="panel" key={term.id} open={term.status === "active" || term.status === "published"}>
-                <summary className="term-summary">
+              <DeferredDetails className="panel" key={term.id} defaultOpen={term.status === "active" || term.status === "published"} summaryClassName="term-summary" summary={<>
                   <span>
                     <strong>{term.name}</strong>
                     <span className="muted small">{offerings.length} offerings</span>
                   </span>
                   <StatusPill value={term.status === "active" ? "active" : "neutral"} label={term.status} />
-                </summary>
+                </>}>
                 {offerings.length === 0 ? (
                   <p className="muted">No offerings configured for this term.</p>
                 ) : (
@@ -254,7 +272,7 @@ export function CourseRecords({ data }: { data: AppData }) {
                     })}
                   </div>
                 )}
-              </details>
+              </DeferredDetails>
             );
           })}
         </div>

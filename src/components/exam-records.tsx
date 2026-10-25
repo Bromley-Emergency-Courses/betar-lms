@@ -1,5 +1,6 @@
 import { Download, PlugZap } from "lucide-react";
 import Link from "next/link";
+import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessment/feature";
 import { EmptyState } from "@/components/empty-state";
 import { ExamPortalMappingForm } from "@/components/exam-portal-mapping-form";
 import { ExamResultsDirectoryTable } from "@/components/exam-results-directory-table";
@@ -179,10 +180,11 @@ export function ExamTools({
           <Field label="CSV file" htmlFor="practical-csv-file">
             <input id="practical-csv-file" name="csv_file" className="input" type="file" accept=".csv,text/csv" required />
           </Field>
+          {assessmentWorkflowEnabled() ? <label>Import reason<textarea className="textarea" name="assessment_reason" required /></label> : null}
           <button className="button primary">Import practical results</button>
         </form>
 
-        <details className="panel" open>
+        {assessmentWorkflowMode() !== "live" ? <details className="panel" open>
           <summary className="term-summary">
             <span>
               <strong>Manual Overall Score</strong>
@@ -228,7 +230,7 @@ export function ExamTools({
             </FormGrid>
             <button className="button primary">Save overall score</button>
           </form>
-        </details>
+        </details> : <p>Enter Manual Theory or Practical scores from the original Module Enrolment in the assessment register.</p>}
       </section>
 
       <section className="section">
@@ -303,6 +305,7 @@ export function ExamTools({
                   </form>
                   <form action={syncExamPortalMapping}>
                     <input type="hidden" name="mapping_id" value={mapping.id} />
+                    {assessmentWorkflowEnabled() ? <label>Sync reason<textarea className="textarea" name="assessment_reason" required /></label> : null}
                     <button className="button">Sync from Exam Portal</button>
                   </form>
                 </div>
@@ -312,7 +315,7 @@ export function ExamTools({
         )}
       </section>
 
-      <section className="section">
+      {assessmentWorkflowMode() !== "live" ? <section className="section">
         <div className="section-header">
           <div>
             <h2>Exam Exceptions</h2>
@@ -403,8 +406,7 @@ export function ExamTools({
             })}
           </div>
         )}
-      </section>
-
+      </section> : null}
       <details className="panel">
         <summary className="term-summary">
           <span>
@@ -420,6 +422,7 @@ export function ExamTools({
           <Field label="Adapter JSON payload" htmlFor="exam-results-json">
             <textarea id="exam-results-json" name="exam_results_json" className="textarea code-textarea" defaultValue={examplePayload(data)} required />
           </Field>
+          {assessmentWorkflowEnabled() ? <label>Import reason<textarea className="textarea" name="assessment_reason" required /></label> : null}
           <button className="button primary">Import exam results</button>
         </form>
       </details>

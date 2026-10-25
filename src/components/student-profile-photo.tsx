@@ -8,15 +8,17 @@ export function StudentProfilePhoto({
   studentId,
   studentName,
   initials,
-  hasPhoto
+  hasPhoto,
+  version
 }: {
   studentId: string;
   studentName: string;
   initials: string;
   hasPhoto: boolean;
+  version?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const photoSrc = `/api/students/${studentId}/photo`;
+  const photoSrc = `/api/students/${studentId}/photo${version === undefined ? "" : `?v=${version}`}`;
   const overlay = (
     <button className="profile-photo-overlay" type="button" onClick={() => setExpanded(false)} aria-label="Close profile photo">
       <span className="profile-photo-expanded">

@@ -1,0 +1,6 @@
+.switcher { position: fixed; z-index: 30; bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 5px; border: 1px solid #3c4d49; border-radius: 40px; background: #172c28; color: white; box-shadow: 0 5px 22px #172c2833; white-space: nowrap; }
+.switcher button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: white; cursor: pointer; }
+.switcher button:hover { background: #ffffff20; }
+.switcher span { min-width: 155px; text-align: center; font-size: 12px; font-weight: 600; }
+.switcher small { display: block; margin-bottom: 2px; font-size: 8px; letter-spacing: 1.5px; color: #c6ddd5; }
+.switcher button:focus-visible { outline: 2px solid #bcead5; outline-offset: -3px; }
