@@ -6,14 +6,14 @@ Subsequent authorization: the user approved the scoped commit and PR, without me
 
 ## Candidate boundary
 
-The branch and `origin/main` currently point to the same commit. The implementation is in modified and untracked files, so a three-dot branch diff alone contains none of the work. Review the working-tree changes and the new files together. Do not use `git add -A` on this mixed workspace.
+The original candidate was assembled from a mixed working tree at the main-branch base. The scoped implementation is now committed as `8cd4b88` in draft PR #56. Review subsequent fixes together with the full branch diff against `origin/main`. Do not use `git add -A`: unrelated Staff work remains local.
 
 Include:
 
 - Student directory/workspace, profile/photo, enrolment, attendance, teaching and finance integrations and their tests.
 - Shared assessment commands, evaluation/projections, imports, histories, corrections, resits, exceptional decisions and reports.
 - Minimal Course integration: exam rules within existing module editors and advanced reviewed changes for existing enrolments. No Course redesign.
-- Migrations `0049`–`0072` in order; existing migrations `0001`–`0048` remain unchanged.
+- Migrations `0049`–`0074` in order; existing migrations `0001`–`0048` remain unchanged.
 - Local Docker configurations, guarded launchers/rehearsals, browser harnesses, deployment/recovery documentation and the locked Playwright dependency.
 - Existing development-only Students/Assessments prototypes and their shared switcher: current route imports still require these source files. Production cannot activate them through a prototype URL parameter.
 
@@ -37,9 +37,17 @@ The final candidate contains 389 source files: 143 added and 28 modified relativ
 
 Production-mode routing is separately checked against synthetic local shadow data on a temporary port. This caught an old `variant` URL parameter bypassing the integrated profile. Prototype selection is now explicitly development-only across the directory, profile and Assessments routes, while intentional legacy views and edit routes remain available. Permanent feature-gate tests cover production, disabled and invalid-variant cases; the local browser check covers normal and prototype-query routes.
 
+## Source-review corrections
+
+The release review found two correctness blockers, reproduced with failing PostgreSQL integration tests. Migration `0073` compares incoming payloads with the latest source version, allowing A → B → A to append a third immutable version while consecutive repeats remain idempotent. Administrative replacement, void and unmatch decisions remain effective. This assumes current snapshots, not unordered source events; see the ordering limitation in the assessment rollout runbook.
+
+Migration `0074` bases repeated-teaching carryover on effective outcomes rather than stale legacy statuses, with a fallback for unplanned legacy enrolments. Changes to eligibility update later enrolment projections, history and optimistic revisions. Regression cases cover failed, deferred and abandoned modules, overrides and clearing, stale-draft rejection, retained historical snapshots, separate repeat scores/credits and legacy fallback. All 163 assessment integration tests pass. The synthetic Docker rehearsal through all 74 migrations, concurrency, cutover/rollback and SQL backup restoration passes; no real records were used.
+
+These corrections do not redesign Course, enable manual matching, authorize a deployment or replace final release review.
+
 ## Remaining release gates
 
-- Complete the final review of the entire uncommitted release, including security/RLS boundaries and the final migration inventory. Spot checks and passing tests do not replace that review.
+- Complete final review of the full release and source-review corrections, including security/RLS boundaries and the final migration inventory. Spot checks and passing tests do not replace that review.
 - Confirm the supported staff-browser/device acceptance scope; the user has accepted the tested Students/profile workflows and asked to preserve familiar Course management. Automated WebKit is not a physical Safari/iOS check.
 - Hosting is Vercel; the user believes main auto-deploys, so treat it as enabled. Confirm preview database isolation and the exact production deployment controls before any preview deployment or merge. No checked-in GitHub Actions workflow or run was found; local checks are not hosted CI.
 - Do not deploy this candidate against the old schema, even with both feature flags disabled. `getLmsData` now reads `active_module_enrolments` unconditionally, and legacy photo changes use the new revisioned photo RPCs. The full additive schema is a prerequisite for running this release against live data. If main auto-deploys, defer merge or explicitly pause that deployment integration until the authorized migration/deployment window; do not treat feature flags as schema compatibility.

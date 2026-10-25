@@ -73,6 +73,8 @@ beforeAll(async () => {
   await db.exec(readFileSync("supabase/migrations/0070_enrolment_evidence_retention.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0071_resolve_cancellation_decision_blockers.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0072_assessment_rollout_safe_update.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0073_assessment_source_reversions.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0074_assessment_teaching_carryover.sql", "utf8"));
   await db.exec(`grant usage on schema public, auth to authenticated; grant select on all tables in schema public to authenticated;
     insert into auth.users values ('${adminId}'),('${teacherId}');
     insert into public.staff_profiles(id,full_name,role) values ('${adminId}','Admin','admin'),('${teacherId}','Teacher','teacher');`);
@@ -89,6 +91,85 @@ beforeEach(async () => {
   await db.query("insert into public.enrolments(id,student_id,offering_id) values($1,$2,$3)", [enrolmentId,studentId,offeringId]);
 });
 afterAll(async () => { await db?.close(); });
+
+describe("release review regressions", () => {
+  it("records a source score reversion as a new revision instead of retaining a later pass", async () => {
+    const failed = source(undefined, 30);
+    const passed = { ...failed, score: 70, items: [{ kind: "mcq", score: 70 }], raw_payload: { score: 70 } };
+    await ingest([failed]);
+    await ingest([passed]);
+    expect((await evaluate()).effective_status).toBe("Pass");
+    expect((await ingest([failed])).source_updated).toBe(1);
+    expect(await evaluate()).toMatchObject({ effective_status: "Fail", awarded_credits: 0 });
+    expect((await evaluate()).components.theory).toMatchObject({ score: 30, revision: 3, attempt_count: 1 });
+    expect(await scalar<number>("select count(*)::int value from module_assessment_source_versions where source_id=(select id from module_assessment_source_results where source_key=$1)", [failed.source_key])).toBe(3);
+    expect((await ingest([failed])).unchanged).toBe(1);
+    expect((await evaluate()).components.theory.revision).toBe(3);
+  });
+
+  it.each(["manual replacement", "void", "unmatch"])("preserves %s decisions across source reversions", async decision => {
+    const original = source();
+    await ingest([original]);
+    const attemptId = (await evaluate()).components.theory.id!;
+    if (decision === "manual replacement") {
+      await sourceCommand("CorrectImportedAttempt", original.source_key, { attempt_id: attemptId, items: [{ kind: "mcq", score: 40 }] });
+    } else {
+      await lifecycleCommand("ExcludeAttempt", attemptId, { category: decision === "void" ? "invalid" : "incorrect_ownership" });
+    }
+    await ingest([{ ...original, score: 90, items: [{ kind: "mcq", score: 90 }] }]);
+    expect((await ingest([original])).source_updated).toBe(1);
+    expect((await ingest([original])).unchanged).toBe(1);
+    expect(await scalar<number>("select count(*)::int value from module_assessment_source_versions where source_id=(select id from module_assessment_source_results where source_key=$1)", [original.source_key])).toBe(3);
+    const result = (await evaluate()).components.theory;
+    if (decision === "manual replacement") expect(result).toMatchObject({ id: attemptId, origin: "Manual", score: 40, attempt_count: 1 });
+    else expect(result.id).toBeNull();
+  });
+
+  it.each(["Fail", "Module deferred", "Abandoned"])("carries prior teaching evidence from a new-workflow %s despite legacy planned status", async status => {
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ practical_pass_mark: 50 }); await adopt();
+    await db.query("update enrolments set attendance_days_required_override=1,presentation_required_override=true where id=$1", [enrolmentId]);
+    const session = randomUUID();
+    await db.query("insert into attendance_sessions(id,term_id,session_date,starts_at,ends_at,location) values($1,$2,'2025-03-01','09:00','17:00','Room')", [session,termId]);
+    await db.query("insert into attendance_records(session_id,student_id,status) values($1,$2,'attended')", [session,studentId]);
+    await db.query("insert into presentation_scores(student_id,offering_id,staff_user_id,occurred_on,total_score) values($1,$2,$3,'2025-03-01',70)", [studentId,offeringId,adminId]);
+    await command(score(30));
+    if (status !== "Fail") await command({ type: "SetEnrolmentDisposition", disposition: status });
+    expect((await evaluate()).effective_status).toBe(status);
+    expect(await scalar("select status::text value from enrolments where id=$1", [enrolmentId])).toBe("planned");
+    const repeatTerm = randomUUID();
+    const repeatOffering = randomUUID();
+    const repeatEnrolment = randomUUID();
+    await db.query("insert into terms(id,name,starts_on,ends_on) values($1::uuid,$1::text,'2025-09-01','2025-11-30')", [repeatTerm]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity) values($1,$2,$3,0,20)", [repeatOffering,moduleId,repeatTerm]);
+    await db.query("insert into enrolments(id,student_id,offering_id,attendance_days_required_override,presentation_required_override) values($1,$2,$3,1,true)", [repeatEnrolment,studentId,repeatOffering]);
+    const repeated = await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [repeatEnrolment]);
+    expect(repeated).toMatchObject({ attendance_actual: 1, presentation_pending: false });
+    expect(repeated.effective_indicators).not.toContain("Attendance non-compliance");
+    expect(repeated.effective_indicators).not.toContain("Presentation incomplete");
+    expect(repeated.components.theory.id).toBeNull();
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" });
+    const revoked = await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [repeatEnrolment]);
+    expect(revoked).toMatchObject({ attendance_actual: 0, presentation_pending: true });
+    expect(revoked.revision).toBeGreaterThan(repeated.revision);
+    expect(await scalar("select assessment_projection->'attendance_actual' value from enrolments where id=$1", [repeatEnrolment])).toBe(0);
+    await expect(command({ ...score(70), enrolment_id: repeatEnrolment }, repeated.revision)).rejects.toThrow("changed");
+    await command({ type: "ClearAssessmentOverride", kind: "status" });
+    const restored = await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [repeatEnrolment]);
+    expect(restored).toMatchObject({ attendance_actual: 1, presentation_pending: false });
+    expect(restored.revision).toBeGreaterThan(revoked.revision);
+    expect(await scalar("select projection->'attendance_actual' value from enrolment_assessment_history where enrolment_id=$1 and revision=$2", [repeatEnrolment, revoked.revision])).toBe(0);
+    for (const component of ["theory", "practical"]) {
+      const current = await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [repeatEnrolment]);
+      await command({ ...score(70, component), enrolment_id: repeatEnrolment, sitting_term_id: repeatTerm, sitting_date: "2025-11-15" }, current.revision);
+    }
+    expect(await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [repeatEnrolment])).toMatchObject({ effective_status: "Pass", awarded_credits: 10 });
+    expect((await evaluate()).components.theory.score).toBe(30);
+    await db.query("update enrolments set status='failed',assessment_plan_id=null where id=$1", [enrolmentId]);
+    expect(await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [repeatEnrolment])).toMatchObject({ attendance_actual: 1, presentation_pending: false });
+    await db.query("update enrolments set assessment_plan_id=$2 where id=$1", [enrolmentId, planId]);
+  });
+});
 
 async function financeSnapshot() { return scalar<FinanceSnapshot>("select read_student_finance_workspace($1) value", [studentId]); }
 async function financeInput() {
@@ -1175,8 +1256,8 @@ describe("assessment PostgreSQL commands and evaluator", () => {
     expect((await ingest([changed])).source_updated).toBe(1);
     expect((await evaluate()).components.theory.revision).toBe(2);
     expect((await evaluate()).effective_status).toBe("Fail");
-    expect((await ingest([input])).unchanged).toBe(1);
-    expect((await evaluate()).components.theory.score).toBe(30);
+    expect((await ingest([input])).source_updated).toBe(1);
+    expect((await evaluate()).components.theory.score).toBe(70);
     await lifecycleCommand("ExcludeAttempt", (await evaluate()).components.theory.id!, { category: "incorrect_ownership" });
     expect((await ingest([{...changed,score:90,items:[{kind:"mcq",score:90}]}])).auto_matched).toBe(0);
     expect((await evaluate()).components.theory.id).toBeNull();

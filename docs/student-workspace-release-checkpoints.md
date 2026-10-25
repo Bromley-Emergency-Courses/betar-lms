@@ -14,6 +14,8 @@ The additional local engineering pass covers specialist workflows, Course-owned 
 
 The review application remains in local shadow mode. The separate live-rehearsal project returned to shadow and was stopped with its volumes retained. No production reconciliation, production migration, production pilot, main-branch merge or live deployment has been approved or completed by these checkpoints.
 
+Draft PR #56 now contains the scoped release; unrelated Staff work remains excluded. Source review identified import-reversion and repeated-teaching carryover defects. Follow-up migrations `0073`–`0074` address these with regression tests, preserve administrative decisions/history and invalidate stale later-enrolment drafts. All 163 assessment integration tests and a fresh synthetic Docker migration/backup-restoration rehearsal through `0074` pass. Final review of the corrections and the human/real-data gates remain required; the branch's Vercel auto-deployment guard remains in place.
+
 ## Remaining checkpoints, in order
 
 ### 1. Finish cross-browser and responsive acceptance
