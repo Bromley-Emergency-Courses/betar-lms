@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { componentScoreText, indicatorLabel } from "@/lib/assessment/display";
 import { useEffect, useId, useRef, useState } from "react";
 import { CalendarCheck, ChevronRight, History, LayoutList, Columns3, X } from "lucide-react";
 import type { AssessmentAttempt, AssessmentEvaluation, AssessmentOutcome, AssessmentRevision, AssessmentStatus, ComponentResult } from "@/lib/assessment/types";
@@ -9,9 +10,7 @@ import { AssessmentTaskDialog, type AssessmentTask } from "./assessment-task-dia
 import type { AssessmentDecision, AssessmentSourceEvidence as SourceEvidence } from "@/lib/assessment/types";
 import { AssessmentSourceEvidence } from "./assessment-source-evidence";
 
-export function indicatorLabel(indicator: string) {
-  return indicator.replace("Attendance non-compliance", "Attendance requirement not met").replace("Presentation incomplete", "Presentation not completed").replace("theory:", "Theory · ").replace("practical:", "Practical · ");
-}
+export { indicatorLabel } from "@/lib/assessment/display";
 
 const statusLabels: Record<AssessmentStatus, string> = { Planned: "Not started", "In progress": "In progress", Pass: "Passed", Fail: "Failed", Abandoned: "Abandoned", "Module deferred": "Module deferred", "Assessment deferred": "Assessment deferred" };
 const groups = ["Needs attention", "Arranged / pending", "On hold / closed", "Complete"];
@@ -31,8 +30,7 @@ export function OutcomeBadge({ assessment }: { assessment: AssessmentEvaluation 
 }
 
 function ComponentScore({ result, notRequired = false }: { result?: ComponentResult; notRequired?: boolean }) {
-  if (notRequired) return <span className={styles.muted}>N/A</span>;
-  return <span className={result?.passed === false ? styles.failedScore : styles.score}>{result?.score == null ? "Pending" : `${result.score}%`}</span>;
+  return <span className={notRequired ? styles.muted : result?.passed === false ? styles.failedScore : styles.score}>{componentScoreText(result, notRequired)}</span>;
 }
 
 function dateLabel(value: string) {

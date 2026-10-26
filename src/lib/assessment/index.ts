@@ -99,6 +99,23 @@ export async function readAssessmentWorkspace(studentId?: string) {
   return { outcomes, attempts, sources, plans };
 }
 
+export type AssessmentSummary = Pick<AssessmentOutcome, "enrolment_id" | "student_id" | "student_name" | "student_identifier" | "module_code" | "module_title" | "original_cohort" | "assessment">;
+
+export async function readAssessmentSummaries(enrolmentIds: string[]): Promise<AssessmentSummary[]> {
+  if (!enrolmentIds.length) return [];
+  const client = await assessmentClient();
+  const rows: AssessmentSummary[] = [];
+  const identifiers = [...new Set(enrolmentIds)];
+  for (let offset = 0; offset < identifiers.length; offset += 50) {
+    const { data, error } = await client.from("assessment_outcomes")
+      .select("enrolment_id,student_id,student_name,student_identifier,module_code,module_title,original_cohort,assessment")
+      .in("enrolment_id", identifiers.slice(offset, offset + 50)).order("enrolment_id");
+    if (error) throw new Error(error.message);
+    rows.push(...data as AssessmentSummary[]);
+  }
+  return rows;
+}
+
 export async function readAssessmentRecords(studentId?: string) {
   const outcomes = await readAssessmentTable<AssessmentOutcome>("assessment_outcomes", studentId ? { column: "student_id", value: studentId } : undefined);
   const client = await assessmentClient();

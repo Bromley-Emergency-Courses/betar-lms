@@ -45,15 +45,15 @@ try {
     localSettings();
     const storage = execute("docker", ["ps", "--filter", `name=^supabase_storage_${localProject}$`, "--format", "{{.Names}}"]);
     process.stdout.write(`Verified isolated API 127.0.0.1:56321 and database 127.0.0.1:56322. Storage: ${storage.trim() ? "running" : "not running"}.\n`);
-  } else if (action === "serve" || action === "build") {
+  } else if (action === "serve" || action === "serve-built" || action === "build") {
     const env = localAppEnvironment(localSettings(), mode, port, process.env);
-    process.stdout.write(`${action === "serve" ? "Serving" : "Building"} the synthetic development app in ${mode} mode at http://127.0.0.1:${port}. External Portal and email disabled.\n`);
-    const server = spawn("npm", action === "serve" ? ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(port)] : ["run", "build"], { cwd: root, env, stdio: "inherit" });
+    process.stdout.write(`${action === "build" ? "Building" : "Serving"} the synthetic development app in ${mode} mode at http://127.0.0.1:${port}. External Portal and email disabled.\n`);
+    const server = spawn("npm", action === "build" ? ["run", "build"] : ["run", action === "serve-built" ? "start" : "dev", "--", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: root, env, stdio: "inherit" });
     for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.kill(signal));
     server.on("error", () => { process.stderr.write("Could not start the local application.\n"); process.exitCode = 1; });
     server.on("exit", code => { process.exitCode = code ?? 1; });
   } else {
-    throw new Error("Usage: node scripts/assessment-local.mjs check|start|stop|migrate|serve|build [shadow|live] [3100|3102]");
+    throw new Error("Usage: node scripts/assessment-local.mjs check|start|stop|migrate|serve|serve-built|build [shadow|live] [3100|3102]");
   }
 } catch {
   process.stderr.write("Local assessment command refused or failed. Check Docker, Supabase CLI and the isolated project configuration. No remote fallback is allowed.\n");

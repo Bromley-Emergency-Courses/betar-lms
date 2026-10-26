@@ -118,3 +118,16 @@ _Avoid_: Deleted result
 **Module Deferred**:
 The module's teaching has been postponed. It is distinct from postponing only an assessment.
 _Avoid_: Assessment Deferred
+
+**Presentation**:
+One case presentation or journal club delivered by a student for one Module Enrolment, distinct from another module's presentation even on the same day. Several staff may assess the same Presentation; their separate scores do not represent additional presentations.
+_Avoid_: Presentation Score
+
+**Presentation Score**:
+One assessor's rubric scores, feedback and any manual time-penalty deduction for a Presentation. Only that assessor may revise their submission; a revision does not create another Presentation or an Assessment Attempt.
+
+**Presentation Plan**:
+An intention for a student to present for a particular Module Enrolment on a teaching date. It is not evidence that the Presentation occurred and does not itself plan attendance.
+
+**Attendance Plan**:
+An expectation that a student will attend a teaching session in a term, independently of any Presentation Plan. It is not completed attendance or evidence that the student is currently present.

@@ -1,7 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assessmentPrototypeEnabled, studentWorkspaceEnabled } from "./feature";
+import { assessmentPrototypeEnabled, staffCompanionEnabled, staffCompanionTeachingEnabled, studentWorkspaceEnabled } from "./feature";
 
 afterEach(() => vi.unstubAllEnvs());
+
+describe("staff companion integration gate", () => {
+  it.each([undefined, "false", "true"])("requires all flags and an enabled assessment mode (%s)", companion => {
+    for (const workspace of [undefined, "false", "true"]) {
+      for (const mode of [undefined, "off", "shadow", "live"]) {
+        vi.stubEnv("STAFF_COMPANION_ENABLED", companion);
+        vi.stubEnv("STUDENT_WORKSPACE_ENABLED", workspace);
+        vi.stubEnv("ASSESSMENT_WORKFLOW_MODE", mode);
+        expect(staffCompanionEnabled()).toBe(companion === "true" && workspace === "true" && (mode === "shadow" || mode === "live"));
+        for (const teaching of [undefined, "false", "true"]) {
+          vi.stubEnv("STAFF_COMPANION_TEACHING_ENABLED", teaching);
+          expect(staffCompanionTeachingEnabled()).toBe(teaching === "true" && staffCompanionEnabled());
+        }
+      }
+    }
+  });
+});
 
 describe("student workspace integration gate", () => {
   it.each([

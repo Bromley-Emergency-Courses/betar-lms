@@ -18,6 +18,11 @@ let termId: string;
 let offeringId: string;
 let enrolmentId: string;
 let planId: string;
+const legacyPresentationStudent = randomUUID();
+const legacyPresentationTerm = randomUUID();
+const legacyPresentationOfferings = Array.from({ length: 4 }, () => randomUUID());
+let legacyPresentationRows: unknown;
+let legacyPresentationHistoryCount: number;
 
 async function scalar<Value>(sql: string, parameters: unknown[] = []): Promise<Value> {
   const result = await db.query<{ value: Value }>(sql, parameters);
@@ -75,9 +80,28 @@ beforeAll(async () => {
   await db.exec(readFileSync("supabase/migrations/0072_assessment_rollout_safe_update.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0073_assessment_source_reversions.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0074_assessment_teaching_carryover.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0075_staff_teaching_eligibility.sql", "utf8"));
   await db.exec(`grant usage on schema public, auth to authenticated; grant select on all tables in schema public to authenticated;
     insert into auth.users values ('${adminId}'),('${teacherId}');
     insert into public.staff_profiles(id,full_name,role) values ('${adminId}','Admin','admin'),('${teacherId}','Teacher','teacher');`);
+  await db.query("select set_config('test.actor',$1,false)", [adminId]);
+  await db.query("insert into students(id,temporary_id,first_name,last_name,email,programme,status) values($1::uuid,$1::text,'Legacy','Presentation','legacy@example.test','pgcert','active')", [legacyPresentationStudent]);
+  await db.query("insert into terms(id,name,starts_on,ends_on,status) values($1::uuid,$1::text,'2024-01-01','2024-05-31','closed')", [legacyPresentationTerm]);
+  for (const [index, offering] of legacyPresentationOfferings.entries()) {
+    const legacyModule = randomUUID();
+    await db.query("insert into course_modules(id,code,title,mode) values($1::uuid,$1::text,'Legacy presentation','online')", [legacyModule]);
+    await scalar("select save_module_assessment_plan($1::jsonb,null) value", [JSON.stringify({ module_id: legacyModule, theory_scheme: "mcq", theory_pass_mark: 50, reason: "Reviewed legacy fixture" })]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity) values($1,$2,$3,0,20)", [offering,legacyModule,legacyPresentationTerm]);
+    await db.query("insert into enrolments(student_id,offering_id) values($1,$2)", [legacyPresentationStudent,offering]);
+    for (const assessor of [0,1]) await db.query("insert into presentation_scores(student_id,offering_id,staff_user_id,occurred_on,presentation_type,duration_minutes,scores,total_score,comments) values($1,$2,$3,$4,$5,20,$6,37,'Preserve legacy total')",
+      [legacyPresentationStudent,offering,index===1 || assessor===0 ? adminId : teacherId,index===2 && assessor===1 ? "2024-03-02" : "2024-03-01",index===3 ? null : "case_presentation",JSON.stringify(Object.fromEntries(presentationRubricCriteria.map(criterion => [criterion.id,4])))]);
+  }
+  legacyPresentationRows = await scalar("select jsonb_agg(to_jsonb(score) order by id) value from presentation_scores score where student_id=$1", [legacyPresentationStudent]);
+  legacyPresentationHistoryCount = await scalar<number>("select count(*)::int value from enrolment_assessment_history");
+  try { await db.exec(readFileSync("supabase/migrations/0076_presentation_scoring.sql", "utf8")); }
+  catch (error) { throw new Error(`0076: ${(error as Error).message} at ${(error as { position?: string }).position}`); }
+  expect(await scalar<number>("select count(*)::int value from enrolment_assessment_history")).toBe(legacyPresentationHistoryCount);
+  await db.exec(readFileSync("supabase/migrations/0077_staff_teaching_plans.sql", "utf8"));
 }, 30000);
 
 beforeEach(async () => {
@@ -725,11 +749,359 @@ async function teachingInput(kind = "observation", extra: Record<string, unknown
     ...(kind === "observation" ? { summary: "Observed scan", concern_level: "watch" } : kind === "presentation" ? { presentation_type: "case_presentation", duration_minutes: 20, scores: Object.fromEntries(presentationRubricCriteria.map(criterion => [criterion.id, 4])), comments: "Reviewed presentation" } : {}), ...extra };
 }
 async function saveTeaching(input: Record<string, unknown>) { return scalar<{ id: string; kind: string }>("select create_student_teaching_record($1) value", [JSON.stringify(input)]); }
+async function presentationInput(extra: Record<string, unknown> = {}) {
+  const offering = (await teachingOptions()).presentations!.find(row => row.id === offeringId)!;
+  return { id: randomUUID(), student_id: studentId, offering_id: offeringId, offering_token: offering.token, kind: "presentation",
+    occurred_on: offering.event?.date ?? "2025-03-01", presentation_type: offering.event?.presentationType ?? "case_presentation",
+    duration_minutes: offering.event?.durationMinutes ?? 20, scores: Object.fromEntries(presentationRubricCriteria.map(criterion => [criterion.id,4])), time_penalty: 0, comments: "Presentation feedback", ...extra };
+}
+async function presentationEdit(extra: Record<string, unknown> = {}) {
+  const offering = (await teachingOptions()).presentations!.find(row => row.id === offeringId)!;
+  return { id: offering.ownScore!.id, student_id: studentId, offering_id: offeringId, offering_token: offering.token, kind: "presentation",
+    expected_revision: offering.ownScore!.revision, scores: offering.ownScore!.scores, time_penalty: 0, comments: "Edited feedback", ...extra };
+}
+async function editPresentation(input: Record<string, unknown>) {
+  return scalar("select edit_student_presentation_score($1) value", [JSON.stringify(input)]);
+}
 async function teachingDefinition() {
   const definitionId = randomUUID();
   await db.query("insert into assessment_definitions(id,module_id,name,domains,score_min,score_max) values($1,$2,'Observed skill',$3,0,5)", [definitionId,moduleId,JSON.stringify([{ id: "image", label: "Image quality" }, { id: "interpret", label: "Interpretation" }])]);
   return (await teachingOptions()).definitions.find(row => row.id === definitionId)!;
 }
+
+describe("teacher calendar plans", () => {
+  let sessionId: string;
+  let nextSessionId: string;
+  async function options() { return scalar<import("../teaching-plans").TeachingPlanOptions>("select read_student_teaching_plans($1) value", [studentId]); }
+  async function input(extra: Record<string, unknown> = {}) { return { studentId, offeringId, token: (await options()).token, kind: "attendance", sessionId, fromSessionId: null, expected: true, ...extra }; }
+  async function save(value: Record<string, unknown>) { return scalar("select save_student_teaching_plan($1) value", [JSON.stringify(value)]); }
+  beforeEach(async () => {
+    await db.query("update terms set status='active' where id=$1", [termId]);
+    await db.query("update module_offerings set presentation_required=true where id=$1", [offeringId]);
+    sessionId = randomUUID(); nextSessionId = randomUUID();
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ practical_pass_mark: 50 }); await adopt();
+    for (const session of [sessionId,nextSessionId]) await db.query("insert into attendance_sessions(id,term_id,session_date,starts_at,ends_at,location) values($1,$2,'2099-03-01','09:00','17:00','Room')", [session,termId]);
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+  });
+  it("plans, moves and cancels shared expectations without recording attendance", async () => {
+    await save(await input());
+    expect((await options()).sessions.find(session => session.id === sessionId)?.expected).toBe(true);
+    await save(await input({ sessionId: nextSessionId, fromSessionId: sessionId }));
+    expect((await options()).sessions.find(session => session.id === sessionId)?.expected).toBe(false);
+    await save(await input({ sessionId: nextSessionId, expected: false }));
+    expect(await scalar<number>("select count(*)::int value from attendance_records where student_id=$1", [studentId])).toBe(0);
+    expect(await scalar<number>("select count(*)::int value from expected_attendance where student_id=$1", [studentId])).toBe(0);
+    expect(await scalar<number>("select count(*)::int value from audit_events where entity_id=$1 and action='teaching.plan_saved'", [studentId])).toBe(3);
+  });
+  it("keeps presentation plans separate from expectations and completion", async () => {
+    await save(await input());
+    await save(await input({ kind: "presentation" }));
+    expect((await evaluate()).presentation_pending).toBe(true);
+    expect((await options()).offerings[0].plannedSessionId).toBe(sessionId);
+    await save(await input({ kind: "presentation", sessionId: nextSessionId }));
+    await save(await input({ kind: "presentation", sessionId: null }));
+    expect((await options()).offerings[0]).toMatchObject({ plannedSessionId: null, planRevision: 3 });
+    expect((await options()).sessions.find(session => session.id === sessionId)?.expected).toBe(true);
+    expect(await scalar<number>("select count(*)::int value from presentation_scores where student_id=$1", [studentId])).toBe(0);
+  });
+  it("rejects stale and duplicate retries", async () => {
+    const pending = await input(); await save(pending);
+    await expect(save(pending)).rejects.toThrow("changed");
+    await expect(save(await input())).rejects.toThrow("already saved");
+  });
+  it("rejects stale calendar and administrator expectation changes", async () => {
+    const pending = await input();
+    await db.query("update attendance_sessions set location='Updated room' where id=$1", [sessionId]);
+    await expect(save(pending)).rejects.toThrow("changed");
+    const next = await input();
+    await db.query("insert into expected_attendance(session_id,student_id) values($1,$2)", [sessionId,studentId]);
+    await expect(save(next)).rejects.toThrow("changed");
+  });
+  it("does not clear actual attendance or its expectations", async () => {
+    await save(await input());
+    await db.query("insert into attendance_records(session_id,student_id,status) values($1,$2,'attended')", [sessionId,studentId]);
+    await expect(save(await input({ expected: false }))).rejects.toThrow("Recorded attendance");
+    expect((await options()).sessions.find(session => session.id === sessionId)?.expected).toBe(true);
+  });
+  it.each(["closed term","inactive module","inactive student","passed","deferred","abandoned"])("blocks %s after the draft opens", async state => {
+    const pending = await input();
+    if (state === "closed term") await db.query("update terms set status='closed' where id=$1", [termId]);
+    if (state === "inactive module") await db.query("update course_modules set active=false where id=$1", [moduleId]);
+    if (state === "inactive student") await db.query("update students set status='withdrawn' where id=$1", [studentId]);
+    if (["passed","deferred","abandoned"].includes(state)) {
+      await db.query("select set_config('test.actor',$1,false)", [adminId]);
+      await command(state === "passed" ? { type: "SetAssessmentOverride", kind: "status", value: "Pass" } : { type: "SetEnrolmentDisposition", disposition: state === "deferred" ? "Module deferred" : "Abandoned" });
+    }
+    await expect(save(pending)).rejects.toThrow();
+  });
+  it("allows Fail but blocks a completed presentation plan", async () => {
+    await db.query("select set_config('test.actor',$1,false)", [adminId]); await command(score(30));
+    await save(await input({ kind: "presentation" }));
+    await saveTeaching(await presentationInput());
+    expect((await evaluate()).effective_status).toBe("Fail");
+    expect((await options()).offerings[0].canPresent).toBe(false);
+    await expect(save(await input({ kind: "presentation", sessionId: nextSessionId }))).rejects.toThrow("complete");
+    await save(await input());
+  });
+  it("rejects non-teaching callers and payload smuggling", async () => {
+    const pending = await input();
+    await expect(save({ ...pending, staff_user_id: adminId })).rejects.toThrow("Invalid");
+    await expect(save({ ...pending, kind: null })).rejects.toThrow("Invalid");
+    await expect(save({ ...pending, kind: "presentation", expected: false })).rejects.toThrow("cannot change attendance");
+    await db.query("select set_config('test.actor','',false)");
+    await expect(save(pending)).rejects.toThrow("staff required");
+    await expect(options()).rejects.toThrow("staff required");
+  });
+  it("keeps direct mutation and private helper grants closed", async () => {
+    for (const role of ["anon","authenticated","service_role"]) {
+      expect(await scalar<boolean>("select has_table_privilege($1,'presentation_plans','INSERT') value", [role])).toBe(false);
+      expect(await scalar<boolean>("select has_function_privilege($1,'student_teaching_plan_options(uuid)','EXECUTE') value", [role])).toBe(false);
+    }
+  });
+  it("preserves two independent module plans on one calendar date", async () => {
+    await save(await input({ kind: "presentation" }));
+    const secondModule = randomUUID(), secondOffering = randomUUID(), secondEnrolment = randomUUID();
+    await db.query("select set_config('test.actor',$1,false)", [adminId]);
+    await db.query("insert into course_modules(id,code,title,mode) values($1::uuid,$1::text,'Second teaching module','practical')", [secondModule]);
+    await scalar("select save_module_assessment_plan($1,null) value", [JSON.stringify({ module_id: secondModule, theory_scheme: "mcq", theory_pass_mark: 50, practical_pass_mark: 50, reason: "Reviewed plan" })]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity,presentation_required) values($1,$2,$3,0,10,true)", [secondOffering,secondModule,termId]);
+    await db.query("insert into enrolments(id,student_id,offering_id) values($1,$2,$3)", [secondEnrolment,studentId,secondOffering]);
+    await save(await input({ kind: "presentation", offeringId: secondOffering }));
+    await save(await input({ kind: "presentation", sessionId: null }));
+    expect((await options()).offerings.find(offering => offering.id === secondOffering)?.plannedSessionId).toBe(sessionId);
+  });
+  it("retains ownership and calendar term identity once presentation intent is recorded", async () => {
+    await save(await input({ kind: "presentation" }));
+    await expect(db.query("update enrolments set student_id=$2 where id=$1", [enrolmentId,legacyPresentationStudent])).rejects.toThrow("ownership");
+    await expect(db.query("update attendance_sessions set term_id=$2 where id=$1", [sessionId,legacyPresentationTerm])).rejects.toThrow("Cancel presentation plans");
+    await expect(db.query("update module_offerings set term_id=$2 where id=$1", [offeringId,legacyPresentationTerm])).rejects.toThrow("module and term");
+  });
+  it("rejects past destinations and sessions from a different term", async () => {
+    await db.query("update attendance_sessions set session_date='2020-01-01' where id=$1", [sessionId]);
+    await expect(save(await input())).rejects.toThrow("future teaching date");
+    await db.query("update attendance_sessions set term_id=$2 where id=$1", [nextSessionId,legacyPresentationTerm]);
+    await expect(save(await input({ sessionId: nextSessionId }))).rejects.toThrow("existing date");
+  });
+  it("does not offer another presentation when earlier evidence carries into a repeat enrolment", async () => {
+    await saveTeaching(await presentationInput());
+    await db.query("select set_config('test.actor',$1,false)", [adminId]); await command(score(30));
+    const nextTerm = randomUUID(), nextOffering = randomUUID(), nextEnrolment = randomUUID();
+    await db.query("insert into terms(id,name,starts_on,ends_on,status) values($1::uuid,$1::text,'2025-09-01','2025-12-31','active')", [nextTerm]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity,presentation_required) values($1,$2,$3,0,10,true)", [nextOffering,moduleId,nextTerm]);
+    await db.query("insert into enrolments(id,student_id,offering_id) values($1,$2,$3)", [nextEnrolment,studentId,nextOffering]);
+    expect((await options()).offerings.find(offering => offering.id === nextOffering)?.canPresent).toBe(false);
+  });
+});
+
+describe("presentation scoring foundation", () => {
+  beforeEach(async () => {
+    await db.query("update terms set status='active' where id=$1", [termId]);
+  });
+  it("links only unambiguous legacy groups without changing score values or academic history", async () => {
+    expect(await scalar("select jsonb_agg(to_jsonb(score)-array['event_id','time_penalty','revision'] order by id) value from presentation_scores score where student_id=$1", [legacyPresentationStudent])).toEqual(legacyPresentationRows);
+    expect(await scalar<number>("select count(*)::int value from presentation_scores where student_id=$1 and event_id is not null", [legacyPresentationStudent])).toBe(2);
+    expect(await scalar<number>("select count(distinct event_id)::int value from presentation_scores where student_id=$1", [legacyPresentationStudent])).toBe(1);
+    expect(await scalar<number>("select count(*)::int value from presentation_scores where student_id=$1 and time_penalty=0 and revision=1 and total_score=37", [legacyPresentationStudent])).toBe(8);
+  });
+  it("reports exact rubric-key failures and legacy conflicts without modifying the audited records", async () => {
+    async function report() {
+      const results = await db.exec(readFileSync("supabase/checks/presentation-preflight.sql", "utf8"));
+      return JSON.parse(String(results.find(result => result.rows[0]?.report)!.rows[0].report)) as Record<string, number>;
+    }
+    const before = await report();
+    expect(before.duplicate_author_groups).toBeGreaterThanOrEqual(1);
+    expect(before.conflicting_metadata_groups).toBeGreaterThanOrEqual(1);
+    expect(before.incomplete_metadata_groups).toBeGreaterThanOrEqual(1);
+    expect(before.legacy_total_differences).toBeGreaterThanOrEqual(8);
+    const rubric = Object.fromEntries(presentationRubricCriteria.map(criterion => [criterion.id,4]));
+    delete rubric[presentationRubricCriteria[0].id]; rubric.unknown = 4;
+    await db.query("insert into presentation_scores(student_id,offering_id,staff_user_id,occurred_on,scores,total_score) values($1,$2,$3,'2025-03-01',$4,40)", [studentId,offeringId,adminId,JSON.stringify(rubric)]);
+    const snapshot = await scalar("select jsonb_agg(to_jsonb(score)) value from presentation_scores score where student_id=$1", [studentId]);
+    expect((await report()).invalid_rubrics).toBe(before.invalid_rubrics+1);
+    expect(await scalar("select jsonb_agg(to_jsonb(score)) value from presentation_scores score where student_id=$1", [studentId])).toEqual(snapshot);
+  });
+  it("keeps ambiguous legacy evidence readable but blocks ordinary scoring instead of choosing or merging it", async () => {
+    await db.query("update terms set status='active' where id=$1", [legacyPresentationTerm]);
+    try {
+      const options = await scalar<TeachingOptions>("select read_student_teaching_options($1) value", [legacyPresentationStudent]);
+      expect(options.presentations!.map(row => row.id)).toEqual([legacyPresentationOfferings[0]]);
+      expect(options.offerings).toHaveLength(4);
+      const current = options.presentations![0];
+      expect(current.ownScore).toMatchObject({ requiresReview: true, totalScore: 37 });
+      await expect(editPresentation({ id: current.ownScore!.id, kind: "presentation", student_id: legacyPresentationStudent,
+        offering_id: current.id, offering_token: current.token, expected_revision: 1, scores: current.ownScore!.scores,
+        time_penalty: 0, comments: "Comments-only edit must not change a legacy total" })).rejects.toThrow("needs reconciliation");
+      await expect(saveTeaching({ ...await presentationInput(), student_id: legacyPresentationStudent, offering_id: legacyPresentationOfferings[1] })).rejects.toThrow("unreconciled");
+    } finally { await db.query("update terms set status='closed' where id=$1", [legacyPresentationTerm]); }
+  });
+  it("retains one event and separate assessor scores after the first submission makes the enrolment Pass", async () => {
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ practical_pass_mark: 50 }); await adopt();
+    await db.query("update enrolments set attendance_days_required_override=0 where id=$1", [enrolmentId]);
+    await db.query("update module_offerings set presentation_required=true where id=$1", [offeringId]);
+    await command(score(70)); await command(score(70,"practical"));
+    const first = await saveTeaching(await presentationInput({ time_penalty: 3 }));
+    expect((await evaluate()).effective_status).toBe("Pass");
+    expect((await teachingOptions()).offerings).toEqual([]);
+    const firstRow = await scalar("select to_jsonb(score) value from presentation_scores score where id=$1", [first.id]);
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    expect((await teachingOptions()).presentations![0].ownScore).toBeNull();
+    const second = await saveTeaching(await presentationInput({ time_penalty: 40 }));
+    expect(await scalar("select total_score value from presentation_scores where id=$1", [second.id])).toBe(0);
+    expect(await scalar<number>("select count(distinct event_id)::int value from presentation_scores where student_id=$1", [studentId])).toBe(1);
+    expect(await scalar("select to_jsonb(score) value from presentation_scores score where id=$1", [first.id])).toEqual(firstRow);
+    expect((await evaluate()).components.theory).toMatchObject({ score: 70, attempt_count: 1 });
+    const edit = await presentationEdit({ time_penalty: 5 });
+    expect(await editPresentation(edit)).toMatchObject({ id: second.id, revision: 2 });
+    expect(await scalar("select total_score value from presentation_scores where id=$1", [second.id])).toBe(35);
+    await expect(editPresentation(edit)).rejects.toThrow("already saved");
+    expect(await scalar("select metadata->'before'->>'total_score' value from audit_events where action='teaching.presentation_edited' and entity_id=$1", [second.id])).toBe("0");
+  });
+  it("returns the original author submission for duplicate and lost-response retries without a second audit or score", async () => {
+    const draft = await presentationInput();
+    const saved = await saveTeaching(draft);
+    expect(await saveTeaching(draft)).toMatchObject({ id: saved.id, status: "duplicate" });
+    expect(await saveTeaching(await presentationInput())).toMatchObject({ id: saved.id, status: "duplicate" });
+    expect(await scalar<number>("select count(*)::int value from presentation_scores where student_id=$1", [studentId])).toBe(1);
+    expect(await scalar<number>("select count(*)::int value from audit_events where entity_id=$1", [saved.id])).toBe(1);
+  });
+  it("rejects an administrator editing another author's submission and does not disclose peer drafts in options", async () => {
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await saveTeaching(await presentationInput());
+    const edit = await presentationEdit();
+    await db.query("select set_config('test.actor',$1,false)", [adminId]);
+    expect((await teachingOptions()).presentations![0].ownScore).toBeNull();
+    await expect(editPresentation(edit)).rejects.toThrow("original author");
+  });
+  it("rejects a concurrent first-scorer snapshot and metadata changes without creating another event", async () => {
+    const stale = await presentationInput();
+    await saveTeaching(await presentationInput());
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await expect(saveTeaching(stale)).rejects.toThrow("details changed");
+    for (const extra of [{ occurred_on: "2025-03-02" }, { presentation_type: "journal_club" }, { duration_minutes: 21 }]) {
+      await expect(saveTeaching(await presentationInput(extra))).rejects.toThrow("existing presentation date");
+    }
+    expect(await scalar<number>("select count(*)::int value from presentation_events where enrolment_id=$1", [enrolmentId])).toBe(1);
+  });
+  it("never widens Pass eligibility for new events, encounters or formative records", async () => {
+    const draft = await presentationInput();
+    const observation = await teachingInput();
+    await command(score(70));
+    expect((await evaluate()).effective_status).toBe("Pass");
+    expect((await teachingOptions()).presentations).toEqual([]);
+    await expect(saveTeaching(draft)).rejects.toThrow("unavailable");
+    await expect(saveTeaching(observation)).rejects.toThrow("current active teaching term");
+  });
+  it("keeps same-day presentations for two modules separate", async () => {
+    const first = await saveTeaching(await presentationInput());
+    const secondModule = randomUUID(), secondOffering = randomUUID();
+    await db.query("insert into course_modules(id,code,title,mode) values($1::uuid,$1::text,'Second module','online')", [secondModule]);
+    await scalar("select save_module_assessment_plan($1::jsonb,null) value", [JSON.stringify({ module_id: secondModule, theory_scheme: "mcq", theory_pass_mark: 50, reason: "Reviewed second module" })]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity) values($1,$2,$3,0,20)", [secondOffering,secondModule,termId]);
+    await db.query("insert into enrolments(student_id,offering_id) values($1,$2)", [studentId,secondOffering]);
+    const secondOption = (await teachingOptions()).presentations!.find(row => row.id===secondOffering)!;
+    const second = await saveTeaching({ ...await presentationInput(), offering_id: secondOffering, offering_token: secondOption.token });
+    expect(first.id).not.toBe(second.id);
+    expect(await scalar<number>("select count(distinct event_id)::int value from presentation_scores where student_id=$1 and occurred_on='2025-03-01'", [studentId])).toBe(2);
+  });
+  it("does not create an event for accepted carryover or unlock the closed original event", async () => {
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ practical_pass_mark: 50 }); await adopt();
+    await db.query("update module_offerings set presentation_required=true where id=$1", [offeringId]);
+    await command(score(30));
+    await saveTeaching(await presentationInput());
+    const originalEdit = await presentationEdit();
+    await db.query("update terms set status='closed' where id=$1", [termId]);
+    const laterTerm = randomUUID(), laterOffering = randomUUID(), laterEnrolment = randomUUID();
+    await db.query("insert into terms(id,name,starts_on,ends_on,status) values($1::uuid,$1::text,'2026-01-01','2026-06-01','active')", [laterTerm]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity,presentation_required) values($1,$2,$3,0,20,true)", [laterOffering,moduleId,laterTerm]);
+    await db.query("insert into enrolments(id,student_id,offering_id) values($1,$2,$3)", [laterEnrolment,studentId,laterOffering]);
+    expect(await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [laterEnrolment])).toMatchObject({ presentation_pending: false });
+    expect((await teachingOptions()).presentations).toEqual([]);
+    await expect(editPresentation(originalEdit)).rejects.toThrow("unavailable");
+    await expect(saveTeaching({ ...originalEdit, id: randomUUID(), offering_id: laterOffering, expected_revision: undefined, occurred_on: "2026-03-01", duration_minutes: 20, presentation_type: "case_presentation" })).rejects.toThrow("unavailable");
+  });
+  it.each(["Abandoned","Module deferred","Assessment deferred"])("keeps existing presentation edits blocked for %s even with an event", async status => {
+    await saveTeaching(await presentationInput());
+    const edit = await presentationEdit();
+    await command({ type: "SetAssessmentOverride", kind: "status", value: status });
+    expect((await teachingOptions()).presentations).toEqual([]);
+    await expect(editPresentation(edit)).rejects.toThrow("unavailable");
+  });
+  it("does not let a Pass override bypass an explicit disposition or assessment deferral", async () => {
+    await saveTeaching(await presentationInput());
+    const edit = await presentationEdit();
+    await command({ type: "SetEnrolmentDisposition", disposition: "Abandoned" });
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" });
+    await expect(editPresentation(edit)).rejects.toThrow("unavailable");
+    await command({ type: "ClearEnrolmentDisposition" });
+    await command({ type: "DeferAssessment", component: "theory", note: "Assessment postponed" });
+    await expect(editPresentation(edit)).rejects.toThrow("unavailable");
+  });
+  it("rejects cancelled owning enrolments without deleting their presentation evidence", async () => {
+    const saved = await saveTeaching(await presentationInput());
+    const edit = await presentationEdit();
+    await db.query("insert into enrolment_cancellations(enrolment_id,actor_id,reason,before_record) select id,$2,'Synthetic cancellation',to_jsonb(enrolment) from enrolments enrolment where id=$1", [enrolmentId,adminId]);
+    expect((await teachingOptions()).presentations).toEqual([]);
+    await expect(editPresentation(edit)).rejects.toThrow("unavailable");
+    expect(await scalar("select total_score value from presentation_scores where id=$1", [saved.id])).toBe(40);
+  });
+  it("enforces immutable shared metadata and event/author uniqueness at the table boundary", async () => {
+    const saved = await saveTeaching(await presentationInput());
+    await expect(db.query("update presentation_scores set occurred_on='2025-03-02' where id=$1", [saved.id])).rejects.toThrow("metadata must match");
+    await expect(db.query("update presentation_scores set staff_user_id=$2 where id=$1", [saved.id,teacherId])).rejects.toThrow("ownership");
+    await expect(db.query("update presentation_events set duration_minutes=21 where enrolment_id=$1", [enrolmentId])).rejects.toThrow();
+    await expect(db.query("update enrolments set student_id=$2 where id=$1", [enrolmentId,legacyPresentationStudent])).rejects.toThrow("cannot be reassigned");
+    await expect(db.query("update module_offerings set term_id=$2 where id=$1", [offeringId,legacyPresentationTerm])).rejects.toThrow("cannot be reassigned");
+    await expect(db.query("insert into presentation_scores(student_id,offering_id,staff_user_id,event_id,occurred_on,presentation_type,duration_minutes,scores,total_score) select student_id,offering_id,staff_user_id,event_id,occurred_on,presentation_type,duration_minutes,scores,total_score from presentation_scores where id=$1", [saved.id])).rejects.toThrow("presentation_scores_event_author");
+  });
+  it.each([null,"",-1,1.5,41,"3",true])("rejects invalid time penalties without partial evidence: %j", async time_penalty => {
+    await expect(saveTeaching(await presentationInput({ time_penalty }))).rejects.toThrow("Time penalty");
+    expect(await scalar<number>("select count(*)::int value from presentation_events where enrolment_id=$1", [enrolmentId])).toBe(0);
+  });
+  it.each([{ scores: {} },{ scores: { wrong: 4 } },{ total_score: 50 },{ staff_user_id: teacherId }])("rejects malformed or forged presentation commands: %j", async extra => {
+    await expect(saveTeaching(await presentationInput(extra))).rejects.toThrow();
+  });
+  it("does not allow shared metadata edits or missing revision/penalty fields", async () => {
+    await saveTeaching(await presentationInput());
+    for (const extra of [{ occurred_on: "2025-03-02" },{ expected_revision: null },{ time_penalty: null },{ event_id: randomUUID() }]) {
+      await expect(editPresentation(await presentationEdit(extra))).rejects.toThrow();
+    }
+  });
+  it("invalidates open edits on term closure, inactive module or assessment changes", async () => {
+    await saveTeaching(await presentationInput());
+    const edit = await presentationEdit();
+    await db.query("update terms set status='closed' where id=$1", [termId]);
+    await expect(editPresentation(edit)).rejects.toThrow("unavailable");
+    await db.query("update terms set status='active' where id=$1", [termId]);
+    await db.query("update course_modules set active=false where id=$1", [moduleId]);
+    await expect(editPresentation(edit)).rejects.toThrow("unavailable");
+    await db.query("update course_modules set active=true where id=$1", [moduleId]);
+    await command(score(30));
+    await expect(editPresentation(edit)).rejects.toThrow("details changed");
+  });
+  it("rolls back score edits if auditing fails", async () => {
+    await saveTeaching(await presentationInput());
+    const edit = await presentationEdit({ time_penalty: 10 });
+    await db.exec("create function fail_presentation_audit() returns trigger language plpgsql as $$ begin raise exception 'Audit unavailable'; end; $$; create trigger fail_presentation_audit before insert on audit_events for each row execute function fail_presentation_audit();");
+    try { await expect(editPresentation(edit)).rejects.toThrow("Audit unavailable"); }
+    finally { await db.exec("drop trigger fail_presentation_audit on audit_events; drop function fail_presentation_audit();"); }
+    expect((await teachingOptions()).presentations![0].ownScore).toMatchObject({ revision: 1, timePenalty: 0, totalScore: 40 });
+  });
+  it("keeps private helpers, event mutations and score table writes inaccessible", async () => {
+    for (const signature of ["guard_presentation_owner()","presentation_rubric_subtotal(jsonb)","save_student_presentation(jsonb,boolean)","student_presentation_offering(uuid,uuid)","read_student_teaching_options_v2(uuid)","create_student_teaching_record_v2(jsonb)"]) {
+      expect(await scalar<boolean>("select has_function_privilege('authenticated',$1,'execute') value", [signature])).toBe(false);
+    }
+    for (const table of ["presentation_scores","presentation_events"]) for (const privilege of ["INSERT","UPDATE","DELETE"]) {
+      expect(await scalar<boolean>("select has_table_privilege('authenticated',$1,$2) value", [table,privilege])).toBe(false);
+    }
+    const draft = await presentationInput();
+    await db.query("select set_config('test.actor','',false)");
+    await expect(saveTeaching(draft)).rejects.toThrow("Active teaching staff");
+    await expect(editPresentation({ ...draft, expected_revision: 1 })).rejects.toThrow("Active teaching staff");
+  });
+});
 
 describe("student teaching workspace", () => {
   beforeEach(async () => {
@@ -817,6 +1189,7 @@ describe("student teaching workspace", () => {
     finally { await db.exec("drop trigger fail_teaching_audit on audit_events; drop function fail_teaching_audit();"); }
     expect(await evaluate()).toEqual(before);
     expect(await scalar<number>("select count(*)::int value from presentation_scores where student_id=$1", [studentId])).toBe(0);
+    expect(await scalar<number>("select count(*)::int value from presentation_events where enrolment_id=$1", [enrolmentId])).toBe(0);
   });
   it("rejects reception, anonymous and inactive teachers, and keeps helpers private", async () => {
     const input = await teachingInput();
@@ -845,6 +1218,73 @@ describe("student teaching workspace", () => {
     await expect(saveTeaching(input)).rejects.toThrow("current active teaching term");
     await db.query("update terms set status='active' where id=$1", [termId]);
     await expect(saveTeaching(await teachingInput("observation", { occurred_on: "infinity" }))).rejects.toThrow("calendar date");
+  });
+  it("allows a current failure but invalidates teaching drafts when academic evidence changes", async () => {
+    const draft = await teachingInput();
+    await command(score(20));
+    expect((await teachingOptions()).offerings.map(offering => offering.id)).toEqual([offeringId]);
+    await expect(saveTeaching(draft)).rejects.toThrow("details changed");
+    await saveTeaching(await teachingInput());
+    expect((await evaluate()).effective_status).toBe("Fail");
+  });
+  it.each(["Pass", "Abandoned", "Module deferred", "Assessment deferred"])("blocks %s enrolments at both options and save boundaries", async status => {
+    const draft = await teachingInput();
+    await command({ type: "SetAssessmentOverride", kind: "status", value: status });
+    expect((await teachingOptions()).offerings).toEqual([]);
+    await expect(saveTeaching(draft)).rejects.toThrow("active student");
+  });
+  it("does not let an outcome override reopen an explicit disposition or assessment deferral", async () => {
+    await command({ type: "SetEnrolmentDisposition", disposition: "Abandoned" });
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "In progress" });
+    expect((await teachingOptions()).offerings).toEqual([]);
+    await command({ type: "ClearEnrolmentDisposition" });
+    await command({ type: "DeferAssessment", component: "theory", note: "Awaiting later assessment" });
+    expect((await teachingOptions()).offerings).toEqual([]);
+  });
+  it("blocks inactive catalogue modules without removing historical teaching records", async () => {
+    const saved = await saveTeaching(await teachingInput());
+    const draft = await teachingInput();
+    await db.query("update course_modules set active=false where id=$1", [moduleId]);
+    expect((await teachingOptions()).offerings).toEqual([]);
+    await expect(saveTeaching(draft)).rejects.toThrow("active student");
+    expect(await scalar("select summary value from encounter_logs where id=$1", [saved.id])).toBe("Observed scan");
+  });
+  it("fails closed for an unreviewed assessment plan", async () => {
+    const draft = await teachingInput();
+    await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+    try {
+      expect((await teachingOptions()).offerings).toEqual([]);
+      await expect(saveTeaching(draft)).rejects.toThrow("active student");
+    } finally { await db.query("update enrolments set assessment_plan_id=$2 where id=$1", [enrolmentId,planId]); }
+  });
+  it("excludes a cancelled-in-error enrolment and rejects its already-open draft", async () => {
+    const draft = await teachingInput();
+    await db.query("insert into enrolment_cancellations(enrolment_id,actor_id,reason,before_record) select id,$2,'Synthetic mistaken enrolment',to_jsonb(enrolment) from enrolments enrolment where id=$1", [enrolmentId,adminId]);
+    expect((await teachingOptions()).offerings).toEqual([]);
+    await expect(saveTeaching(draft)).rejects.toThrow("active student");
+  });
+  it("considers each active term rather than silently picking the newest one", async () => {
+    const laterTerm = randomUUID(), laterOffering = randomUUID();
+    await db.query("insert into terms(id,name,starts_on,ends_on,status) values($1::uuid,$1::text,'2026-01-01','2026-06-01','active')", [laterTerm]);
+    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity) values($1,$2,$3,0,20)", [laterOffering,moduleId,laterTerm]);
+    await db.query("insert into enrolments(student_id,offering_id) values($1,$2)", [studentId,laterOffering]);
+    expect((await teachingOptions()).offerings.map(offering => offering.id).sort()).toEqual([offeringId,laterOffering].sort());
+  });
+  it("denies authenticated direct teaching mutations, retaining only reads and the guarded command", async () => {
+    for (const table of ["encounter_logs", "assessment_attempts", "presentation_scores"]) {
+      for (const privilege of ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "TRIGGER", "REFERENCES"]) {
+        expect(await scalar<boolean>("select has_table_privilege('authenticated',$1,$2) value", [table,privilege])).toBe(false);
+      }
+      expect(await scalar<boolean>("select has_table_privilege('authenticated',$1,'SELECT') value", [table])).toBe(true);
+    }
+    const input = await teachingInput();
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await db.exec("set role authenticated");
+    try {
+      await expect(db.query("insert into encounter_logs(student_id,offering_id,staff_user_id,occurred_on,summary,concern_level) values($1,$2,$3,'2025-03-01','Forged direct insert','none')", [studentId,offeringId,adminId])).rejects.toThrow("permission denied");
+      const saved = await saveTeaching(input);
+      expect(await scalar("select staff_user_id value from encounter_logs where id=$1", [saved.id])).toBe(teacherId);
+    } finally { await db.exec("reset role"); }
   });
 });
 

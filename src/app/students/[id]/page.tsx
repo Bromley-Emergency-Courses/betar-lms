@@ -8,6 +8,7 @@ import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
 import { StudentProfilePhoto } from "@/components/student-profile-photo";
 import { StudentWorkspace } from "@/components/student-workspace";
+import { loadWorkspaceTeaching } from "@/app/students/teaching-actions";
 import { buildStudentWorkspaceData } from "@/lib/student-workspace";
 import { EnrolmentAssessments } from "@/components/enrolment-assessments";
 import { readStudentAttendance } from "@/lib/student-attendance-store";
@@ -158,8 +159,16 @@ export default async function StudentProfilePage({
   if (studentWorkspaceEnabled() && !prototype && view !== "legacy" && !editMode) {
     const [records, attendance] = await Promise.all([readAssessmentRecords(student.id), readStudentAttendance(student.id)]);
     const canFinance = can(profile.role, "manage_finance");
+    const workspaceData = buildStudentWorkspaceData(data, student.id, canFinance);
+    if (can(profile.role, "record_teaching")) {
+      const teachingOptions = await loadWorkspaceTeaching(student.id);
+      if (teachingOptions.ok) for (const record of workspaceData.teaching) {
+        const own = teachingOptions.options.presentations?.find(offering => offering.ownScore?.id === record.id && !offering.ownScore.requiresReview);
+        if (own) record.editableOfferingId = own.id;
+      }
+    }
     return <AppShell title="Student workspace" workspace hideTitle>
-      <StudentWorkspace student={student} data={{ ...buildStudentWorkspaceData(data, student.id, canFinance), attendance }} {...records} canEdit={profile.role === "admin"} canFinance={canFinance} canTeach={can(profile.role, "record_teaching")} returnTo={returnTo} />
+      <StudentWorkspace student={student} data={{ ...workspaceData, attendance }} {...records} canEdit={profile.role === "admin"} canFinance={canFinance} canTeach={can(profile.role, "record_teaching")} returnTo={returnTo} />
     </AppShell>;
   }
   if (prototype) {

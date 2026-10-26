@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { studentWorkspaceEnabled } from "@/lib/assessment/feature";
 import { createSupabaseServerClient } from "@/lib/supabase";
-import { teachingCommandSchema, type TeachingOptions } from "@/lib/student-teaching";
+import { presentationEditCommandSchema, teachingCommandSchema, type TeachingOptions } from "@/lib/student-teaching";
 
 export async function loadWorkspaceTeaching(studentId: string): Promise<{ ok: true; options: TeachingOptions } | { ok: false; error: string }> {
   await requirePermission("record_teaching");
@@ -18,16 +18,31 @@ export async function loadWorkspaceTeaching(studentId: string): Promise<{ ok: tr
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Teaching options could not be loaded." }; }
 }
 
-export async function saveWorkspaceTeaching(input: unknown): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+export async function saveWorkspaceTeaching(input: unknown): Promise<{ ok: true; message: string } | { ok: false; error: string; existingScoreId?: string }> {
   await requirePermission("record_teaching");
   if (!studentWorkspaceEnabled()) return { ok: false, error: "The student workspace is disabled." };
   const parsed = teachingCommandSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map(issue => issue.message).join(" ") };
   try {
     const client = await createSupabaseServerClient();
-    const { error } = await client.rpc("create_student_teaching_record", { command: parsed.data });
+    const { data, error } = await client.rpc("create_student_teaching_record", { command: parsed.data });
     if (error) throw new Error(error.message);
+    if (data?.status === "duplicate") return { ok: false, error: "You have already scored this presentation. Edit your existing submission instead.", existingScoreId: data.id };
     revalidatePath("/", "layout");
     return { ok: true, message: "Teaching record saved. Relevant module outcomes have been recalculated; exam scores and exceptional decisions are unchanged." };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "The save could not be confirmed. Review the timeline before retrying." }; }
+}
+
+export async function editWorkspacePresentation(input: unknown): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  await requirePermission("record_teaching");
+  if (!studentWorkspaceEnabled()) return { ok: false, error: "The student workspace is disabled." };
+  const parsed = presentationEditCommandSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues.map(issue => issue.message).join(" ") };
+  try {
+    const client = await createSupabaseServerClient();
+    const { error } = await client.rpc("edit_student_presentation_score", { command: parsed.data });
+    if (error) throw new Error(error.message);
+    revalidatePath("/", "layout");
+    return { ok: true, message: "Your presentation score was updated. Shared presentation details and other assessors’ submissions are unchanged." };
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "The edit could not be confirmed. Review your existing submission before retrying." }; }
 }

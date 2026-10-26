@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadWorkspaceTeaching, saveWorkspaceTeaching } from "@/app/students/teaching-actions";
+import { editWorkspacePresentation, loadWorkspaceTeaching, saveWorkspaceTeaching } from "@/app/students/teaching-actions";
 import { requirePermission } from "@/lib/auth";
 import { studentWorkspaceEnabled } from "@/lib/assessment/feature";
 import { createSupabaseServerClient } from "@/lib/supabase";
@@ -16,6 +16,8 @@ const base = { id: "49000000-0000-4000-8000-000000000002", student_id: student, 
 const observation = { ...base, kind: "observation", summary: "Reviewed scan", concern_level: "watch" };
 const formative = { ...base, kind: "formative", definition_id: base.id, definition_token: "b".repeat(32), assessed_item_ids: ["image"], overall_score: 0, comments: null };
 const presentation = { ...base, kind: "presentation", presentation_type: "journal_club", duration_minutes: 15, scores: Object.fromEntries(presentationRubricCriteria.map(criterion => [criterion.id, 4])), comments: "Feedback" };
+const presentationEdit = { id: base.id, student_id: student, offering_id: base.offering_id, offering_token: base.offering_token,
+  kind: "presentation", expected_revision: 1, scores: presentation.scores, time_penalty: 0, comments: "Reviewed feedback" };
 beforeEach(() => {
   vi.resetAllMocks(); vi.mocked(studentWorkspaceEnabled).mockReturnValue(true);
   vi.mocked(createSupabaseServerClient).mockResolvedValue({ rpc } as unknown as Awaited<ReturnType<typeof createSupabaseServerClient>>);
@@ -50,5 +52,38 @@ describe("student teaching actions", () => {
     rpc.mockResolvedValue({ error: { message: "Formative assessment configuration changed" } });
     expect(await saveWorkspaceTeaching(formative)).toEqual({ ok: false, error: "Formative assessment configuration changed" });
     expect(rpc).toHaveBeenCalledTimes(1); expect(revalidatePath).not.toHaveBeenCalled();
+  });
+  it.each([0,3,40])("accepts a valid presentation penalty %s without supplying a final total", async time_penalty => {
+    expect(await saveWorkspaceTeaching({ ...presentation, time_penalty })).toMatchObject({ ok: true });
+    expect(rpc).toHaveBeenCalledWith("create_student_teaching_record", { command: { ...presentation, time_penalty } });
+  });
+  it.each([null,"",-1,1.5,41,"3",true])("rejects invalid presentation deductions on creates and edits: %j", async time_penalty => {
+    expect(await saveWorkspaceTeaching({ ...presentation, time_penalty })).toMatchObject({ ok: false });
+    expect(await editWorkspacePresentation({ ...presentationEdit, time_penalty })).toMatchObject({ ok: false });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("directs a duplicate author to the existing submission rather than reporting another saved record", async () => {
+    rpc.mockResolvedValue({ data: { status: "duplicate", id: base.id }, error: null });
+    expect(await saveWorkspaceTeaching(presentation)).toEqual({ ok: false, existingScoreId: base.id, error: "You have already scored this presentation. Edit your existing submission instead." });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+  it("gates edits, validates immutable fields, and uses the guarded revision-aware edit RPC", async () => {
+    vi.mocked(requirePermission).mockRejectedValueOnce(new Error("Denied"));
+    await expect(editWorkspacePresentation(presentationEdit)).rejects.toThrow("Denied");
+    vi.mocked(studentWorkspaceEnabled).mockReturnValueOnce(false);
+    expect(await editWorkspacePresentation(presentationEdit)).toMatchObject({ ok: false });
+    for (const extra of [{ staff_user_id: student },{ occurred_on: "2025-03-02" },{ duration_minutes: 25 },{ total_score: 40 },{ expected_revision: undefined },{ time_penalty: undefined }]) {
+      expect(await editWorkspacePresentation({ ...presentationEdit, ...extra })).toMatchObject({ ok: false });
+    }
+    expect(rpc).not.toHaveBeenCalled();
+    expect(await editWorkspacePresentation(presentationEdit)).toMatchObject({ ok: true });
+    expect(rpc).toHaveBeenCalledWith("edit_student_presentation_score", { command: presentationEdit });
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+  it("retains edit failures without retries or success revalidation", async () => {
+    rpc.mockResolvedValue({ error: { message: "This presentation score changed" } });
+    expect(await editWorkspacePresentation(presentationEdit)).toEqual({ ok: false, error: "This presentation score changed" });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

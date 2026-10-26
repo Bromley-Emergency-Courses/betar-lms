@@ -6,6 +6,8 @@ Subsequent authorization: the user approved the scoped commit and PR, without me
 
 ## Candidate boundary
 
+Companion packaging update (2026-10-26): after functional/device review, the user authorized committing and pushing the staff companion into the same draft PR, and explicitly reiterated that the student directory/profile changes remain part of this branch. The exclusions below describe the earlier student-only candidate, not the newly authorized combined candidate. Retain the existing student/assessment commits and add the companion/shared integration, its tests/docs and migrations 0075–0077 on top. The current Staff route imports the development-only prototype, so include its source dependency; production cannot activate it with a variant parameter. Credentials and private/generated evidence remain excluded. This authorization does not permit merging, deploying or changing the branch deployment guard.
+
 The original candidate was assembled from a mixed working tree at the main-branch base. The scoped implementation is now committed as `8cd4b88` in draft PR #56. Review subsequent fixes together with the full branch diff against `origin/main`. Do not use `git add -A`: unrelated Staff work remains local.
 
 Include:

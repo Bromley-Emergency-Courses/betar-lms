@@ -113,6 +113,9 @@
 .taskFields label, .taskField { display: grid; gap: 8px; font-size: 13px; }
 .taskFields input, .taskFields select, .taskFields textarea { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #d6e1d1; border-radius: 6px; font: inherit; color: #2c4034; background: white; }
 .taskFields textarea { min-height: 90px; resize: vertical; }
+.teachingDialog .taskFields input:not([type="checkbox"]), .teachingDialog .taskFields select, .teachingDialog .taskFields textarea { font-size: 16px; min-height: 44px; }
+.teachingDialog .taskFields select { height: 44px; }
+.teachingDialog button, .teachingDialog .confirmation { min-height: 44px; }
 .profileGroup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .profileGroup legend { font-weight: 700; padding: 0 0 14px; }
 @media (max-width: 600px) { .profileGroup { grid-template-columns: minmax(0, 1fr); } }

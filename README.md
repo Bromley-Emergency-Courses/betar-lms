@@ -45,6 +45,8 @@ Assessment workflow setup, local Docker rehearsal and rollout gates are document
 
 The isolated student-workspace integration checkpoint, saved assessment actions, guarded launcher and browser checks are documented in [docs/student-workspace-development.md](docs/student-workspace-development.md). The broader workspace integration and production acceptance remain incomplete.
 
+The default-off staff companion and its phone/tablet validation are documented in [docs/staff-companion-development.md](docs/staff-companion-development.md). It reuses assessment/student-workspace data; teaching, author-owned presentation editing, manual penalties and calendar planning share guarded commands behind a separate default-off teaching flag. Additive migrations 0075–0077 and compatible readers/actions must deploy together. Production rollout remains separately gated.
+
 ```bash
 npm run lint
 npm run test

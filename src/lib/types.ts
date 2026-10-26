@@ -259,6 +259,7 @@ export interface PresentationScore {
   durationMinutes?: number;
   scores: Record<string, number>;
   totalScore: number;
+  timePenalty?: number;
   comments?: string;
 }
 

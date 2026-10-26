@@ -46,8 +46,9 @@ describe("student workspace saved records", () => {
     expect(record?.details).toEqual(expect.arrayContaining([
       { label: "Type", value: "case presentation" },
       { label: "Duration", value: "20 minutes" },
-      { label: "Total score", value: "42" }
+      { label: "Recorded total", value: "42/50" },
+      { label: "Time penalty", value: "0 points" }
     ]));
-    expect(record?.details).toHaveLength(3 + Object.keys(data.presentationScores[0].scores).length);
+    expect(record?.details).toHaveLength(5 + Object.keys(data.presentationScores[0].scores).length);
   });
 });

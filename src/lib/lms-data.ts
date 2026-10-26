@@ -208,6 +208,7 @@ function mapPresentation(row: DbRow): PresentationScore {
     durationMinutes: numberValue(row.duration_minutes),
     scores: (row.scores ?? {}) as Record<string, number>,
     totalScore: Number(row.total_score),
+    timePenalty: numberValue(row.time_penalty),
     comments: optionalString(row.comments)
   };
 }

@@ -33,6 +33,7 @@ import { presentationRubricCriteria } from "@/lib/presentation-rubric";
 import { sendPortalMagicLinkEmail } from "@/lib/portal-email";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
 import { saveStudentPhotoChange } from "@/lib/student-photo-service";
+import { saveLegacyTeaching } from "@/lib/student-teaching-legacy";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -2288,7 +2289,7 @@ function todayIsoDate(): string {
 }
 
 export async function createEncounterLog(formData: FormData) {
-  const profile = await requirePermission("record_teaching");
+  await requirePermission("record_teaching");
   const parsed = z
     .object({
       student_id: z.string().uuid(),
@@ -2305,20 +2306,13 @@ export async function createEncounterLog(formData: FormData) {
       concern_level: value(formData, "concern_level") || "none"
     });
 
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("encounter_logs").insert({
-    ...parsed,
-    staff_user_id: profile.id
-  });
-  if (error) {
-    throw new Error(error.message);
-  }
+  await saveLegacyTeaching({ ...parsed, id: value(formData, "command_id"), kind: "observation" });
 
   revalidatePath("/", "layout");
 }
 
 export async function createAssessmentAttempt(formData: FormData) {
-  const profile = await requirePermission("record_teaching");
+  await requirePermission("record_teaching");
   const definitionId = idSchema.parse(value(formData, "definition_id"));
   const assessedItemIds = formData
     .getAll("assessed_item_ids")
@@ -2368,27 +2362,23 @@ export async function createAssessmentAttempt(formData: FormData) {
     throw new Error(`Overall score must be between ${definition.score_min} and ${definition.score_max}.`);
   }
 
-  const { error } = await supabase.from("assessment_attempts").insert({
+  await saveLegacyTeaching({
     ...parsed,
+    id: value(formData, "command_id"),
+    kind: "formative",
     definition_id: definitionId,
-    staff_user_id: profile.id,
-    assessed_item_ids: assessedItemIds,
-    scores: {}
+    assessed_item_ids: assessedItemIds
   });
-  if (error) {
-    throw new Error(error.message);
-  }
 
   revalidatePath("/", "layout");
 }
 
 export async function createPresentationScore(formData: FormData) {
-  const profile = await requirePermission("record_teaching");
+  await requirePermission("record_teaching");
   const scoreSchema = z.coerce.number().int().min(1).max(5);
   const scores = Object.fromEntries(
     presentationRubricCriteria.map((criterion) => [criterion.id, scoreSchema.parse(value(formData, criterion.id))])
   );
-  const totalScore = Object.values(scores).reduce((total, score) => total + score, 0);
 
   const parsed = z
     .object({
@@ -2397,6 +2387,7 @@ export async function createPresentationScore(formData: FormData) {
       occurred_on: z.string().min(1),
       presentation_type: z.enum(["case_presentation", "journal_club"]),
       duration_minutes: z.coerce.number().int().positive(),
+      time_penalty: z.number().int().min(0).max(50),
       comments: z.string().nullable()
     })
     .parse({
@@ -2405,19 +2396,16 @@ export async function createPresentationScore(formData: FormData) {
       occurred_on: value(formData, "occurred_on") || todayIsoDate(),
       presentation_type: value(formData, "presentation_type"),
       duration_minutes: value(formData, "duration_minutes"),
+      time_penalty: formData.has("time_penalty") ? (value(formData, "time_penalty") === "" ? NaN : Number(value(formData, "time_penalty"))) : 0,
       comments: optionalValue(formData, "comments")
     });
 
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("presentation_scores").insert({
+  await saveLegacyTeaching({
     ...parsed,
-    staff_user_id: profile.id,
-    scores,
-    total_score: totalScore
+    id: value(formData, "command_id"),
+    kind: "presentation",
+    scores
   });
-  if (error) {
-    throw new Error(error.message);
-  }
 
   revalidatePath("/", "layout");
 }

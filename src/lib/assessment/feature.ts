@@ -14,3 +14,11 @@ export function assessmentPrototypeEnabled(variant?: string): boolean {
 export function studentWorkspaceEnabled(): boolean {
   return process.env.STUDENT_WORKSPACE_ENABLED === "true" && assessmentWorkflowEnabled();
 }
+
+export function staffCompanionEnabled(): boolean {
+  return process.env.STAFF_COMPANION_ENABLED === "true" && studentWorkspaceEnabled();
+}
+
+export function staffCompanionTeachingEnabled(): boolean {
+  return process.env.STAFF_COMPANION_TEACHING_ENABLED === "true" && staffCompanionEnabled();
+}

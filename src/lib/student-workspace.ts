@@ -1,5 +1,5 @@
 import type { AppData, AttendanceStatus, FinanceRecord } from "./types";
-import { presentationRubricCriteria } from "./presentation-rubric";
+import { presentationBreakdown } from "./presentation-display";
 
 export interface WorkspaceAttendance {
   id: string;
@@ -22,6 +22,7 @@ export interface WorkspaceAttendance {
 
 export interface WorkspaceTeachingRecord {
   id: string;
+  editableOfferingId?: string;
   date: string;
   author: string;
   module: string;
@@ -80,8 +81,7 @@ export function buildStudentWorkspaceData(data: AppData, studentId: string, incl
       type: "Presentation" as const, text: record.comments ?? "", details: [
         { label: "Type", value: record.presentationType?.replaceAll("_", " ") ?? "Not recorded" },
         { label: "Duration", value: record.durationMinutes === undefined ? "Not recorded" : `${record.durationMinutes} minutes` },
-        { label: "Total score", value: String(record.totalScore) },
-        ...Object.entries(record.scores).map(([key, value]) => ({ label: presentationRubricCriteria.find(criterion => criterion.id === key)?.label ?? key.replaceAll("_", " "), value: String(value) }))
+        ...presentationBreakdown(record.scores, record.totalScore, record.timePenalty)
       ]
     }))
   ];
