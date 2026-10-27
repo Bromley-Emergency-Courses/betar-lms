@@ -4,18 +4,22 @@ import Link from "next/link";
 import { componentScoreText, indicatorLabel } from "@/lib/assessment/display";
 import { useEffect, useId, useRef, useState } from "react";
 import { CalendarCheck, ChevronRight, History, LayoutList, Columns3, X } from "lucide-react";
-import type { AssessmentAttempt, AssessmentEvaluation, AssessmentOutcome, AssessmentRevision, AssessmentStatus, ComponentResult } from "@/lib/assessment/types";
+import type { AssessmentAttempt, AssessmentEvaluation, AssessmentOutcome, AssessmentRevision, AssessmentDisplayStatus, ComponentResult } from "@/lib/assessment/types";
 import styles from "./student-workspace.module.css";
 import { AssessmentTaskDialog, type AssessmentTask } from "./assessment-task-dialog";
 import type { AssessmentDecision, AssessmentSourceEvidence as SourceEvidence } from "@/lib/assessment/types";
 import { AssessmentSourceEvidence } from "./assessment-source-evidence";
+import { HistoricalAssessmentResults } from "./historical-assessment-results";
+import { historicalStatusLabel } from "@/lib/assessment/historical";
+import type { HistoricalAssessmentResult } from "@/lib/assessment/types";
 
 export { indicatorLabel } from "@/lib/assessment/display";
 
-const statusLabels: Record<AssessmentStatus, string> = { Planned: "Not started", "In progress": "In progress", Pass: "Passed", Fail: "Failed", Abandoned: "Abandoned", "Module deferred": "Module deferred", "Assessment deferred": "Assessment deferred" };
+const statusLabels: Record<AssessmentDisplayStatus, string> = { Planned: "Not started", "In progress": "In progress", Pass: "Passed", Fail: "Failed", Abandoned: "Abandoned", "Module deferred": "Module deferred", "Assessment deferred": "Assessment deferred", Historical: "Historical status" };
 const groups = ["Needs attention", "Arranged / pending", "On hold / closed", "Complete"];
 
 function groupFor(assessment: AssessmentEvaluation) {
+  if (assessment.historical) return assessment.historical.review_flags.length || assessment.effective_status === "Fail" || assessment.effective_indicators?.length ? "Needs attention" : assessment.effective_status === "Pass" ? "Complete" : "Arranged / pending";
   if (["Abandoned", "Module deferred", "Assessment deferred"].includes(assessment.effective_status)) return "On hold / closed";
   if (assessment.needs_plan) return "Needs attention";
   if (assessment.effective_status === "Pass") return "Complete";
@@ -26,10 +30,11 @@ function groupFor(assessment: AssessmentEvaluation) {
 
 export function OutcomeBadge({ assessment }: { assessment: AssessmentEvaluation }) {
   const status = assessment.effective_status;
-  return <span className={`${styles.badge} ${status === "Pass" ? styles.good : status === "Fail" ? styles.bad : styles.neutral}`}>{assessment.needs_plan ? "Plan review required" : statusLabels[status] ?? "Awaiting review"}</span>;
+  return <span className={`${styles.badge} ${status === "Pass" ? styles.good : status === "Fail" ? styles.bad : styles.neutral}`}>{assessment.historical ? `Historical · ${assessment.overrides?.some(decision => decision.kind === "status") ? `${status} (amended)` : historicalStatusLabel(assessment.historical.status)}` : assessment.needs_plan ? "Plan review required" : statusLabels[status] ?? "Awaiting review"}</span>;
 }
 
 function ComponentScore({ result, notRequired = false }: { result?: ComponentResult; notRequired?: boolean }) {
+  if (result?.origin === "Historical record") return <span className={result.passed === false ? styles.failedScore : styles.score}>{result.score === null ? "Not recorded / review history" : `${result.score}%`}<small>Historical</small></span>;
   return <span className={notRequired ? styles.muted : result?.passed === false ? styles.failedScore : styles.score}>{componentScoreText(result, notRequired)}</span>;
 }
 
@@ -76,7 +81,7 @@ function ResultHistory({ attempts, revisions, sourceEvidence, onCorrect, onLifec
   })}</ol>;
 }
 
-function AssessmentDetails({ outcome, attempts, revisions, sourceEvidence, close, onAttendance, canEdit, terms, decisions }: { outcome: AssessmentOutcome; attempts: AssessmentAttempt[]; revisions: AssessmentRevision[]; sourceEvidence: SourceEvidence[]; close: () => void; onAttendance?: (termId: string) => void; canEdit: boolean; terms: Array<{ id: string; name: string }>; decisions: AssessmentDecision[] }) {
+function AssessmentDetails({ outcome, attempts, historicalResults, revisions, sourceEvidence, close, onAttendance, canEdit, terms, decisions }: { outcome: AssessmentOutcome; attempts: AssessmentAttempt[]; historicalResults: HistoricalAssessmentResult[]; revisions: AssessmentRevision[]; sourceEvidence: SourceEvidence[]; close: () => void; onAttendance?: (termId: string) => void; canEdit: boolean; terms: Array<{ id: string; name: string }>; decisions: AssessmentDecision[] }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [history, setHistory] = useState(false);
@@ -95,7 +100,7 @@ function AssessmentDetails({ outcome, attempts, revisions, sourceEvidence, close
     <div className={styles.dialogBody}>
       {message ? <p role="status" className={styles.notice}>{message}</p> : null}
       <div className={styles.toolbar}><OutcomeBadge assessment={assessment} /><span>{assessment.awarded_credits ?? 0} credits awarded</span></div>
-      {assessment.needs_plan ? <p className={styles.notice}>This module needs a reviewed assessment plan in Course configuration.</p> : <>
+      {assessment.historical ? <section className={styles.notice}><strong>Historical record — preserved as recorded</strong><p>Recorded status: {historicalStatusLabel(assessment.historical.status)} · Recorded credits: {assessment.historical.credits ?? assessment.awarded_credits}</p><p>Final mark: {assessment.historical.final_mark ?? "Not recorded"} · Grade: {assessment.historical.grade ?? "Not recorded"}</p><p>{assessment.historical.protected ? "Current rules and missing historical attendance cannot change this recorded outcome. Exceptional decisions can amend the effective outcome, credits or warning flags with a reason; clearing a decision restores the historical baseline. Outcome and credits are independent decisions. Original scores require separate reconciliation before correction." : "These values are not recalculated under current exam rules. Reconciliation is required before new assessment decisions on this enrolment."}</p>{assessment.historical.review_flags.map(flag => <p key={flag}>{flag}</p>)}</section> : assessment.needs_plan ? <p className={styles.notice}>This module needs a reviewed assessment plan in Course configuration.</p> : <>
         <div className={styles.indicators}>{assessment.effective_indicators?.map(indicator => <span key={indicator} className={styles.flag}>{indicatorLabel(indicator)}</span>)}</div>
         <div className={styles.attendanceLink}><CalendarCheck size={18} /><span>Attendance: {assessment.attendance_actual} of {assessment.attendance_required} required days recorded</span>{onAttendance ? <button className={styles.textButton} onClick={() => { close(); onAttendance(assessment.original_term_id); }}>Review attendance</button> : <Link href={`/students/${outcome.student_id}?tab=attendance&term=${assessment.original_term_id}`}>Review attendance</Link>}</div>
         <div className={styles.resultTiles}>{["theory", "practical"].map(component => {
@@ -116,19 +121,20 @@ function AssessmentDetails({ outcome, attempts, revisions, sourceEvidence, close
             </div> : null}
           </>}</section>;
         })}</div>
-        {assessment.overrides?.length ? <section className={styles.notice}><strong>Exceptional decisions active</strong><p>Calculated outcome: {statusLabels[assessment.calculated_status]} · {assessment.calculated_credits} credits</p><p>Calculated flags: {assessment.calculated_indicators.map(indicatorLabel).join(" · ") || "None"}</p>{assessment.overrides.map(override => <p key={`${override.kind}-${override.indicator}`}><strong>{override.kind === "status" ? "Outcome" : override.kind === "credits" ? "Credits" : indicatorLabel(override.indicator)}: {typeof override.value === "boolean" ? override.value ? "Show flag" : "Suppress flag" : override.value}</strong> — {override.reason}</p>)}</section> : null}
-        {canEdit ? <button className={styles.button} onClick={() => setTask({ kind: "decision" })}>Exceptional decision</button> : null}
-        {decisions.length ? <details className={styles.revisions}><summary>Decision history ({decisions.length})</summary>{[...decisions].sort((first, second) => second.event_order - first.event_order).map(decision => <article key={decision.id}><strong>{decision.kind === "status" ? "Outcome" : decision.kind === "credits" ? "Credits" : indicatorLabel(decision.indicator)} · {decision.value === null ? "Restored automatic calculation" : typeof decision.value === "boolean" ? decision.value ? "Show flag" : "Suppress flag" : decision.value}</strong><p>{decision.reason}</p><p className={styles.muted}>{decision.actor_name} · {dateLabel(decision.created_at)}</p></article>)}</details> : null}
       </>}
-      <button className={styles.button} aria-expanded={history} onClick={() => setHistory(value => !value)}><History size={17} />Result history ({attempts.length})</button>
-      {history ? <section aria-label="Result history"><p className={styles.muted}>All recorded sittings remain here. Corrections keep the same attempt; only the latest valid attempt determines each component’s current result. Excluded results stay visible but do not contribute to accepted outcomes or official result exports.</p><ResultHistory attempts={attempts} revisions={revisions} sourceEvidence={sourceEvidence} onCorrect={canEdit ? attempt => setTask({ kind: "score", component: attempt.component, correction: attempt }) : undefined} onLifecycle={canEdit ? (attempt, operation) => setTask({ kind: "lifecycle", component: attempt.component, attempt, operation }) : undefined} /></section> : null}
+      {assessment.overrides?.length ? <section className={styles.notice}><strong>Exceptional decisions active</strong><p>{assessment.historical ? `Original outcome: ${historicalStatusLabel(assessment.historical.status)}` : `Calculated outcome: ${statusLabels[assessment.calculated_status]}`} · {assessment.calculated_credits} credits</p>{assessment.overrides.map(override => <p key={`${override.kind}-${override.indicator}`}><strong>{override.kind === "status" ? "Outcome" : override.kind === "credits" ? "Credits" : indicatorLabel(override.indicator)}: {typeof override.value === "boolean" ? override.value ? "Show flag" : "Suppress flag" : override.value}</strong> — {override.reason}</p>)}</section> : null}
+      {canEdit && (assessment.historical?.protected || (!assessment.historical && !assessment.needs_plan)) ? <button className={styles.button} onClick={() => setTask({ kind: "decision" })}>Exceptional decision</button> : null}
+      {decisions.length ? <details className={styles.revisions}><summary>Decision history ({decisions.length})</summary>{[...decisions].sort((first, second) => second.event_order - first.event_order).map(decision => <article key={decision.id}><strong>{decision.kind === "status" ? "Outcome" : decision.kind === "credits" ? "Credits" : indicatorLabel(decision.indicator)} · {decision.value === null ? assessment.historical?.protected ? "Restored historical baseline" : "Restored automatic calculation" : typeof decision.value === "boolean" ? decision.value ? "Show flag" : "Suppress flag" : decision.value}</strong><p>{decision.reason}</p><p className={styles.muted}>{decision.actor_name} · {dateLabel(decision.created_at)}</p></article>)}</details> : null}
+      <HistoricalAssessmentResults results={historicalResults} />
+      <button className={styles.button} aria-expanded={history} onClick={() => setHistory(value => !value)}><History size={17} />Result history ({attempts.length} new-workflow attempts)</button>
+      {history ? <section aria-label="Result history"><p className={styles.muted}>All recorded sittings remain here. Corrections keep the same attempt; only the latest valid attempt determines each component’s current result. Excluded results stay visible but do not contribute to accepted outcomes or official result exports. Protected historical outcomes remain independent of these calculations.</p><ResultHistory attempts={attempts} revisions={revisions} sourceEvidence={sourceEvidence} onCorrect={canEdit && !assessment.historical ? attempt => setTask({ kind: "score", component: attempt.component, correction: attempt }) : undefined} onLifecycle={canEdit && !assessment.historical ? (attempt, operation) => setTask({ kind: "lifecycle", component: attempt.component, attempt, operation }) : undefined} /></section> : null}
       <Link className={styles.textButton} href={`/students/${outcome.student_id}?tab=modules`}>Open student workspace <ChevronRight size={16} /></Link>
     </div>
     {task ? <AssessmentTaskDialog task={task} assessment={assessment} attempts={attempts} terms={terms} source={sourceEvidence.find(source => source.id === (task.kind === "score" ? task.correction?.source_id : task.kind === "lifecycle" ? task.attempt.source_id : undefined))} close={() => setTask(null)} saved={(updated, notice) => { setSavedAssessment(updated); setMessage(notice); setTask(null); }} /> : null}
   </dialog>;
 }
 
-export function AssessmentRegister({ outcomes, attempts, revisions, sourceEvidence = [], studentScoped = false, onAttendance, canEdit = false, terms = [], decisions = [] }: { outcomes: AssessmentOutcome[]; attempts: AssessmentAttempt[]; revisions: AssessmentRevision[]; sourceEvidence?: SourceEvidence[]; studentScoped?: boolean; onAttendance?: (termId: string) => void; canEdit?: boolean; terms?: Array<{ id: string; name: string }>; decisions?: AssessmentDecision[] }) {
+export function AssessmentRegister({ outcomes, attempts, historicalResults = [], revisions, sourceEvidence = [], studentScoped = false, onAttendance, canEdit = false, terms = [], decisions = [] }: { outcomes: AssessmentOutcome[]; attempts: AssessmentAttempt[]; historicalResults?: HistoricalAssessmentResult[]; revisions: AssessmentRevision[]; sourceEvidence?: SourceEvidence[]; studentScoped?: boolean; onAttendance?: (termId: string) => void; canEdit?: boolean; terms?: Array<{ id: string; name: string }>; decisions?: AssessmentDecision[] }) {
   const [view, setView] = useState<"table" | "board">("table");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -148,6 +154,7 @@ export function AssessmentRegister({ outcomes, attempts, revisions, sourceEviden
     </tr>)}</tbody></table></div> : <div className={styles.board}>{groups.map(group => <section className={styles.lane} key={group}><h3>{group} <small>{visible.filter(outcome => groupFor(outcome.assessment) === group).length}</small></h3>{visible.filter(outcome => groupFor(outcome.assessment) === group).map(outcome => <article className={styles.boardCard} key={outcome.enrolment_id}>
       <OutcomeBadge assessment={outcome.assessment} /><h4>{studentScoped ? outcome.module_title : outcome.student_name}</h4><p>{outcome.module_code} · {studentScoped ? outcome.original_cohort : outcome.module_title}</p>{!studentScoped ? <p className={styles.muted}>Teaching term: {outcome.original_cohort}</p> : null}<div className={styles.toolbar}><span>Theory <ComponentScore result={outcome.assessment.components?.theory} /></span><span>Practical <ComponentScore result={outcome.assessment.components?.practical} notRequired={outcome.assessment.plan?.mode === "online"} /></span></div>{outcome.assessment.effective_indicators?.map(indicator => <p key={indicator} className={styles.muted}>{indicatorLabel(indicator)}</p>)}<button className={styles.button} onClick={() => setSelected(outcome.enrolment_id)}>View results</button>
     </article>)}</section>)}</div>}
-    {chosen ? <AssessmentDetails key={chosen.enrolment_id} outcome={chosen} attempts={attempts.filter(attempt => attempt.enrolment_id === chosen.enrolment_id)} revisions={revisions} sourceEvidence={sourceEvidence} close={() => setSelected(null)} onAttendance={onAttendance} canEdit={canEdit} terms={terms} decisions={decisions.filter(decision => decision.enrolment_id === chosen.enrolment_id)} /> : null}
+    <HistoricalAssessmentResults results={historicalResults.filter(result => !result.enrolment_id && (!teachingTerm || result.original_cohort === teachingTerm) && `${result.student_name} ${result.student_identifier} ${result.module_code} ${result.module_title}`.toLowerCase().includes(query.toLowerCase()))} />
+    {chosen ? <AssessmentDetails key={chosen.enrolment_id} outcome={chosen} attempts={attempts.filter(attempt => attempt.enrolment_id === chosen.enrolment_id)} historicalResults={historicalResults.filter(result => result.enrolment_id === chosen.enrolment_id)} revisions={revisions} sourceEvidence={sourceEvidence} close={() => setSelected(null)} onAttendance={onAttendance} canEdit={canEdit} terms={terms} decisions={decisions.filter(decision => decision.enrolment_id === chosen.enrolment_id)} /> : null}
   </section>;
 }

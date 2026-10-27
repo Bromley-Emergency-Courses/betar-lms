@@ -2,9 +2,11 @@ import Link from "next/link";
 import { AssessmentCommandForm, AssessmentScoreForm } from "./assessment-forms";
 import { readAssessmentWorkspace, readAssessmentTable } from "@/lib/assessment";
 import { assessmentWorkflowMode } from "@/lib/assessment/feature";
+import { HistoricalAssessmentResults } from "./historical-assessment-results";
+import { historicalStatusLabel } from "@/lib/assessment/historical";
 
 export async function EnrolmentAssessments({ studentId, editMode, terms }: { studentId?: string; editMode: boolean; terms: Array<{id:string;name:string}> }) {
-  const { outcomes, attempts, sources } = await readAssessmentWorkspace(studentId);
+  const { outcomes, attempts, sources, historicalResults } = await readAssessmentWorkspace(studentId);
   const [revisions, histories, arrangements, auditEvents] = await Promise.all([
     readAssessmentTable<Record<string, unknown>>("assessment_revision_history"),
     readAssessmentTable<Record<string, unknown>>("enrolment_assessment_history"),
@@ -19,6 +21,7 @@ export async function EnrolmentAssessments({ studentId, editMode, terms }: { stu
       const enrolmentAttempts = attempts.filter(attempt=>attempt.enrolment_id===outcome.enrolment_id).sort((first,second)=>first.ordinal-second.ordinal);
       const base = {enrolment_id:outcome.enrolment_id};
       const history = histories.filter(event=>event.enrolment_id===outcome.enrolment_id);
+      if (assessment.historical) return <details className="panel" key={outcome.enrolment_id}><summary>{outcome.student_name} · {outcome.module_code} · Historical: {assessment.historical.protected ? assessment.effective_status : historicalStatusLabel(assessment.historical.status)} · {assessment.awarded_credits} effective credits</summary><p>Original outcome: {historicalStatusLabel(assessment.historical.status)} · {assessment.historical.credits ?? outcome.legacy_credits} recorded credits. Current exam rules have not been applied retrospectively.</p><p>Final mark: {assessment.historical.final_mark ?? "Not recorded"} · Grade: {assessment.historical.grade ?? "Not recorded"}</p>{assessment.historical.protected ? <Link href={`/students/${outcome.student_id}?tab=modules`}>Review audited Exceptional decisions in the student workspace</Link> : <p>Reconciliation is required before new assessment decisions.</p>}{assessment.historical.review_flags.map(flag => <p key={flag}>{flag}</p>)}<HistoricalAssessmentResults results={historicalResults.filter(result => result.enrolment_id === outcome.enrolment_id)} /></details>;
       return <details className="panel" key={outcome.enrolment_id} open={assessment.needs_plan}>
         <summary><strong>{outcome.original_cohort} · {outcome.module_code}</strong> · {outcome.student_name}
           {assessment.needs_plan ? " · Plan review required" : <> · Theory {assessment.components.theory.score ?? "Pending"} · Practical {assessment.plan.mode === "online" ? "N/A" : assessment.components.practical?.score ?? "Pending"}

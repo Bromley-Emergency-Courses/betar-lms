@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-The app runs with seeded demo data when Supabase environment variables are not configured.
+In development and tests only, the app uses in-memory demo data when Supabase environment variables are not configured. Production builds (including hosted previews) never fall back to demo data or a demo administrator: missing configuration blocks requests with a service-unavailable response. Set the intended Supabase URL and anonymous key before building; never promote a synthetic-target build to production. This does not run database seeds.
 
 ## Supabase Setup
 

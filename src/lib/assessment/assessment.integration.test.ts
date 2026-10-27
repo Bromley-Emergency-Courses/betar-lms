@@ -21,6 +21,10 @@ let planId: string;
 const legacyPresentationStudent = randomUUID();
 const legacyPresentationTerm = randomUUID();
 const legacyPresentationOfferings = Array.from({ length: 4 }, () => randomUUID());
+const protectedEnrolment = randomUUID();
+const protectedModule = randomUUID();
+const protectedOffering = randomUUID();
+const protectedFailedEnrolment = randomUUID();
 let legacyPresentationRows: unknown;
 let legacyPresentationHistoryCount: number;
 
@@ -102,6 +106,16 @@ beforeAll(async () => {
   catch (error) { throw new Error(`0076: ${(error as Error).message} at ${(error as { position?: string }).position}`); }
   expect(await scalar<number>("select count(*)::int value from enrolment_assessment_history")).toBe(legacyPresentationHistoryCount);
   await db.exec(readFileSync("supabase/migrations/0077_staff_teaching_plans.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0078_historical_assessment_records.sql", "utf8"));
+  await db.query("insert into course_modules(id,code,title,mode,credits) values($1::uuid,$1::text,'Historical award','practical',10)", [protectedModule]);
+  await scalar("select save_module_assessment_plan($1::jsonb,null) value", [JSON.stringify({ module_id: protectedModule, theory_scheme: "mcq", theory_pass_mark: 50, practical_pass_mark: 50, reason: "Reviewed fixture" })]);
+  await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity) values($1,$2,$3,0,20)", [protectedOffering, protectedModule, legacyPresentationTerm]);
+  await db.query("insert into enrolments(id,student_id,offering_id,status,credits_awarded,final_mark,grade,attendance_days_required_override,presentation_required_override) values($1,$2,$3,'completed',10,73,'Merit',2,true)", [protectedEnrolment, legacyPresentationStudent, protectedOffering]);
+  for (const component of ["theory", "practical"]) await db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,$3,$4,$5,70,50,true,false,'2024-05-01')", [legacyPresentationStudent, protectedOffering, component, component === "theory" ? "theory_portal" : "practical_osce", randomUUID()]);
+  const failedStudent = randomUUID();
+  await db.query("insert into students(id,temporary_id,first_name,last_name,email,programme,status) values($1::uuid,$1::text,'Historical','Failure','failure@example.test','pgcert','active')", [failedStudent]);
+  await db.query("insert into enrolments(id,student_id,offering_id,status,credits_awarded) values($1,$2,$3,'failed',0)", [protectedFailedEnrolment, failedStudent, protectedOffering]);
+  await db.exec(readFileSync("supabase/migrations/0079_historical_outcome_protection.sql", "utf8"));
 }, 30000);
 
 beforeEach(async () => {
@@ -117,6 +131,140 @@ beforeEach(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("release review regressions", () => {
+  it("protects a historical pass and credits after reviewed backfill despite unrecorded attendance", async () => {
+    await db.exec("begin");
+    try {
+      const approvals = await scalar("select jsonb_agg(jsonb_build_object('legacy_result_id',legacy_result_id,'legacy_hash',legacy_hash)) value from assessment_backfill_candidates where enrolment_id=$1", [protectedEnrolment]);
+      await scalar("select backfill_assessment_results($1,'Reviewed historical fixture') value", [JSON.stringify(approvals)]);
+      const result = await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [protectedEnrolment]);
+      expect(result.effective_status).toBe("Pass");
+      expect(result.awarded_credits).toBe(10);
+      expect(result.effective_indicators).not.toContain("Attendance non-compliance");
+      expect(result.effective_indicators).not.toContain("Presentation incomplete");
+      expect(result.historical).toMatchObject({ protected: true, status: "completed", credits: 10, final_mark: 73, grade: "Merit" });
+      await db.query("update course_modules set credits=20 where id=$1", [protectedModule]);
+      const nextPlan = await scalar<string>("select save_module_assessment_plan($1::jsonb,(select assessment_plan_id from enrolments where id=$2)) value", [JSON.stringify({ module_id: protectedModule, theory_scheme: "mcq", theory_pass_mark: 95, practical_pass_mark: 95, reason: "Future harder rules" }), protectedEnrolment]);
+      const preview = await scalar("select preview_enrolment_assessment_plan($1,$2) value", [protectedEnrolment, nextPlan]);
+      await command({ type: "ChangeEnrolmentAssessmentPlan", enrolment_id: protectedEnrolment, plan_id: nextPlan, preview }, await scalar("select assessment_revision value from enrolments where id=$1", [protectedEnrolment]));
+      expect(await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment])).toMatchObject({ effective_status: "Pass", awarded_credits: 10 });
+      expect(await scalar("select count(*)::int value from attendance_records where student_id=$1", [legacyPresentationStudent])).toBe(0);
+    } finally { await db.exec("rollback"); }
+  });
+
+  it("amends protected historical decisions without a plan and clears them back to the immutable baseline", async () => {
+    await db.exec("begin");
+    try {
+      enrolmentId = protectedEnrolment;
+      await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+      await db.query("update enrolments set assessment_projection=jsonb_build_object('calculated_status','Pass','effective_status','Pass') where id=$1", [enrolmentId]);
+      const original = await scalar("select jsonb_build_object('status',status,'credits',credits_awarded,'final',final_mark,'grade',grade) value from enrolments where id=$1", [enrolmentId]);
+      const baseline = await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId]);
+      const failed = await command({ type: "SetAssessmentOverride", kind: "status", value: "Fail", reason: "Reviewed erroneous original award" });
+      expect(failed.assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 10, needs_plan: true });
+      expect(failed.assessment.pass_reversed).toBe(false);
+      expect((await command({ type: "SetAssessmentOverride", kind: "credits", value: 0 })).assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 0 });
+      expect((await command({ type: "SetAssessmentOverride", kind: "indicator", indicator: "Attendance non-compliance", value: true })).assessment.effective_indicators).toEqual(["Attendance non-compliance"]);
+      expect((await command({ type: "ClearAssessmentOverride", kind: "indicator", indicator: "Attendance non-compliance" })).assessment.effective_indicators).toEqual([]);
+      expect((await command({ type: "ClearAssessmentOverride", kind: "status" })).assessment).toMatchObject({ effective_status: "Pass", awarded_credits: 0 });
+      expect((await command({ type: "ClearAssessmentOverride", kind: "credits" })).assessment).toMatchObject({ effective_status: "Pass", awarded_credits: 10 });
+      expect(await scalar("select jsonb_build_object('status',status,'credits',credits_awarded,'final',final_mark,'grade',grade) value from enrolments where id=$1", [enrolmentId])).toEqual(original);
+      expect(await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId])).toEqual(baseline);
+      expect(await scalar("select count(*)::int value from audit_events where entity_id=$1 and metadata->>'historical_amendment'='true'", [enrolmentId])).toBe(6);
+      expect(await scalar("select count(*)::int value from enrolment_assessment_overrides where enrolment_id=$1", [enrolmentId])).toBe(6);
+    } finally { await db.exec("rollback"); }
+  });
+
+  it("protects historic failures while leaving new enrolments under ordinary attendance rules", async () => {
+    await db.exec("begin");
+    try {
+      await db.query("update enrolments set attendance_days_required_override=0,presentation_required_override=false where id=$1", [protectedFailedEnrolment]);
+      for (const component of ["theory", "practical"]) await scalar("select assessment_new_attempt($1,$2,$3,'Manual') value", [protectedFailedEnrolment, component, JSON.stringify({ ...score(70, component), reason: "Synthetic passing evidence", sitting_date: "2024-05-01", sitting_term_id: legacyPresentationTerm })]);
+      expect(await scalar("select assessment_evaluate_current_rules($1) value", [protectedFailedEnrolment])).toMatchObject({ effective_status: "Pass", awarded_credits: 10 });
+      expect(await scalar("select read_enrolment_assessment($1) value", [protectedFailedEnrolment])).toMatchObject({ effective_status: "Fail", awarded_credits: 0, historical: { protected: true, status: "failed" } });
+      await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+      await plan({ practical_pass_mark: 50 }); await adopt();
+      await db.query("update enrolments set attendance_days_required_override=2,presentation_required_override=true where id=$1", [enrolmentId]);
+      await command(score(70)); await command(score(70, "practical"));
+      expect(await evaluate()).toMatchObject({ effective_status: "Fail", awarded_credits: 0 });
+      expect((await evaluate()).effective_indicators).toContain("Attendance non-compliance");
+      expect((await evaluate()).historical).toBeUndefined();
+    } finally { await db.exec("rollback"); }
+  });
+
+  it.each([
+    [{ type: "SetAssessmentOverride", kind: "status", value: "Pass", reason: " " }, "reason"],
+    [{ type: "SetAssessmentOverride", kind: "status", value: "unknown" }, "Invalid status"],
+    [{ type: "SetAssessmentOverride", kind: "credits", value: -1 }, "nonnegative integer"],
+    [{ type: "SetAssessmentOverride", kind: "credits", value: 1.5 }, "nonnegative integer"],
+    [{ type: "SetAssessmentOverride", kind: "anything", value: 1 }, "Invalid historical decision"],
+    [{ type: "SetAssessmentOverride", kind: "indicator", indicator: "anything", value: true }, "Invalid indicator"]
+  ])("rejects invalid historical amendments atomically: %j", async (input, message) => {
+    enrolmentId = protectedEnrolment;
+    const before = await evaluate();
+    await expect(command(input)).rejects.toThrow(String(message));
+    expect(await evaluate()).toEqual(before);
+    expect(await scalar("select count(*)::int value from enrolment_assessment_overrides where enrolment_id=$1", [enrolmentId])).toBe(0);
+  });
+
+  it("enforces historical amendment revision, admin and baseline retention guards", async () => {
+    enrolmentId = protectedEnrolment;
+    await expect(command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" }, -1)).rejects.toThrow("changed");
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await expect(command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" })).rejects.toThrow(/admin/i);
+    await db.query("select set_config('test.actor',$1,false)", [adminId]);
+    await expect(db.query("update assessment_historical_outcomes set recorded_credits=0 where enrolment_id=$1", [enrolmentId])).rejects.toThrow(/immutable/i);
+    await expect(db.query("delete from assessment_historical_outcomes where enrolment_id=$1", [enrolmentId])).rejects.toThrow(/immutable/i);
+    await expect(db.query("update enrolments set status='failed' where id=$1", [enrolmentId])).rejects.toThrow("baseline is preserved");
+    await db.exec("set role authenticated");
+    try {
+      await expect(scalar("select assessment_evaluate_current_rules($1) value", [enrolmentId])).rejects.toThrow("permission denied");
+      await expect(scalar("select execute_assessment_command_v7('{}',0) value")).rejects.toThrow("permission denied");
+      await expect(db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'completed',10)", [enrolmentId])).rejects.toThrow("permission denied");
+      await db.query("select set_config('test.actor','',false)");
+      expect(await scalar("select count(*)::int value from assessment_historical_outcomes")).toBe(0);
+    } finally { await db.exec("reset role"); await db.query("select set_config('test.actor',$1,false)", [adminId]); }
+  });
+
+  it("retains original historical failures and online Practical records without creating attempts", async () => {
+    await db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'practical','manual',$3,42,50,false,true,'2025-06-15')", [studentId,offeringId,randomUUID()]);
+    const before = await scalar("select jsonb_agg(to_jsonb(result)) value from exam_results result where student_id=$1", [studentId]);
+    const historical = await scalar<Array<Record<string, unknown>>>("select jsonb_agg(to_jsonb(result)) value from assessment_historical_results result where student_id=$1", [studentId]);
+    expect(historical).toHaveLength(1);
+    expect(historical[0]).toMatchObject({ enrolment_id: enrolmentId, component: "practical", score: 42, pass_mark: 50, passed: false, resit_required: true, represented_by_attempt_id: null, reviewed_backfill: false });
+    await expect(command(score(70))).rejects.toThrow("Historical records are retained read-only");
+    await expect(command({ type: "SetAssessmentOverride", kind: "credits", value: 10 })).rejects.toThrow("Historical records are retained read-only");
+    expect(await scalar("select jsonb_agg(to_jsonb(result)) value from exam_results result where student_id=$1", [studentId])).toEqual(before);
+    expect(await scalar("select count(*)::int value from module_assessment_attempts where enrolment_id=$1", [enrolmentId])).toBe(0);
+  });
+
+  it("links imported historical evidence without treating an automatic match as reviewed backfill", async () => {
+    const imported = source();
+    await db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'theory','theory_portal',$3,70,50,true,false,'2025-06-15')", [studentId,offeringId,imported.source_key]);
+    await ingest([imported]);
+    const original = await scalar<{ represented_by_attempt_id: string; reviewed_backfill: boolean }>("select to_jsonb(result) value from assessment_historical_results result where student_id=$1", [studentId]);
+    expect(original.represented_by_attempt_id).toBe((await evaluate()).components.theory.id);
+    expect(original.reviewed_backfill).toBe(false);
+    await expect(command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" })).rejects.toThrow("Historical records are retained read-only");
+    const approvals = await scalar("select jsonb_agg(jsonb_build_object('legacy_result_id',legacy_result_id,'legacy_hash',legacy_hash)) value from assessment_backfill_candidates where enrolment_id=$1", [enrolmentId]);
+    await scalar("select backfill_assessment_results($1,'Reviewed synthetic original evidence') value", [JSON.stringify(approvals)]);
+    expect(await scalar("select reviewed_backfill value from assessment_historical_results where student_id=$1", [studentId])).toBe(true);
+    expect(await scalar("select count(*)::int value from module_assessment_attempts where enrolment_id=$1", [enrolmentId])).toBe(1);
+  });
+
+  it("keeps historical evidence scoped by staff permissions and the internal command wrapper private", async () => {
+    await db.exec("set role authenticated");
+    try {
+      await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+      await db.query("select id from assessment_historical_results limit 1");
+      await expect(scalar("select execute_assessment_command_v6('{}',0) value")).rejects.toThrow("permission denied");
+      await db.query("select set_config('test.actor','',false)");
+      expect(await scalar("select count(*)::int value from assessment_historical_results")).toBe(0);
+    } finally {
+      await db.exec("reset role");
+      await db.query("select set_config('test.actor',$1,false)", [adminId]);
+    }
+  });
+
   it("records a source score reversion as a new revision instead of retaining a later pass", async () => {
     const failed = source(undefined, 30);
     const passed = { ...failed, score: 70, items: [{ kind: "mcq", score: 70 }], raw_payload: { score: 70 } };
@@ -1577,6 +1725,30 @@ describe("assessment PostgreSQL commands and evaluator", () => {
     await plan({ theory_scheme: "coursework_viva", requires_coursework: true });
     expect((await evaluate()).plan.id).not.toBe(planId);
     await expect(db.query("update module_assessment_plans set theory_pass_mark=40 where id=$1",[planId])).rejects.toThrow("immutable");
+  });
+  it("applies an online-only plan to new enrolments without changing historical Practical evidence", async () => {
+    await db.exec("begin");
+    try {
+      await db.query("update enrolments set assessment_plan_id=null,final_mark=73,grade='Historic' where id=$1", [enrolmentId]);
+      await db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'practical','manual',$3,73,50,true,false,'2025-06-15')", [studentId,offeringId,randomUUID()]);
+      const historicalEnrolment = await scalar("select to_jsonb(enrolment) value from enrolments enrolment where id=$1", [enrolmentId]);
+      const historicalResults = await scalar("select jsonb_agg(to_jsonb(result) order by id) value from exam_results result where student_id=$1", [studentId]);
+      await plan({ physics_weighting: false });
+      const futureTerm = randomUUID();
+      const futureOffering = randomUUID();
+      const futureEnrolment = randomUUID();
+      await db.query("insert into terms(id,name,starts_on,ends_on) values($1::uuid,$1::text,'2025-09-01','2025-11-30')", [futureTerm]);
+      await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity) values($1,$2,$3,0,20)", [futureOffering,moduleId,futureTerm]);
+      await db.query("insert into enrolments(id,student_id,offering_id) values($1,$2,$3)", [futureEnrolment,studentId,futureOffering]);
+      const futureAssessment = await scalar<AssessmentEvaluation>("select read_enrolment_assessment($1) value", [futureEnrolment]);
+      expect(futureAssessment.plan).toMatchObject({ id: planId, mode: "online", theory_scheme: "mcq", physics_weighting: false, theory_pass_mark: 50, practical_pass_mark: null });
+      expect(await scalar("select to_jsonb(enrolment) value from enrolments enrolment where id=$1", [enrolmentId])).toEqual(historicalEnrolment);
+      expect(await scalar("select jsonb_agg(to_jsonb(result) order by id) value from exam_results result where student_id=$1", [studentId])).toEqual(historicalResults);
+      expect(await scalar("select review_reason value from assessment_backfill_candidates where enrolment_id=$1", [enrolmentId])).toBe("unreviewed_plan");
+      await expect(command({ ...score(73, "practical"), enrolment_id: futureEnrolment, sitting_term_id: futureTerm, sitting_date: "2025-11-15" }, futureAssessment.revision)).rejects.toThrow("Invalid component for this plan");
+    } finally {
+      await db.exec("rollback");
+    }
   });
   it("uses MCQ and weighted physics, with pass/fail only on combined Theory", async () => {
     await plan({ physics_weighting: true }); await adopt();

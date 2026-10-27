@@ -40,6 +40,34 @@ const candidate = await admin.from("assessment_backfill_candidates").select("leg
 await rpc("backfill_assessment_results", { approvals: [{ legacy_result_id: legacyId, legacy_hash: candidate.data.legacy_hash }], change_reason: "Synthetic eligible source review" });
 await command({ type: "AddManualAttempt", component: "theory", items: [{ kind: "mcq", score: 70 }], sitting_date: "2025-10-01", sitting_term_id: sittingTermId });
 const legacyBefore = await admin.from("exam_results").select("*").eq("id", legacyId).single(); assert.equal(legacyBefore.error, null);
+const historicalStudent = randomUUID(); const historicalModule = randomUUID(); const historicalOffering = randomUUID(); const historicalEnrolment = randomUUID();
+const historicalIdentifier = `HISTORY-${fixtureId}`;
+await insert("students", { id: historicalStudent, temporary_id: historicalIdentifier, first_name: "Historical", last_name: "Live rehearsal", email: `${historicalStudent}@example.test`, programme: "pgcert", status: "active" });
+await insert("course_modules", { id: historicalModule, code: historicalIdentifier, title: "Synthetic historical practical module", mode: "practical", credits: 10 });
+await rpc("save_module_assessment_plan", { input: { module_id: historicalModule, theory_scheme: "mcq", theory_pass_mark: 50, practical_pass_mark: 50, reason: "Synthetic reviewed historical fixture" }, expected_plan_id: null });
+await insert("module_offerings", { id: historicalOffering, module_id: historicalModule, term_id: termId, price_pence: 0, capacity: 10 });
+await insert("enrolments", { id: historicalEnrolment, student_id: historicalStudent, offering_id: historicalOffering, status: "completed", credits_awarded: 10, final_mark: 72, grade: "Merit", attendance_days_required_override: 2, presentation_required_override: true });
+await insert("exam_results", ["theory", "practical"].map(component => ({ student_id: historicalStudent, offering_id: historicalOffering, component_type: component, source_system: "manual", source_attempt_id: randomUUID(), score: 72, pass_mark: 50, passed: true, resit_required: false, taken_on: "2025-05-20", attempt_number: 1, is_resit: false, prior_attempt_missing: false })));
+execFileSync("docker", ["exec", "-i", liveContainer, "psql", "-Xq", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"], {
+  input: `insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits,recorded_final_mark,recorded_grade,capture_reference)
+    select id,status::text,credits_awarded,final_mark,grade,'Synthetic live-mode browser fixture only' from enrolments where id='${historicalEnrolment}';`,
+  encoding: "utf8", stdio: ["pipe", "pipe", "pipe"]
+});
+const historicalBefore = await admin.from("exam_results").select("*").eq("student_id", historicalStudent).order("id"); assert.equal(historicalBefore.error, null);
+const historicalEvaluation = () => rpc("read_enrolment_assessment", { enrolment_key: historicalEnrolment });
+async function historicalDecision(page, kind, value, clear = false) {
+  const details = page.getByRole("dialog", { name: "Synthetic historical practical module", exact: true });
+  await details.getByRole("button", { name: "Exceptional decision", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Exceptional decision", exact: true });
+  await editor.getByRole("combobox", { name: "Decision", exact: true }).selectOption(kind);
+  if (clear) await editor.getByRole("combobox", { name: "Action", exact: true }).selectOption("clear");
+  else if (kind === "credits") await editor.getByLabel("Awarded credits", { exact: true }).fill(String(value));
+  else await editor.getByRole("combobox", { name: "Outcome", exact: true }).selectOption(value);
+  await editor.getByLabel("Reason", { exact: true }).fill(`Synthetic live historical ${kind} ${clear ? "restoration" : "amendment"}`);
+  const refresh = page.waitForResponse(response => response.request().method() === "GET" && response.request().headers().rsc === "1" && new URL(response.url()).pathname === `/students/${historicalStudent}`);
+  await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+  await editor.waitFor({ state: "detached" }); assert.equal(await (await refresh).finished(), null);
+}
 const checks = []; let server; let logDescriptor; let context; const errors = [];
 const browser = await chromium.launch();
 async function stopApp() {
@@ -101,6 +129,30 @@ try {
   await page.screenshot({ path: `${artifacts}/live-result-history.png` });
   assert.equal((await evaluate()).components.theory.attempt_count, 3); assert.equal((await evaluate()).awarded_credits, 10);
   checks.push("A browser correction reverses Pass/credits without creating a resit; a later live-only resit restores Pass with all three attempts retained");
+  await page.goto(`${base}/students/${historicalStudent}?tab=modules`);
+  await page.getByText("Historical · completed", { exact: true }).waitFor();
+  const protectedOutcome = await historicalEvaluation();
+  assert.equal(protectedOutcome.effective_status, "Pass"); assert.equal(protectedOutcome.awarded_credits, 10);
+  assert.equal(protectedOutcome.attendance_actual, 0); assert.deepEqual(protectedOutcome.effective_indicators, []);
+  const historicalExport = await page.request.get(`${base}/api/exports/cccu-exam-results`); assert.equal(historicalExport.status(), 200);
+  const originalRows = Papa.parse(await historicalExport.text(), { header: true, skipEmptyLines: true }).data.filter(row => row["Student ID"] === historicalIdentifier);
+  assert.equal(originalRows.length, 2); assert(originalRows.every(row => row.Score === "72" && row["Record basis"].startsWith("Historical record")));
+  await page.getByRole("button", { name: "View results for Synthetic historical practical module", exact: true }).click();
+  await historicalDecision(page, "status", "Fail");
+  assert.equal((await historicalEvaluation()).awarded_credits, 10);
+  await historicalDecision(page, "credits", 0);
+  const amendedExport = await page.request.get(`${base}/api/exports/assessments?report=outcomes`); assert.equal(amendedExport.status(), 200);
+  const amended = Papa.parse(await amendedExport.text(), { header: true, skipEmptyLines: true }).data.find(row => row["Student ID"] === historicalIdentifier);
+  assert.equal(amended["Effective Status"], "Fail"); assert.equal(amended.Credits, "0");
+  assert.equal(amended["Original recorded status"], "completed"); assert.equal(amended["Original recorded credits"], "10");
+  await historicalDecision(page, "status", null, true); await historicalDecision(page, "credits", null, true);
+  const restoredHistorical = await historicalEvaluation(); assert.equal(restoredHistorical.effective_status, "Pass"); assert.equal(restoredHistorical.awarded_credits, 10);
+  const historicalAfter = await admin.from("exam_results").select("*").eq("student_id", historicalStudent).order("id"); assert.equal(historicalAfter.error, null); assert.deepEqual(historicalAfter.data, historicalBefore.data);
+  const historicalAcademic = await admin.from("enrolments").select("status,credits_awarded,final_mark,grade").eq("id", historicalEnrolment).single(); assert.equal(historicalAcademic.error, null);
+  assert.deepEqual(historicalAcademic.data, { status: "completed", credits_awarded: 10, final_mark: 72, grade: "Merit" });
+  await page.getByText(/Decision history \(4\)/).click();
+  await page.screenshot({ path: `${artifacts}/historical-live-decisions.png` });
+  checks.push("Live historical Pass/credits survive missing attendance; original scores remain exported, audited browser amendments affect effective exports, and clearing restores the original baseline without rewriting evidence");
   await stopApp(); await rpc("set_assessment_rollout", { requested_mode: "shadow", evidence: {}, change_reason: "Synthetic rollback; preserve live-only evidence" });
   page = await startApp("shadow"); assert.deepEqual((await official(page)).map(row => row.Score), ["30"]); assert.equal((await evaluate()).components.theory.score, 80);
   const legacyAfter = await admin.from("exam_results").select("*").eq("id", legacyId).single(); assert.equal(legacyAfter.error, null); assert.deepEqual(legacyAfter.data, legacyBefore.data);

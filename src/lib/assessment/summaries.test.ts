@@ -14,7 +14,9 @@ const from = vi.fn((table: string) => {
   const query = {
     select: (columns: string) => { call.columns = columns; return query; },
     in: (column: string, ids: string[]) => { expect(column).toBe("enrolment_id"); call.ids = ids; return query; },
-    order: async () => ({ data: call.ids.map(enrolment_id => ({ enrolment_id })), error: queryError }),
+    order: () => query,
+    range: () => query,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === "assessment_historical_results" ? [] : call.ids.map(enrolment_id => ({ enrolment_id, assessment: { needs_plan: false }, legacy_status: "planned", legacy_credits: 0, legacy_final_mark: null, legacy_grade: null })), error: queryError }).then(resolve),
     single: async () => ({ data: { mode: databaseMode }, error: queryError })
   };
   return query;
@@ -32,11 +34,12 @@ describe("scoped assessment summaries", () => {
     expect(await readAssessmentSummaries([])).toEqual([]);
     expect(createSupabaseServerClient).not.toHaveBeenCalled();
   });
-  it("deduplicates and batches IDs without fetching histories or legacy marks", async () => {
+  it("deduplicates and batches IDs with scoped historical evidence for retained outcomes", async () => {
     const ids = Array.from({ length: 111 }, (_, index) => `enrolment-${index}`);
     expect(await readAssessmentSummaries([...ids, ids[0]])).toHaveLength(111);
-    expect(calls.map(call => call.ids.length)).toEqual([50, 50, 11]);
-    expect(calls.every(call => call.table === "assessment_outcomes" && call.columns === "enrolment_id,student_id,student_name,student_identifier,module_code,module_title,original_cohort,assessment")).toBe(true);
+    expect(calls.map(call => call.ids.length)).toEqual([50, 50, 50, 50, 11, 11]);
+    expect(calls.filter(call => call.table === "assessment_outcomes").every(call => call.columns === "enrolment_id,student_id,student_name,student_identifier,module_code,module_title,original_cohort,assessment,legacy_status,legacy_final_mark,legacy_grade,legacy_credits,original_term_id,module_credits")).toBe(true);
+    expect(calls.filter(call => call.table === "assessment_historical_results").map(call => call.ids.length)).toEqual([50, 50, 11]);
   });
   it("uses the existing disabled and database live-cutover gates", async () => {
     vi.stubEnv("ASSESSMENT_WORKFLOW_MODE", "off");
@@ -46,7 +49,7 @@ describe("scoped assessment summaries", () => {
     await expect(readAssessmentSummaries(["enrolment"])).rejects.toThrow("sign-off gate");
     expect(calls.some(call => call.table === "assessment_outcomes")).toBe(false);
     databaseMode = "live";
-    expect(await readAssessmentSummaries(["enrolment"])).toEqual([{ enrolment_id: "enrolment" }]);
+    expect((await readAssessmentSummaries(["enrolment"])).map(row => row.enrolment_id)).toEqual(["enrolment"]);
   });
   it("propagates failures instead of reporting missing results as Pending", async () => {
     queryError = { message: "Unavailable" };

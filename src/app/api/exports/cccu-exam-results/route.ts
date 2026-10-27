@@ -9,7 +9,7 @@ import { assessmentExportCsv } from "@/lib/assessment/exports";
 export async function GET() {
   await requirePermission("view_students");
   const workspace = assessmentWorkflowMode() === "live" ? await readAssessmentWorkspace() : null;
-  const csv = workspace ? assessmentExportCsv("cccu",workspace.outcomes,workspace.attempts,workspace.sources) : cccuExamExportCsv(await getLmsData());
+  const csv = workspace ? assessmentExportCsv("cccu",workspace.outcomes,workspace.attempts,workspace.sources,workspace.historicalResults) : cccuExamExportCsv(await getLmsData());
   return new NextResponse(csv, {
     headers: {
       "content-type": "text/csv; charset=utf-8",

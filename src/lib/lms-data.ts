@@ -5,7 +5,7 @@ import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase
 import { getAppData } from "@/lib/seed";
 import { assessmentWorkflowMode } from "@/lib/assessment/feature";
 import { readAssessmentTable } from "@/lib/assessment";
-import type { AssessmentOutcome, AssessmentAttempt as RecordedAssessmentAttempt } from "@/lib/assessment/types";
+import type { AssessmentOutcome, AssessmentAttempt as RecordedAssessmentAttempt, HistoricalAssessmentResult } from "@/lib/assessment/types";
 import type {
   AppData,
   AdmissionLead,
@@ -385,6 +385,8 @@ export const getLmsData = cache(async (): Promise<AppData> => {
 
   const assessmentOutcomes = assessmentWorkflowMode() === "live" ? await readAssessmentTable<AssessmentOutcome>("assessment_outcomes") : [];
   const assessmentAttempts = assessmentWorkflowMode() === "live" ? await readAssessmentTable<RecordedAssessmentAttempt>("assessment_attempt_history") : [];
+  const historicalResults = assessmentWorkflowMode() === "live" ? await readAssessmentTable<HistoricalAssessmentResult>("assessment_historical_results") : [];
+  const retainedResultIds = new Set(historicalResults.filter(result => !result.represented_by_attempt_id).map(result => result.id));
 
   return {
     admissionLeads: admissionLeadRows.map(mapAdmissionLead),
@@ -413,13 +415,13 @@ export const getLmsData = cache(async (): Promise<AppData> => {
     assessmentAttempts: assessmentAttemptRows.map(mapAssessmentAttempt),
     presentationScores: presentationRows.map(mapPresentation),
     financeRecords: financeRows.map(mapFinance),
-    examResults: assessmentWorkflowMode() === "live" ? assessmentAttempts.filter(attempt=>attempt.active && attempt.is_current).map(attempt=>{
+    examResults: assessmentWorkflowMode() === "live" ? [...examRows.filter(row => retainedResultIds.has(String(row.id))).map(mapExamResult), ...assessmentAttempts.filter(attempt=>attempt.active && attempt.is_current).map(attempt=>{
       const enrolment=enrolmentRows.find(row=>String(row.id)===attempt.enrolment_id);
       return {id:attempt.id,studentId:String(enrolment?.student_id),offeringId:String(enrolment?.offering_id),componentType:attempt.component,
         sourceSystem:(attempt.origin==="Manual"?"manual":attempt.origin==="Portal"?"theory_portal":"practical_osce") as ExamResult["sourceSystem"],sourceAttemptId:attempt.id,
         score:attempt.score,passMark:attempt.pass_mark,passed:attempt.passed,resitRequired:!attempt.passed,isResit:attempt.ordinal>1||Boolean(attempt.previous_result_unavailable),
         attemptNumber:attempt.sequence??1,priorAttemptMissing:Boolean(attempt.previous_result_unavailable),takenOn:attempt.sitting_date,importedAt:attempt.sitting_date};
-    }) : examRows.map(mapExamResult),
+    })] : examRows.map(mapExamResult),
     examPortalMappings: examPortalMappingRows.map(mapExamPortalMapping),
     examPortalSubmissions: examPortalSubmissionRows.map(mapExamPortalSubmission),
     managedFiles: managedFileRows.map(mapManagedFile)

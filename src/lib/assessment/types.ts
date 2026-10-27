@@ -1,5 +1,6 @@
 export type AssessmentComponent = "theory" | "practical";
 export type AssessmentStatus = "Planned" | "In progress" | "Abandoned" | "Pass" | "Fail" | "Module deferred" | "Assessment deferred";
+export type AssessmentDisplayStatus = AssessmentStatus | "Historical";
 export type AssessmentItemKind = "mcq" | "physics" | "coursework" | "viva";
 export interface AssessmentItemInput { kind: AssessmentItemKind; score?: number; carried_from_item_id?: string }
 export interface AssessmentPlan {
@@ -38,15 +39,25 @@ export interface ComponentResult {
   arrangement_state: "active" | "completed" | "cancelled" | null; note: string | null;
 }
 export interface AssessmentEvaluation {
+  historical?: { protected?: boolean; status: string; credits?: number; final_mark: number | null; grade: string | null; review_flags: string[]; captured_at?: string; capture_reference?: string };
   enrolment_id: string; revision: number; needs_plan?: boolean; plan: AssessmentPlan;
   student_id: string; module_id: string; original_term_id: string;
   components: { theory: ComponentResult; practical?: ComponentResult };
-  calculated_status: AssessmentStatus; effective_status: AssessmentStatus;
+  calculated_status: AssessmentDisplayStatus; effective_status: AssessmentDisplayStatus;
   calculated_indicators: string[]; effective_indicators: string[];
   calculated_credits: number; recommended_credits: number; awarded_credits: number;
   overrides: Array<{ kind: "status" | "indicator" | "credits"; indicator: string; value: string | number | boolean; reason: string }>;
   disposition: string | null; attendance_required: number; attendance_actual: number; presentation_pending: boolean;
   pass_reversed?: boolean;
+}
+export interface HistoricalAssessmentResult {
+  id: string; enrolment_id: string | null; student_id: string; offering_id: string;
+  student_identifier: string; student_name: string; module_code: string; module_title: string;
+  original_cohort: string; original_term_id: string; component: AssessmentComponent;
+  score: number; pass_mark: number; passed: boolean; resit_required: boolean;
+  attempt_number: number; is_resit: boolean; prior_attempt_missing: boolean;
+  resit_of_result_id: string | null; taken_on: string; source_system: string; source_attempt_id: string;
+  represented_by_attempt_id: string | null; reviewed_backfill: boolean;
 }
 export interface AssessmentPlanPreview {
   before: AssessmentEvaluation;
@@ -69,6 +80,7 @@ export interface AssessmentSourceEvidence {
   versions: Array<{ id: string; revision: number; observed_at: string; student_identifier: string; component: string; sitting_date: string; score: number | null; pass_mark: number | null; items: AssessmentItemInput[] }>;
 }
 export interface AssessmentOutcome {
+  original_term_id?: string; module_credits?: number;
   temporary_identifier?: string;
   enrolment_id: string; student_id: string; student_identifier: string; student_name: string; module_code: string; module_title: string;
   original_cohort: string; assessment: AssessmentEvaluation; legacy_status: string; legacy_final_mark: number | null; legacy_grade: string | null; legacy_credits: number;

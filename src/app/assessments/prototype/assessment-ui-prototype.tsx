@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ArrowUpRight, CalendarClock, Check, CheckCircle2, ChevronRight, CircleHelp, Clock3, FlaskConical, History, PauseCircle, Search, Settings2, ShieldCheck, X, XCircle } from "lucide-react";
-import type { AssessmentAttempt, AssessmentOutcome, AssessmentPlan, AssessmentStatus } from "@/lib/assessment/types";
+import type { AssessmentAttempt, AssessmentOutcome, AssessmentPlan, AssessmentStatus, AssessmentDisplayStatus } from "@/lib/assessment/types";
 import styles from "./assessment-ui-prototype.module.css";
 
 type Variant = "A" | "B" | "C";
@@ -15,15 +15,15 @@ type Result = { name: ComponentName; score: number | null; passMark: number; sch
 type Entry = { title: string; detail: string; date: string; reason: string };
 type Row = {
   id: string; studentId: string; name: string; identifier: string; module: string; title: string; cohort: string;
-  status: AssessmentStatus; calculated: AssessmentStatus; credits: number; plan: AssessmentPlan;
+  status: AssessmentDisplayStatus; calculated: AssessmentDisplayStatus; credits: number; plan: AssessmentPlan;
   results: Result[]; reasons: string[]; attendance: string | null; exception: string | null;
   disposition: string | null; history: Entry[]; needsPlan: boolean;
 };
 type OpenAction = (row: Row, action?: Action, component?: ComponentName) => void;
 type VariantProps = { rows: Row[]; open: OpenAction; canEdit: boolean; studentScoped?: boolean };
 const variantNames: Record<Variant, string> = { A: "Compact register", B: "Review workspace", C: "Follow-up board" };
-const statusTone: Record<AssessmentStatus, Tone> = { Pass: "green", Fail: "red", "In progress": "blue", Planned: "grey", Abandoned: "grey", "Module deferred": "purple", "Assessment deferred": "purple" };
-const statusLabel: Record<AssessmentStatus, string> = { Pass: "Passed", Fail: "Failed", "In progress": "In progress", Planned: "Not started", Abandoned: "Abandoned", "Module deferred": "Module deferred", "Assessment deferred": "Assessment deferred" };
+const statusTone: Record<AssessmentDisplayStatus, Tone> = { Pass: "green", Fail: "red", "In progress": "blue", Planned: "grey", Abandoned: "grey", "Module deferred": "purple", "Assessment deferred": "purple", Historical: "grey" };
+const statusLabel: Record<AssessmentDisplayStatus, string> = { Pass: "Passed", Fail: "Failed", "In progress": "In progress", Planned: "Not started", Abandoned: "Abandoned", "Module deferred": "Module deferred", "Assessment deferred": "Assessment deferred", Historical: "Historical status" };
 
 function humanIndicator(indicator: string) {
   if (indicator === "Attendance non-compliance") return "Attendance requirement not met";

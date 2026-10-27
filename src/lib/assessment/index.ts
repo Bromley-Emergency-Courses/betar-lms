@@ -1,6 +1,8 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase";
 import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "./feature";
+import { retainHistoricalOutcomes } from "./historical";
+import type { HistoricalAssessmentResult } from "./types";
 import type { AssessmentAttemptEvent, AssessmentDecision, AssessmentPlanPreview, AssessmentSourceEvidence } from "./types";
 import type { EnrolmentWorkspace } from "../student-enrolment";
 import type { AssessmentCommand, AssessmentChangeSummary, AssessmentEvaluation, AssessmentIngestionSummary, AssessmentSourceInput, AssessmentOutcome, AssessmentAttempt, AssessmentSource, AssessmentPlan, AssessmentRevision } from "./types";
@@ -62,7 +64,7 @@ export async function previewEnrolmentAssessmentPlan(enrolmentId: string, planId
   return data;
 }
 
-export async function readAssessmentTable<Row>(table: "assessment_outcomes" | "assessment_attempt_history" | "assessment_import_reconciliation" | "module_assessment_plans" | "module_assessment_attempt_revisions" | "module_assessment_arrangements" | "enrolment_assessment_history" | "audit_events" | "assessment_backfill_candidates" | "assessment_shadow_comparison" | "module_assessment_source_versions" | "assessment_revision_history", filter?: { column: string; value: string }): Promise<Row[]> {
+export async function readAssessmentTable<Row>(table: "assessment_outcomes" | "assessment_historical_results" | "assessment_attempt_history" | "assessment_import_reconciliation" | "module_assessment_plans" | "module_assessment_attempt_revisions" | "module_assessment_arrangements" | "enrolment_assessment_history" | "audit_events" | "assessment_backfill_candidates" | "assessment_shadow_comparison" | "module_assessment_source_versions" | "assessment_revision_history", filter?: { column: string; value: string }): Promise<Row[]> {
   const client = await assessmentClient();
   const rows: Row[] = [];
   for (let offset = 0; ; offset += 500) {
@@ -72,8 +74,13 @@ export async function readAssessmentTable<Row>(table: "assessment_outcomes" | "a
     const { data, error } = await query;
     if (error) throw new Error(error.message);
     rows.push(...(data as Row[]));
-    if (data.length < 500) return rows;
+    if (data.length < 500) break;
   }
+  if (table === "assessment_outcomes") {
+    const historical = await readAssessmentTable<HistoricalAssessmentResult>("assessment_historical_results", filter);
+    return retainHistoricalOutcomes(rows as AssessmentOutcome[], historical) as Row[];
+  }
+  return rows;
 }
 
 export async function backfillAssessmentResults(approvals: Array<{legacy_result_id:string;legacy_hash:string}>, reason: string) {
@@ -90,13 +97,14 @@ export async function setAssessmentRollout(mode: "shadow" | "live", evidence: Re
 }
 
 export async function readAssessmentWorkspace(studentId?: string) {
-  const [outcomes, attempts, sources, plans] = await Promise.all([
+  const [outcomes, attempts, sources, plans, historicalResults] = await Promise.all([
     readAssessmentTable<AssessmentOutcome>("assessment_outcomes", studentId ? { column: "student_id", value: studentId } : undefined),
     readAssessmentTable<AssessmentAttempt>("assessment_attempt_history"),
     readAssessmentTable<AssessmentSource>("assessment_import_reconciliation"),
-    readAssessmentTable<AssessmentPlan>("module_assessment_plans")
+    readAssessmentTable<AssessmentPlan>("module_assessment_plans"),
+    readAssessmentTable<HistoricalAssessmentResult>("assessment_historical_results", studentId ? { column: "student_id", value: studentId } : undefined)
   ]);
-  return { outcomes, attempts, sources, plans };
+  return { outcomes, attempts, sources, plans, historicalResults };
 }
 
 export type AssessmentSummary = Pick<AssessmentOutcome, "enrolment_id" | "student_id" | "student_name" | "student_identifier" | "module_code" | "module_title" | "original_cohort" | "assessment">;
@@ -108,16 +116,25 @@ export async function readAssessmentSummaries(enrolmentIds: string[]): Promise<A
   const identifiers = [...new Set(enrolmentIds)];
   for (let offset = 0; offset < identifiers.length; offset += 50) {
     const { data, error } = await client.from("assessment_outcomes")
-      .select("enrolment_id,student_id,student_name,student_identifier,module_code,module_title,original_cohort,assessment")
+      .select("enrolment_id,student_id,student_name,student_identifier,module_code,module_title,original_cohort,assessment,legacy_status,legacy_final_mark,legacy_grade,legacy_credits,original_term_id,module_credits")
       .in("enrolment_id", identifiers.slice(offset, offset + 50)).order("enrolment_id");
     if (error) throw new Error(error.message);
-    rows.push(...data as AssessmentSummary[]);
+    const historical: HistoricalAssessmentResult[] = [];
+    for (let page = 0; ; page += 500) {
+      const { data: records, error: recordError } = await client.from("assessment_historical_results").select("*")
+        .in("enrolment_id", identifiers.slice(offset, offset + 50)).order("id").range(page, page + 499);
+      if (recordError) throw new Error(recordError.message);
+      historical.push(...records as HistoricalAssessmentResult[]);
+      if (records.length < 500) break;
+    }
+    rows.push(...retainHistoricalOutcomes(data as AssessmentOutcome[], historical));
   }
   return rows;
 }
 
 export async function readAssessmentRecords(studentId?: string) {
   const outcomes = await readAssessmentTable<AssessmentOutcome>("assessment_outcomes", studentId ? { column: "student_id", value: studentId } : undefined);
+  const historicalResults = await readAssessmentTable<HistoricalAssessmentResult>("assessment_historical_results", studentId ? { column: "student_id", value: studentId } : undefined);
   const client = await assessmentClient();
 
   async function scopedRows<Row>(table: string, columns: string, column: string, ids: string[]): Promise<Row[]> {
@@ -149,5 +166,5 @@ export async function readAssessmentRecords(studentId?: string) {
   const lifecycle = await scopedRows<Omit<AssessmentAttemptEvent, "actor_name">>("assessment_attempt_events", "id,attempt_id,attempt_revision_id,kind,category,exclusion_id,source_version_id,reason,created_at,event_order,actor_id", "enrolment_id", outcomes.map(outcome => outcome.enrolment_id));
   const actors = await scopedRows<{ id: string; full_name: string }>("staff_profiles", "id,full_name", "id", [...new Set([...decisions, ...lifecycle].map(event => event.actor_id))]);
   const actorName = (actorId: string) => actors.find(actor => actor.id === actorId)?.full_name ?? "Administrator";
-  return { outcomes, attempts: attempts.map(attempt => ({ ...attempt, lifecycle: lifecycle.filter(event => event.attempt_id === attempt.id).sort((first, second) => second.event_order - first.event_order).map(event => ({ ...event, actor_name: actorName(event.actor_id) })) })), revisions, sourceEvidence, terms: terms as Array<{ id: string; name: string }>, decisions: decisions.map(decision => ({ ...decision, actor_name: actorName(decision.actor_id) })) };
+  return { outcomes, historicalResults, attempts: attempts.map(attempt => ({ ...attempt, lifecycle: lifecycle.filter(event => event.attempt_id === attempt.id).sort((first, second) => second.event_order - first.event_order).map(event => ({ ...event, actor_name: actorName(event.actor_id) })) })), revisions, sourceEvidence, terms: terms as Array<{ id: string; name: string }>, decisions: decisions.map(decision => ({ ...decision, actor_name: actorName(decision.actor_id) })) };
 }
