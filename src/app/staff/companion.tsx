@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Check, ChevronRight, Users, UserRound, ClipboardPen } from "lucide-react";
 import { indicatorLabel } from "@/lib/assessment/display";
-import { companionPageSize, companionHref as href, companionScreen, termAttendance, type CompanionData } from "@/lib/staff-companion";
+import { attendanceLabel, companionPageSize, companionHref as href, companionScreen, recordedAttendanceDays, termAttendance, type CompanionData } from "@/lib/staff-companion";
 import styles from "./companion.module.css";
 import { PresentationEditButton } from "@/components/presentation-edit-button";
 import { CompanionTeaching } from "./companion-teaching";
@@ -9,9 +9,6 @@ import { CompanionEntry } from "./companion-entry";
 
 function dateLabel(date: string) {
   return new Date(date + "T12:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
-}
-function attendanceLabel(attended: number | null, required: number | null) {
-  return attended === null || required === null ? "Unavailable" : `${attended}/${required}`;
 }
 const statusLabels: Record<string, string> = { attended: "✓ Attended", partial: "◐ Partial", missed: "× Missed", expected: "○ Planned", not_recorded: "Not recorded" };
 function statusStyle(status: string) {
@@ -49,7 +46,7 @@ export function StaffCompanion({ data }: { data: CompanionData }) {
             {Object.entries(query).filter(([key, value]) => key !== "attendanceTerm" && value !== undefined).map(([key, value]) => <input key={key} type="hidden" name={key} value={value} />)}
             <label>Show attendance for term<select aria-label="Show attendance for term" name="attendanceTerm" defaultValue={profile.attendanceTerm}>{terms.filter(term => profile.modules.some(module => module.termId === term.id)).map(term => <option key={term.id} value={term.id}>{term.name}</option>)}</select></label><button>Show dates</button>
           </form>
-          <p className={styles.quiet}>Attendance {(() => { const summary = termAttendance(profile.modules.filter(module => module.termId === profile.attendanceTerm)); return attendanceLabel(summary.attended, summary.required); })()} · attended/required, including applicable carried attendance.</p>
+          <p className={styles.quiet}>Attendance {(() => { const summary = termAttendance(profile.modules.filter(module => module.termId === profile.attendanceTerm)); return attendanceLabel(summary.attended, summary.required, recordedAttendanceDays(profile.attendance, data.today)); })()} · reviewed totals include applicable carryover; recorded totals show this term only, not requirement completion.</p>
           {!profile.attendance.length && <p className={styles.empty}>No attendance recorded or planned in this term.</p>}
           {profile.attendance.map(session => <div key={session.id} className={`${styles.attendanceRow} ${session.status === "expected" ? styles.plannedRow : ""}`}><span><strong>{dateLabel(session.date)}</strong><small>{session.startsAt.slice(0, 5)}–{session.endsAt.slice(0, 5)}</small></span><span className={statusStyle(session.status)}>{statusLabels[session.status] ?? session.status}</span></div>)}
           <p className={styles.quiet}>Planned dates are expectations, not completed attendance. Calendar changes remain with administrators.</p>
@@ -85,17 +82,17 @@ export function StaffCompanion({ data }: { data: CompanionData }) {
         <div className={styles.tableLabels}><span>Student</span><span>Term att.</span><span>Pres.</span><span>FA</span></div>
         {students.map(student => <Link key={student.id} className={`${styles.studentRow} ${student.here ? styles.here : ""}`} href={href(query, { studentId: student.id, screen: "student" })}>
           <span><strong>{student.name}</strong><small>{student.identifier}</small>{student.here && <small className={styles.present}>● Here today</small>}{student.risk.length > 0 && <small className={styles.risk}>{student.risk.map(indicatorLabel).join(" · ")}</small>}</span>
-          <span>{attendanceLabel(student.attended, student.required)}</span><span aria-label={student.presentationUnknown ? "Presentation unavailable" : !student.presentationRequired ? "Presentation not required" : student.presentationComplete ? "Presentation complete" : "Presentation incomplete"}>{student.presentationUnknown ? "?" : !student.presentationRequired ? "N/A" : student.presentationComplete ? <Check size={20} /> : "—"}</span><span>{student.formative}</span>
+          <span>{attendanceLabel(student.attended, student.required, student.recordedAttendance)}</span><span aria-label={student.presentationUnknown ? student.presentationRecorded ? "Presentation recorded; completion not verified" : "Presentation not recorded; completion not verified" : !student.presentationRequired ? "Presentation not required" : student.presentationComplete ? "Presentation complete" : "Presentation incomplete"}>{student.presentationUnknown ? student.presentationRecorded ? "Recorded" : "Not recorded" : !student.presentationRequired ? "N/A" : student.presentationComplete ? <Check size={20} /> : "—"}</span><span>{student.formative}</span>
         </Link>)}
       </div> : <>
         <p className={styles.quiet}>Scroll dates horizontally. Attendance statuses are per session; presentation labels deduplicate assessors. Planned presentations are labelled separately by module.</p>
-        <div className={styles.matrixScroll} role="region" aria-label="Term attendance and presentation register" tabIndex={0}><table className={styles.matrix}><thead><tr><th scope="col">Student</th>{data.dates.map(date => <th scope="col" key={date}>{dateLabel(date)}</th>)}</tr></thead><tbody>{students.map(student => <tr key={student.id} className={student.here ? styles.here : ""}><th scope="row"><Link href={href(query, { studentId: student.id, screen: "student" })}><strong>{student.name}</strong>{student.here && <small className={styles.present}>● Here today</small>}<small>Attendance {attendanceLabel(student.attended, student.required)}</small><small>Presentations {student.presentationUnknown ? "Unavailable" : `${student.presentationComplete}/${student.presentationRequired}`}</small></Link></th>{data.dates.map(date => {
+        <div className={styles.matrixScroll} role="region" aria-label="Term attendance and presentation register" tabIndex={0}><table className={styles.matrix}><thead><tr><th scope="col">Student</th>{data.dates.map(date => <th scope="col" key={date}>{dateLabel(date)}</th>)}</tr></thead><tbody>{students.map(student => <tr key={student.id} className={student.here ? styles.here : ""}><th scope="row"><Link href={href(query, { studentId: student.id, screen: "student" })}><strong>{student.name}</strong>{student.here && <small className={styles.present}>● Here today</small>}<small>Attendance {attendanceLabel(student.attended, student.required, student.recordedAttendance)}</small><small>Presentations {student.presentationUnknown ? `${student.presentationComplete + student.presentationRecorded}/${student.presentationRequired} evidenced` : `${student.presentationComplete}/${student.presentationRequired}`}</small></Link></th>{data.dates.map(date => {
           const day = student.days.find(candidate => candidate.date === date);
           return <td key={date}>{day?.statuses.length ? day.statuses.map(status => <span key={status} className={statusStyle(status)}>{statusLabels[status] ?? status}</span>) : day?.expected ? <span className={styles.planned}>○ Planned</span> : <span className={styles.quiet}>—</span>}{day?.presentations.map(code => <span className={styles.presentation} key={code}>{code} · Presented</span>)}{day?.plannedPresentations?.map(code => <span className={styles.planned} key={code}>{code} · Presentation planned</span>)}</td>;
         })}</tr>)}</tbody></table></div>
       </>}
       <nav className={styles.pagination} aria-label="Student pages">{query.page > 1 ? <Link href={href(query, { page: query.page - 1 })}>Previous</Link> : <span />}<span>Page {query.page} of {pages}</span>{query.page < pages ? <Link href={href(query, { page: query.page + 1 })}>Next</Link> : <span />}</nav>
-      <p className={styles.quiet}>Attendance is the shared term total, including approved carryover—not a total for this module alone. Completion ticks may include accepted earlier teaching evidence. Plans and additional assessor submissions never add completed days or presentations.</p>
+      <p className={styles.quiet}>Attendance is shared across the term. Reviewed totals and completion ticks include applicable carryover. “Recorded” shows this term’s attended/part-attended dates or module presentation evidence—not verified completion. Missing records do not mean failure. Plans and extra assessor submissions do not count as completed teaching.</p>
     </>}
     <nav className={styles.teachingNav} aria-label="Teaching navigation">
       <Link aria-current={screen === "overview" ? "page" : undefined} href={href(query, { screen: "overview" })}><Users size={21} aria-hidden="true" />Overview</Link>

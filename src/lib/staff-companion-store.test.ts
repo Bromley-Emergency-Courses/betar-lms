@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StaffCompanion } from "@/app/staff/companion";
 import { readStaffCompanion } from "./staff-companion-store";
 import { requirePermission } from "./auth";
 import { createSupabaseServerClient } from "./supabase";
@@ -8,6 +11,9 @@ import { readStudentAttendance } from "./student-attendance-store";
 import type { AssessmentSummary } from "./assessment";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/components/presentation-edit-button", () => ({ PresentationEditButton: () => null }));
+vi.mock("@/app/staff/companion-teaching", () => ({ CompanionTeaching: () => null }));
+vi.mock("@/app/staff/companion-entry", () => ({ CompanionEntry: () => null }));
 vi.mock("./auth", () => ({ requirePermission: vi.fn() }));
 vi.mock("./supabase", () => ({ createSupabaseServerClient: vi.fn() }));
 vi.mock("./assessment", () => ({ readAssessmentSummaries: vi.fn() }));
@@ -32,6 +38,7 @@ const from = vi.fn((table: string) => {
 });
 
 beforeEach(() => {
+  vi.stubGlobal("React", React);
   vi.clearAllMocks(); queries.length = 0;
   vi.mocked(requirePermission).mockResolvedValue({ id: "staff", fullName: "Teacher", active: true, role: "teacher" });
   vi.mocked(staffCompanionEnabled).mockReturnValue(true);
@@ -55,6 +62,51 @@ beforeEach(() => {
 });
 
 describe("staff companion server reads", () => {
+  it("shows recorded teaching evidence without an inherited assessment plan or a new academic failure", async () => {
+    const studentId = identifier(100), sessionId = identifier(900);
+    outcomes[0] = { ...outcomes[0], assessment: { needs_plan: true, effective_status: "In progress", effective_indicators: [],
+      historical: { protected: true, status: "planned", credits: 10, final_mark: null, grade: null, review_flags: [] }, components: {}
+    } } as unknown as AssessmentSummary;
+    tables.attendance_sessions = [{ id: sessionId, term_id: termId, session_date: "2026-09-10", starts_at: "09:00", ends_at: "17:00" }];
+    tables.attendance_records = [{ id: identifier(901), student_id: studentId, session_id: sessionId, status: "attended" }];
+    tables.presentation_scores = [1, 2].map(number => ({ id: identifier(910 + number), student_id: studentId, offering_id: offeringId, occurred_on: "2026-09-10" }));
+    const roster = await readStaffCompanion({});
+    expect(roster.students[0]).toMatchObject({ attended: null, required: null, recordedAttendance: 1, presentationRecorded: 1, presentationUnknown: true, risk: [] });
+    expect(roster.students[1]).toMatchObject({ presentationRecorded: 0, presentationComplete: 1 });
+    const html = renderToStaticMarkup(React.createElement(StaffCompanion, { data: roster }));
+    expect(html).toContain(">1 recorded</span>");
+    expect(html).toContain('aria-label="Presentation recorded; completion not verified">Recorded</span>');
+    expect(html).not.toContain(">?</span>");
+    const profile = (await readStaffCompanion({ studentId })).profile!;
+    expect(profile.modules[0]).toMatchObject({ presentation: "Recorded", status: "In progress", risk: [], attended: null, required: null });
+    expect(profile.teachingOfferingIds).toEqual([]);
+  });
+  it("distinguishes absent teaching records from failed requirements and keeps a presentation plan separate", async () => {
+    outcomes[0] = { ...outcomes[0], assessment: { needs_plan: true, effective_status: "Pass", effective_indicators: [],
+      historical: { protected: true, status: "completed", credits: 10, final_mark: null, grade: null, review_flags: [] }, components: {}
+    } } as unknown as AssessmentSummary;
+    const sessionId = identifier(900);
+    tables.attendance_sessions = [{ id: sessionId, term_id: termId, session_date: "2099-10-30", starts_at: "09:00", ends_at: "17:00" }];
+    tables.expected_attendance = [{ student_id: identifier(100), session_id: sessionId }];
+    tables.presentation_plans = [{ enrolment_id: identifier(200), session_id: sessionId }];
+    const roster = await readStaffCompanion({ mode: "term" });
+    expect(roster.students[0]).toMatchObject({ recordedAttendance: 0, presentationRecorded: 0, presentationUnknown: true, risk: [] });
+    expect(roster.students[0].days[0]).toMatchObject({ expected: true, presentations: [], plannedPresentations: ["VA"] });
+    const html = renderToStaticMarkup(React.createElement(StaffCompanion, { data: roster }));
+    expect(html).toContain("Attendance 0 recorded");
+    expect(html).toContain("Presentations 0/1 evidenced");
+    expect((await readStaffCompanion({ studentId: identifier(100) })).profile?.modules[0]).toMatchObject({ presentation: "Not recorded", status: "Pass", risk: [] });
+  });
+  it("does not count another term's attendance or a different offering's presentation in the selected roster", async () => {
+    outcomes[0] = { ...outcomes[0], assessment: { ...outcomes[0].assessment, needs_plan: true } };
+    tables.attendance_sessions = [{ id: identifier(900), term_id: identifier(999), session_date: "2026-09-10", starts_at: "09:00", ends_at: "17:00" }];
+    tables.attendance_records = [{ id: identifier(901), student_id: identifier(100), session_id: identifier(900), status: "attended" }];
+    tables.presentation_scores = [{ id: identifier(902), student_id: identifier(100), offering_id: identifier(998), occurred_on: "2026-09-10" }];
+    const data = await readStaffCompanion({});
+    expect(data.students[0]).toMatchObject({ recordedAttendance: 0, presentationRecorded: 0, presentationUnknown: true });
+    const html = renderToStaticMarkup(React.createElement(StaffCompanion, { data }));
+    expect(html).toContain('aria-label="Presentation not recorded; completion not verified">Not recorded</span>');
+  });
   it("returns historical scores and current protected status in the selected Staff profile without enabling writes", async () => {
     outcomes[0] = { ...outcomes[0], assessment: { needs_plan: true, effective_status: "In progress", effective_indicators: [],
       historical: { protected: true, status: "planned", current_term_in_progress: true, credits: 10, final_mark: null, grade: null, review_flags: [] },

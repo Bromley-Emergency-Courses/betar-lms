@@ -7,7 +7,7 @@ import type { TeachingOptions } from "./student-teaching";
 import { readStudentAttendance } from "./student-attendance-store";
 import { presentationBreakdown } from "./presentation-display";
 import {
-  companionPageSize, companionQuerySchema, companionScreen, isHereToday, moduleResult, studentDays, teachingDate, termAttendance,
+  attachRecordedPresentations, companionPageSize, companionQuerySchema, companionScreen, isHereToday, moduleResult, recordedAttendanceDays, studentDays, teachingDate, termAttendance,
   type CompanionAttendance, type CompanionData, type CompanionEnrolment, type CompanionExpectation,
   type CompanionModule, type CompanionModuleResult, type CompanionOffering, type CompanionPresentation,
   type CompanionProfile, type CompanionSession, type CompanionTeaching, type CompanionTerm
@@ -52,7 +52,7 @@ async function moduleResults(enrolments: CompanionEnrolment[], offerings: Compan
   });
 }
 
-async function teachingRecords(client: Client, studentId: string, modules: CompanionModuleResult[]): Promise<CompanionTeaching[]> {
+async function teachingRecords(client: Client, studentId: string, modules: CompanionModuleResult[]): Promise<{ records: CompanionTeaching[]; presentations: CompanionPresentation[] }> {
   const scope = { column: "student_id", ids: [studentId] };
   const common = "id,student_id,offering_id,staff_user_id,occurred_on";
   const [encounters, formative, presentations] = await Promise.all([
@@ -65,7 +65,7 @@ async function teachingRecords(client: Client, studentId: string, modules: Compa
     rows<{ id: string; full_name: string }>(client, "staff_profiles", "id,full_name", { column: "id", ids: [...new Set(all.map(record => record.staff_user_id))] }),
     rows<{ id: string; name: string; domains: Array<{ id: string; label: string }> }>(client, "assessment_definitions", "id,name,domains", { column: "id", ids: [...new Set(formative.flatMap(record => record.definition_id ? [record.definition_id] : []))] })
   ]);
-  return all.map(record => {
+  const records = all.map(record => {
     const courseModule = modules.find(candidate => candidate.offeringId === record.offering_id)!;
     const kind = encounters.includes(record) ? "Encounter" : presentations.includes(record) ? "Presentation" : "Formative assessment";
     const definition = definitions.find(candidate => candidate.id === record.definition_id);
@@ -81,6 +81,7 @@ async function teachingRecords(client: Client, studentId: string, modules: Compa
     ];
     return { id: record.id, date: record.occurred_on, kind, author: authors.find(author => author.id === record.staff_user_id)?.full_name ?? "Teaching staff", module: `${courseModule.code} · ${courseModule.title}`, term: courseModule.term, comment: record.summary ?? record.comments ?? "", details };
   }).sort((first, second) => second.date.localeCompare(first.date) || first.id.localeCompare(second.id));
+  return { records, presentations };
 }
 
 async function attachPresentationPlans(client: Client, modules: CompanionModuleResult[]) {
@@ -89,7 +90,7 @@ async function attachPresentationPlans(client: Client, modules: CompanionModuleR
   for (const courseModule of modules) {
     const plan = plans.find(plan => plan.enrolment_id === courseModule.id);
     const session = sessions.find(session => session.id === plan?.session_id && session.term_id === courseModule.termId);
-    if (session && courseModule.presentation === "Incomplete") courseModule.plannedPresentationDate = session.session_date;
+    if (session && ["Incomplete", "Not recorded"].includes(courseModule.presentation)) courseModule.plannedPresentationDate = session.session_date;
   }
 }
 
@@ -121,8 +122,10 @@ export async function readStaffCompanion(input: Record<string, string | undefine
     const identity = identities[0];
     if (!identity) return data;
     const results = await moduleResults(enrolments, offerings, modules, terms);
+    const [attendance, teachingData] = await Promise.all([readStudentAttendance(identity.id), teachingRecords(client, identity.id, results)]);
+    const teaching = teachingData.records;
+    attachRecordedPresentations(results, identity.id, teachingData.presentations, data.today);
     await attachPresentationPlans(client, results);
-    const [attendance, teaching] = await Promise.all([readStudentAttendance(identity.id), teachingRecords(client, identity.id, results)]);
     let teachingOfferingIds: string[] = [];
     let presentationOfferingIds: string[] = [];
     if (data.teachingEnabled) {
@@ -181,6 +184,7 @@ export async function readStaffCompanion(input: Record<string, string | undefine
     rows<{ student_id: string; offering_id: string }>(client, "assessment_attempts", "id,student_id,offering_id", scope)
   ]);
   const scopedPresentations = presentations.filter(event => termOfferings.some(offering => offering.id === event.offering_id));
+  for (const student of page) attachRecordedPresentations(forStudent(student.id), student.id, scopedPresentations, data.today);
   await attachPresentationPlans(client, page.flatMap(student => forStudent(student.id)));
   data.dates = [...new Set([...sessions.map(session => session.session_date), ...scopedPresentations.map(event => event.occurred_on)])].sort();
   data.students = page.map(student => {
@@ -189,9 +193,14 @@ export async function readStaffCompanion(input: Record<string, string | undefine
     return {
       id: student.id, name: `${student.first_name} ${student.last_name}`, identifier: student.cccu_student_id || student.temporary_id,
       here: isHereToday(student.id, data.today, sessions, presence), risk: riskForStudent(student.id), ...termAttendance(allModules),
+      recordedAttendance: recordedAttendanceDays(attendance.filter(record => record.student_id === student.id).flatMap(record => {
+        const session = sessions.find(session => session.id === record.session_id);
+        return session ? [{ date: session.session_date, status: record.status }] : [];
+      }), data.today),
       presentationComplete: selectedModules.filter(module => module.presentation === "Complete").length,
+      presentationRecorded: selectedModules.filter(module => module.presentation === "Recorded").length,
       presentationRequired: selectedModules.filter(module => module.presentation !== "N/A").length,
-      presentationUnknown: selectedModules.some(module => module.presentation === "Unavailable"),
+      presentationUnknown: selectedModules.some(module => ["Unavailable", "Recorded", "Not recorded"].includes(module.presentation)),
       formative: formative.filter(record => record.student_id === student.id && selectedModules.some(module => module.offeringId === record.offering_id)).length,
       days: query.mode === "term" ? studentDays(student.id, sessions, attendance, expectations, scopedPresentations, allModules).map(day => ({ ...day, plannedPresentations: allModules.filter(module => module.plannedPresentationDate === day.date).map(module => module.code) })) : []
     };

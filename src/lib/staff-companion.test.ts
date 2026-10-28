@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { componentScoreText } from "./assessment/display";
 import type { AssessmentSummary } from "./assessment";
-import { companionHref, companionScreen, companionQuerySchema, isHereToday, moduleResult, studentDays, teachingDate, termAttendance, type CompanionModuleResult } from "./staff-companion";
+import { attachRecordedPresentations, attendanceLabel, companionHref, companionScreen, companionQuerySchema, isHereToday, moduleResult, recordedAttendanceDays, studentDays, teachingDate, termAttendance, type CompanionModuleResult } from "./staff-companion";
 
 const enrolment = { id: "enrolment", student_id: "student", offering_id: "offering", presentation_required_override: null };
 const offering = { id: "offering", term_id: "term", module_id: "module", presentation_required: true };
@@ -123,6 +123,35 @@ describe("staff companion read projection", () => {
 });
 
 describe("attendance and presentation evidence", () => {
+  it("labels recorded attendance separately from reviewed totals and never invents a requirement", () => {
+    expect(attendanceLabel(null, null, 0)).toBe("0 recorded");
+    expect(attendanceLabel(null, 5, 2)).toBe("2 recorded");
+    expect(attendanceLabel(4, 5, 2)).toBe("4/5");
+    expect(attendanceLabel(null, null)).toBe("Unavailable");
+    expect(recordedAttendanceDays([
+      { date: "2026-10-25", status: "attended" }, { date: "2026-10-25", status: "partial" },
+      { date: "2026-10-24", status: "partial" }, { date: "2026-10-23", status: "missed" },
+      { date: "2026-10-22", status: "expected" }, { date: "2026-10-21", status: "not_recorded" },
+      { date: "2026-10-26", status: "attended" }
+    ], "2026-10-25")).toBe(2);
+  });
+  it("shows only the student's already occurred presentation for this offering without overriding canonical completion", () => {
+    const unavailable = { ...result(), presentation: "Unavailable" as const };
+    const modules = [unavailable, { ...result(), id: "canonical" }];
+    const events = [
+      { student_id: "other", offering_id: "offering", occurred_on: "2026-10-24" },
+      { student_id: "student", offering_id: "earlier-offering", occurred_on: "2026-10-24" },
+      { student_id: "student", offering_id: "offering", occurred_on: "2026-10-26" }
+    ];
+    attachRecordedPresentations(modules, "student", events, "2026-10-25");
+    expect(modules.map(module => module.presentation)).toEqual(["Not recorded", "Complete"]);
+    const recorded: CompanionModuleResult = { ...result(), presentation: "Unavailable" };
+    const notRequired: CompanionModuleResult = { ...result(), presentation: "N/A" };
+    attachRecordedPresentations([recorded, notRequired], "student", [...events, { student_id: "student", offering_id: "offering", occurred_on: "2026-10-25" }], "2026-10-25");
+    expect(recorded.presentation).toBe("Recorded");
+    expect(notRequired.presentation).toBe("N/A");
+    expect(recorded.risk).toEqual(result().risk);
+  });
   const session = { id: "session", term_id: "term", session_date: "2026-10-25", starts_at: "09:00", ends_at: "16:00" };
   const record = { student_id: "student", session_id: "session", status: "attended", checked_in_at: "2026-10-25T09:00:00Z", checked_out_at: null };
   it("requires an actual unclosed check-in on a session today", () => {
