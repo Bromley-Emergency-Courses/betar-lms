@@ -2,7 +2,7 @@
 
 The current end-to-end implementation and release sequence is recorded in [Student workspace release checkpoints](student-workspace-release-checkpoints.md), including the remaining local acceptance and separate real-data/main/production approvals.
 
-The implementation is additive. Production has not been migrated or modified. The legacy `exam_results`, enrolment status, Final mark, Grade and credit values remain available for reconciliation. Formative `assessment_attempts` remains a separate teaching record.
+Release-window status (2026-10-28): the owner-approved additive production migrations `0049`–`0079` are applied and original public data preservation is verified. PR #56 is merged at `1d79b98`. After owner approval to replace project pause with a temporary firewall barrier, the exact merged source built successfully as a staged production deployment. Public access remains denied; authenticated runtime validation, historical-edit/import compatibility, promotion and reopening are not complete. All new workflow flags remain disabled and database rollout mode remains shadow; no backfill, synthetic data or assessment cutover was performed. Post-build read-only checks confirm original public data and historical fields remain unchanged. The legacy `exam_results`, enrolment status, Final mark, Grade and credit values remain available for reconciliation. Formative `assessment_attempts` remains a separate teaching record.
 
 For the current approved student-workspace integration and isolated Docker commands, follow [Student workspace development](student-workspace-development.md). The earlier rehearsal/browser evidence below is historical, not acceptance of the latest build. Do not use its old launchers against other local stacks. Migration 0058 disables manual matching and legacy source mutations; the current guarded correction/exclusion/restoration workflows replace those steps.
 
@@ -65,7 +65,7 @@ Workspace-only scripts, screenshots, CSVs and result logs are retained in `.cont
 | `shadow` | Legacy screens remain authoritative. Portal/CSV imports also create immutable evidence. `/assessments` and student profiles expose the new workflow for reconciliation and pilot review. |
 | `live` | Assessment projections supply profile results, risk, credits and official exports. Legacy exam/outcome mutations are rejected. The database must also be in `live` mode with recorded sign-offs. |
 
-Apply the complete repository migration chain to a local/test Supabase instance before enabling `shadow` (currently through `0074`). Use the guarded local launcher for this workspace. The rehearsal databases are for SQL testing and are not automatically substituted for the local Supabase API's database.
+Apply the complete repository migration chain to a local/test Supabase instance before enabling `shadow` (currently through `0079`, including the combined Staff and historical-protection migrations). Use the guarded local launcher for this workspace. The rehearsal databases are for SQL testing and are not automatically substituted for the local Supabase API's database.
 
 Deployment ordering matters even when the flags are off: this integrated release reads the new active-enrolment view and uses the revisioned photo RPCs from legacy photo actions. It must not run against a pre-migration database. Confirm auto-deployment behaviour before merging; deploy only within the separately authorized additive-schema/application rollout, or pause automatic deployment while the PR/merge is prepared. Turning assessment mode off is a workflow rollback on a migrated database, not a schema rollback.
 
@@ -90,7 +90,7 @@ The adapter API requires an active administrator session and `x-assessment-reaso
 
 ## Reconciliation and backfill
 
-Run `scripts/assessment-preflight.sql` against the intended dataset using a read-only database connection and export the result for administrator review. The script explicitly starts a read-only transaction. No deployed-data report has been run as part of this implementation.
+Run `scripts/assessment-preflight.sql` against the intended dataset using an authorized read-only database connection and retain the result under the agreed data-handling rules for administrator review. The script explicitly starts a read-only transaction. Approved read-only aggregate screening and a pseudonymized academic rehearsal have been completed; their private evidence does not certify whole-production recovery or final reconciliation. Recheck the intended release dataset rather than treating older snapshot counts as current.
 
 In shadow mode, `/assessments/reconciliation` provides backfill exception and shadow-comparison CSVs. Review plans and assign inherited versions before backfill. Select reviewed eligible rows and supply a review reference. The RPC verifies the current legacy hash, direct ownership, source identity, predecessor chain and sequence. It preserves all originals and records an immutable backfill ledger. Retries do not create additional attempts. Existing newer/conflicting source evidence is never overwritten by backfill.
 
