@@ -30,7 +30,12 @@ function groupFor(assessment: AssessmentEvaluation) {
 
 export function OutcomeBadge({ assessment }: { assessment: AssessmentEvaluation }) {
   const status = assessment.effective_status;
-  return <span className={`${styles.badge} ${status === "Pass" ? styles.good : status === "Fail" ? styles.bad : styles.neutral}`}>{assessment.historical ? `${assessment.historical.protected ? "Recorded" : "Historical"} · ${assessment.overrides?.some(decision => decision.kind === "status") ? `${status} (amended)` : historicalStatusLabel(assessment.historical.status)}` : assessment.needs_plan ? "Plan review required" : statusLabels[status] ?? "Awaiting review"}</span>;
+  const amended = assessment.overrides?.some(decision => decision.kind === "status");
+  const currentTeaching = assessment.historical?.protected && assessment.historical.current_term_in_progress && !amended;
+  const label = currentTeaching ? statusLabels[status] ?? status : assessment.historical
+    ? `${assessment.historical.protected ? "Recorded" : "Historical"} · ${amended ? `${status} (amended)` : historicalStatusLabel(assessment.historical.status)}`
+    : assessment.needs_plan ? "Plan review required" : statusLabels[status] ?? "Awaiting review";
+  return <span className={`${styles.badge} ${status === "Pass" ? styles.good : status === "Fail" ? styles.bad : styles.neutral}`}>{label}</span>;
 }
 
 function ComponentScore({ result, notRequired = false }: { result?: ComponentResult; notRequired?: boolean }) {

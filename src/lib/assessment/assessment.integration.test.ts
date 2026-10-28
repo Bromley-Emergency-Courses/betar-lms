@@ -117,6 +117,7 @@ beforeAll(async () => {
   await db.query("insert into enrolments(id,student_id,offering_id,status,credits_awarded) values($1,$2,$3,'failed',0)", [protectedFailedEnrolment, failedStudent, protectedOffering]);
   await db.exec(readFileSync("supabase/migrations/0079_historical_outcome_protection.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0080_protected_current_teaching.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0081_protected_ongoing_lifecycle.sql", "utf8"));
 }, 30000);
 
 beforeEach(async () => {
@@ -130,6 +131,62 @@ beforeEach(async () => {
   await db.query("insert into public.enrolments(id,student_id,offering_id) values($1,$2,$3)", [enrolmentId,studentId,offeringId]);
 });
 afterAll(async () => { await db?.close(); });
+
+describe("protected ongoing lifecycle", () => {
+  beforeEach(async () => { await db.exec("begin"); });
+  afterEach(async () => { await db.exec("rollback"); });
+  it.each([0, 10])("shows current protected Planned enrolments as In progress while retaining %i credits", async credits => {
+    await db.query("update terms set status='active' where id=$1", [termId]);
+    await db.query("update enrolments set assessment_plan_id=null,credits_awarded=$2 where id=$1", [enrolmentId,credits]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'planned',$2)", [enrolmentId,credits]);
+    const original = await scalar("select to_jsonb(enrolment) value from enrolments enrolment where id=$1", [enrolmentId]);
+    const assessment = await scalar<AssessmentEvaluation>("select assessment_evaluate($1,'2025-03-01') value", [enrolmentId]);
+    expect(assessment.effective_status).toBe("In progress");
+    expect(assessment.awarded_credits).toBe(credits);
+    expect(assessment.historical).toMatchObject({ protected: true, status: "planned", credits, current_term_in_progress: true });
+    expect(assessment.effective_indicators).toEqual([]);
+    expect(await scalar("select to_jsonb(enrolment) value from enrolments enrolment where id=$1", [enrolmentId])).toEqual(original);
+  });
+  it.each([
+    ["before term", "2024-12-31", "active", "planned", "active", true, "Planned"],
+    ["first day", "2025-01-01", "active", "planned", "active", true, "In progress"],
+    ["last day", "2025-05-31", "active", "planned", "active", true, "In progress"],
+    ["after term", "2025-06-01", "active", "planned", "active", true, "Planned"],
+    ["closed term", "2025-03-01", "closed", "planned", "active", true, "Planned"],
+    ["draft term", "2025-03-01", "draft", "planned", "active", true, "Planned"],
+    ["inactive student", "2025-03-01", "active", "planned", "withdrawn", true, "Planned"],
+    ["inactive module", "2025-03-01", "active", "planned", "active", false, "Planned"],
+    ["recorded pass", "2025-03-01", "active", "completed", "active", true, "Pass"],
+    ["recorded failure", "2025-03-01", "active", "failed", "active", true, "Fail"],
+    ["recorded deferral", "2025-03-01", "active", "deferred", "active", true, "Historical"],
+    ["recorded resit", "2025-03-01", "active", "resit", "active", true, "Historical"],
+    ["recorded ongoing", "2025-03-01", "active", "in_progress", "active", true, "In progress"]
+  ] as const)("respects %s without changing protected credits or original fields", async (_name, date, termStatus, status, studentStatus, moduleActive, expected) => {
+    await db.query("update terms set status=$2::term_status where id=$1", [termId,termStatus]);
+    await db.query("update students set status=$2::student_status where id=$1", [studentId,studentStatus]);
+    await db.query("update course_modules set active=$2 where id=$1", [moduleId,moduleActive]);
+    await db.query("update enrolments set assessment_plan_id=null,status=$2::enrolment_status,credits_awarded=10 where id=$1", [enrolmentId,status]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,$2,10)", [enrolmentId,status]);
+    const baseline = await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId]);
+    const assessment = await scalar<AssessmentEvaluation>("select assessment_evaluate($1,$2::date) value", [enrolmentId,date]);
+    expect(assessment.effective_status).toBe(expected);
+    expect(assessment.awarded_credits).toBe(10);
+    expect(assessment.historical?.current_term_in_progress).toBe(expected === "In progress");
+    expect(await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId])).toEqual(baseline);
+  });
+  it("keeps explicit status amendments authoritative and restores ongoing teaching when cleared", async () => {
+    await db.query("update terms set status='active',starts_on=current_date-5,ends_on=current_date+20 where id=$1", [termId]);
+    await db.query("update enrolments set assessment_plan_id=null,credits_awarded=10 where id=$1", [enrolmentId]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'planned',10)", [enrolmentId]);
+    expect((await evaluate()).effective_status).toBe("In progress");
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "Planned" });
+    expect(await evaluate()).toMatchObject({ effective_status: "Planned", awarded_credits: 10 });
+    await command({ type: "ClearAssessmentOverride", kind: "status" });
+    expect(await evaluate()).toMatchObject({ effective_status: "In progress", awarded_credits: 10 });
+    expect(await scalar("select status::text value from enrolments where id=$1", [enrolmentId])).toBe("planned");
+    expect(await scalar("select recorded_credits value from assessment_historical_outcomes where enrolment_id=$1", [enrolmentId])).toBe(10);
+  });
+});
 
 describe("release review regressions", () => {
   it("protects a historical pass and credits after reviewed backfill despite unrecorded attendance", async () => {
