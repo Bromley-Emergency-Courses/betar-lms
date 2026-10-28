@@ -29,7 +29,7 @@ export interface CompanionExpectation { student_id: string; session_id: string }
 export interface CompanionPresentation { student_id: string; offering_id: string; occurred_on: string }
 export interface CompanionModuleResult {
   id: string; offeringId: string; moduleId: string; code: string; title: string; termId: string; term: string;
-  status: string; theory: string; practical: string; presentation: "Complete" | "Incomplete" | "N/A" | "Unavailable";
+  status: string; theory: string; practical: string; presentation: "Complete" | "Incomplete" | "N/A" | "Unavailable" | "Recorded" | "Not recorded";
   attended: number | null; required: number | null; practicalModule: boolean | null; risk: string[];
   plannedPresentationDate?: string;
 }
@@ -37,6 +37,7 @@ export interface CompanionDay { date: string; statuses: string[]; expected: bool
 export interface CompanionStudent {
   id: string; name: string; identifier: string; here: boolean; risk: string[];
   attended: number | null; required: number | null; presentationComplete: number; presentationRequired: number; presentationUnknown: boolean;
+  recordedAttendance: number; presentationRecorded: number;
   formative: number; days: CompanionDay[];
 }
 export interface CompanionTeaching {
@@ -96,6 +97,22 @@ export function termAttendance(results: CompanionModuleResult[]) {
   const practical = results.filter(result => result.practicalModule);
   if (practical.some(result => result.attended === null || result.required === null)) return { attended: null, required: null };
   return { attended: Math.max(0, ...practical.map(result => result.attended!)), required: Math.max(0, ...practical.map(result => result.required!)) };
+}
+
+export function recordedAttendanceDays(records: Array<{ date: string; status: string }>, today: string): number {
+  return new Set(records.filter(record => record.date <= today && ["attended", "partial"].includes(record.status)).map(record => record.date)).size;
+}
+
+export function attendanceLabel(attended: number | null, required: number | null, recorded?: number): string {
+  if (attended !== null && required !== null) return `${attended}/${required}`;
+  return recorded === undefined ? "Unavailable" : `${recorded} recorded`;
+}
+
+export function attachRecordedPresentations(modules: CompanionModuleResult[], studentId: string, presentations: CompanionPresentation[], today: string) {
+  for (const courseModule of modules) {
+    if (courseModule.presentation !== "Unavailable") continue;
+    courseModule.presentation = presentations.some(event => event.student_id === studentId && event.offering_id === courseModule.offeringId && event.occurred_on <= today) ? "Recorded" : "Not recorded";
+  }
 }
 
 export function isHereToday(studentId: string, today: string, sessions: CompanionSession[], attendance: CompanionAttendance[]): boolean {

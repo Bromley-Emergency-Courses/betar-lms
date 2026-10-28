@@ -105,7 +105,7 @@
   .filters { grid-template-columns: 1fr; }
   .profileGrid { grid-template-columns: minmax(0, 1fr); }
   .historyFilter { grid-template-columns: 1fr; }
-  .tableLabels, .studentRow { grid-template-columns: minmax(0, 1fr) 53px 36px 24px; gap: 6px; padding: 14px 3px; font-size: 12px; }
+  .tableLabels, .studentRow { grid-template-columns: minmax(0, 1fr) 53px 60px 24px; gap: 6px; padding: 14px 3px; font-size: 12px; }
   .tableLabels { font-size: 9px; }
   .studentRow > span { overflow-wrap: anywhere; }
   .results { grid-template-columns: 1fr auto; }
