@@ -360,10 +360,19 @@ export async function syncEnrolmentStatusesForExamResults(
     ]
   };
   const affectedKeys = new Set(incomingResults.map((result) => `${result.studentId}:${result.offeringId}`));
+  const affectedEnrolments = nextData.enrolments.filter(enrolment => affectedKeys.has(`${enrolment.studentId}:${enrolment.offeringId}`));
+  const protectedEnrolments = new Set<string>();
+  for (let offset = 0; offset < affectedEnrolments.length; offset += 200) {
+    const { data: historical, error } = await supabase.from("assessment_historical_outcomes")
+      .select("enrolment_id")
+      .in("enrolment_id", affectedEnrolments.slice(offset, offset + 200).map(enrolment => enrolment.id));
+    if (error) throw new Error(error.message);
+    for (const baseline of historical ?? []) protectedEnrolments.add(baseline.enrolment_id);
+  }
   const updates: EnrolmentStatusUpdate[] = [];
 
-  for (const enrolment of nextData.enrolments) {
-    if (!affectedKeys.has(`${enrolment.studentId}:${enrolment.offeringId}`)) {
+  for (const enrolment of affectedEnrolments) {
+    if (protectedEnrolments.has(enrolment.id)) {
       continue;
     }
 
