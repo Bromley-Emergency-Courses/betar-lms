@@ -28,6 +28,17 @@ const outcome: AssessmentOutcome = {
 };
 
 describe("historical assessment continuity", () => {
+  it("does not label protected ongoing enrolments as historical teaching", () => {
+    for (const status of ["planned", "in_progress"]) {
+      const assessment = {
+        ...outcome.assessment, effective_status: status === "planned" ? "Planned" : "In progress",
+        historical: { protected: true, status, final_mark: null, grade: null, review_flags: [] }
+      } as AssessmentEvaluation;
+      const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment }));
+      expect(html).toContain(`Recorded · ${status.replaceAll("_", " ")}`);
+      expect(html).not.toContain("Historical ·");
+    }
+  });
   it("preserves recorded outcome, credits and legacy marks without recalculating a failed score", () => {
     const original = structuredClone(outcome);
     const [retained] = retainHistoricalOutcomes([outcome], [result]);
@@ -102,7 +113,7 @@ describe("historical assessment continuity", () => {
     } as AssessmentEvaluation };
     const [retained] = retainHistoricalOutcomes([amended], [{ ...result, represented_by_attempt_id: "accepted", reviewed_backfill: true }]);
     expect(retained.assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 0, historical: { protected: true, status: "completed", credits: 10 }, overrides: amended.assessment.overrides });
-    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }))).toContain("Historical · Fail (amended)");
+    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }))).toContain("Recorded · Fail (amended)");
     const csv = assessmentExportCsv("outcomes", [retained], [], []);
     expect(csv).toContain(",Fail,");
     expect(csv).toContain("Reviewed original decision");
