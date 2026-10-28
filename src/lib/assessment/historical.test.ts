@@ -28,6 +28,28 @@ const outcome: AssessmentOutcome = {
 };
 
 describe("historical assessment continuity", () => {
+  it("shows the current In progress state rather than the captured Planned label", () => {
+    const assessment = {
+      ...outcome.assessment, effective_status: "In progress", awarded_credits: 10,
+      historical: { protected: true, status: "planned", current_term_in_progress: true, credits: 10, final_mark: null, grade: null, review_flags: [] }
+    } as AssessmentEvaluation;
+    const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment }));
+    expect(html).toContain(">In progress</span>");
+    expect(html).not.toContain("Recorded · planned");
+  });
+  it("retains ongoing status and awarded credits through history merging and exports", () => {
+    const ongoing = { ...outcome, legacy_status: "planned", legacy_final_mark: null, legacy_grade: null,
+      assessment: { ...outcome.assessment, effective_status: "In progress", awarded_credits: 10, effective_indicators: [],
+        historical: { protected: true, status: "planned", current_term_in_progress: true, credits: 10, final_mark: null, grade: null, review_flags: [] }
+      } as AssessmentEvaluation };
+    const [retained] = retainHistoricalOutcomes([ongoing], []);
+    expect(retained.assessment).toMatchObject({ effective_status: "In progress", awarded_credits: 10, historical: { status: "planned", credits: 10 } });
+    const csv = assessmentExportCsv("outcomes", [retained], [], []);
+    expect(csv).toContain(",In progress,");
+    expect(csv).toContain("planned,10");
+    const amended = { ...retained.assessment, effective_status: "Planned", overrides: [{ kind: "status", value: "Planned", indicator: "", reason: "Explicit review" }] } as AssessmentEvaluation;
+    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: amended }))).toContain("Recorded · Planned (amended)");
+  });
   it("does not label protected ongoing enrolments as historical teaching", () => {
     for (const status of ["planned", "in_progress"]) {
       const assessment = {
