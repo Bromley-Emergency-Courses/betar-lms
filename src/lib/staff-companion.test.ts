@@ -11,6 +11,42 @@ const outcome = { assessment: { plan: { mode: "practical" }, components: { theor
 const result = () => moduleResult(enrolment, offering, courseModule, term, outcome);
 
 describe("staff companion read projection", () => {
+  it("shows retained historical exam results and outcomes without requiring a new assessment plan", () => {
+    const historical = { ...outcome, assessment: { ...outcome.assessment, plan: undefined, needs_plan: true,
+      effective_status: "Pass", effective_indicators: [],
+      historical: { protected: true, status: "completed", credits: 10, final_mark: null, grade: null, review_flags: [] },
+      components: { theory: { score: 72, origin: "Historical record", attempt_count: 1 }, practical: { score: 0, origin: "Historical record", attempt_count: 1 } }
+    } } as unknown as AssessmentSummary;
+    expect(moduleResult(enrolment, offering, courseModule, term, historical)).toMatchObject({ status: "Pass", theory: "72% (recorded)", practical: "0% (recorded)", risk: [] });
+  });
+  it("distinguishes no recorded exam from unavailable data on protected ongoing enrolments", () => {
+    const ongoing = { ...outcome, assessment: { ...outcome.assessment, plan: undefined, needs_plan: true,
+      effective_status: "In progress", effective_indicators: [],
+      historical: { protected: true, current_term_in_progress: true, status: "planned", credits: 10, final_mark: null, grade: null, review_flags: [] },
+      components: { theory: { score: null, origin: "Historical record", attempt_count: 0 }, practical: { score: null, origin: "Historical record", attempt_count: 0 } }
+    } } as unknown as AssessmentSummary;
+    expect(moduleResult(enrolment, offering, courseModule, term, ongoing)).toMatchObject({ status: "In progress", theory: "Not recorded", practical: "Not recorded", attended: null, required: null });
+  });
+  it("does not hide historical Practical evidence when a reviewed plan is online", () => {
+    const historical = { ...outcome, assessment: { ...outcome.assessment, plan: { ...outcome.assessment.plan, mode: "online" },
+      historical: { protected: true, status: "completed", final_mark: null, grade: null, review_flags: [] },
+      components: { ...outcome.assessment.components, practical: { ...outcome.assessment.components.practical!, score: 65, origin: "Historical record", attempt_count: 1 } }
+    } } as AssessmentSummary;
+    expect(moduleResult(enrolment, offering, courseModule, term, historical).practical).toBe("65% (recorded)");
+    historical.assessment.components.practical!.score = null;
+    expect(moduleResult(enrolment, offering, courseModule, term, historical).practical).toBe("Review result history");
+    historical.assessment.components.practical!.attempt_count = 0;
+    expect(moduleResult(enrolment, offering, courseModule, term, historical).practical).toBe("N/A");
+  });
+  it("keeps protected Fail and explicit warning flags visible without inferring historical teaching failures", () => {
+    const historical = { ...outcome, assessment: { ...outcome.assessment, needs_plan: true,
+      historical: { protected: true, status: "failed", final_mark: null, grade: null, review_flags: ["Administrative review"] },
+      effective_indicators: ["Presentation incomplete"], presentation_pending: true
+    } } as AssessmentSummary;
+    expect(moduleResult(enrolment, offering, courseModule, term, historical)).toMatchObject({ status: "Fail", risk: ["Module failed", "Presentation incomplete"], presentation: "Unavailable", attended: null });
+    const passed = { ...historical, assessment: { ...historical.assessment, effective_status: "Pass" as const, effective_indicators: [] } };
+    expect(moduleResult(enrolment, offering, courseModule, term, passed).risk).toEqual([]);
+  });
   it("keeps existing student links working and validates explicit destinations", () => {
     const studentId = "62000000-0000-4000-8000-000000000001";
     expect(companionScreen(companionQuerySchema.parse({}))).toBe("overview");

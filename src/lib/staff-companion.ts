@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AssessmentSummary } from "./assessment";
 import { componentScoreText } from "./assessment/display";
+import type { AssessmentEvaluation } from "./assessment/types";
 
 export const companionPageSize = 20;
 export const companionQuerySchema = z.object({
@@ -60,20 +61,33 @@ export function teachingDate(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
+function companionExamScore(assessment: AssessmentEvaluation | undefined, component: "theory" | "practical", reviewed: boolean): string {
+  const result = assessment?.components?.[component];
+  const notRequired = component === "practical" && reviewed && assessment?.plan.mode === "online";
+  if (assessment?.historical && result?.origin === "Historical record") {
+    if (result.score !== null && result.score !== undefined) return `${result.score}% (recorded)`;
+    if (result.attempt_count > 0) return "Review result history";
+    return notRequired ? "N/A" : "Not recorded";
+  }
+  if (reviewed) return componentScoreText(result, notRequired);
+  return assessment?.historical && !result ? "Not recorded" : "Unavailable";
+}
+
 export function moduleResult(enrolment: CompanionEnrolment, offering: CompanionOffering, courseModule: CompanionModule, term: CompanionTerm, outcome?: AssessmentSummary): CompanionModuleResult {
   const assessment = outcome?.assessment;
   const reviewed = Boolean(assessment && !assessment.needs_plan && assessment.plan);
+  const outcomeAvailable = reviewed || Boolean(assessment?.historical);
   const presentationRequired = enrolment.presentation_required_override ?? offering.presentation_required;
   const held = ["Abandoned", "Module deferred", "Assessment deferred"].includes(assessment?.effective_status ?? "");
   return {
     id: enrolment.id, offeringId: offering.id, moduleId: courseModule.id, code: courseModule.code, title: courseModule.title, termId: term.id, term: term.name,
-    status: assessment?.needs_plan ? "Plan review required" : assessment?.effective_status ?? "Unavailable",
-    theory: reviewed ? componentScoreText(assessment?.components?.theory) : "Unavailable",
-    practical: reviewed ? componentScoreText(assessment?.components?.practical, assessment?.plan.mode === "online") : "Unavailable",
+    status: assessment?.historical ? assessment.effective_status : assessment?.needs_plan ? "Plan review required" : assessment?.effective_status ?? "Unavailable",
+    theory: companionExamScore(assessment, "theory", reviewed),
+    practical: companionExamScore(assessment, "practical", reviewed),
     presentation: !presentationRequired ? "N/A" : !reviewed || typeof assessment?.presentation_pending !== "boolean" ? "Unavailable" : assessment.presentation_pending ? "Incomplete" : "Complete",
     attended: reviewed ? assessment?.attendance_actual ?? null : null, required: reviewed ? assessment?.attendance_required ?? null : null,
     practicalModule: reviewed ? assessment?.plan.mode === "practical" : null,
-    risk: !reviewed || held ? [] : [...new Set([...(assessment?.effective_status === "Fail" ? ["Module failed"] : []), ...(assessment?.effective_indicators ?? [])])]
+    risk: !outcomeAvailable || held ? [] : [...new Set([...(assessment?.effective_status === "Fail" ? ["Module failed"] : []), ...(assessment?.effective_indicators ?? [])])]
   };
 }
 
