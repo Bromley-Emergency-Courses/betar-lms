@@ -118,6 +118,10 @@ beforeAll(async () => {
   await db.exec(readFileSync("supabase/migrations/0079_historical_outcome_protection.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0080_protected_current_teaching.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0081_protected_ongoing_lifecycle.sql", "utf8"));
+  const preservedBeforeActivationMigration = await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment");
+  await db.exec(readFileSync("supabase/migrations/0082_current_assessment_activation.sql", "utf8"));
+  expect(await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment")).toEqual(preservedBeforeActivationMigration);
+  expect(await scalar("select count(*)::int value from assessment_current_activations")).toBe(0);
 }, 30000);
 
 beforeEach(async () => {
@@ -131,6 +135,185 @@ beforeEach(async () => {
   await db.query("insert into public.enrolments(id,student_id,offering_id) values($1,$2,$3)", [enrolmentId,studentId,offeringId]);
 });
 afterAll(async () => { await db?.close(); });
+
+describe("reviewed current assessment activation", () => {
+  beforeEach(async () => {
+    await db.exec("begin");
+    await db.query("update terms set status='active',starts_on=current_date-30,ends_on=current_date+30 where id=$1", [termId]);
+    await db.query("update enrolments set assessment_plan_id=null,credits_awarded=10 where id=$1", [enrolmentId]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'planned',10)", [enrolmentId]);
+  });
+  afterEach(async () => { await db.exec("rollback"); });
+  async function activationQuery<Value>(sql: string, parameters: unknown[]) {
+    await db.exec("savepoint activation_request");
+    try { return await scalar<Value>(sql, parameters); }
+    catch (error) { await db.exec("rollback to activation_request"); throw error; }
+    finally { await db.exec("release activation_request"); }
+  }
+  async function preview(keys = [enrolmentId]) {
+    return activationQuery<{ enrolments: Array<{ enrolment_id: string; before: AssessmentEvaluation; after: AssessmentEvaluation }> }>("select preview_current_assessment_activation($1::uuid[]) value", [keys]);
+  }
+  async function activate(reviewed?: unknown, keys = [enrolmentId], reason = "Reviewed current cohort only") {
+    return activationQuery("select activate_current_assessments($1::uuid[],$2::jsonb,$3,true) value", [keys, JSON.stringify(reviewed ?? await preview(keys)), reason]);
+  }
+  it("previews without writes, activates once and retains provenance, credits and baseline fields", async () => {
+    const original = await scalar("select to_jsonb(enrolment) value from enrolments enrolment where id=$1", [enrolmentId]);
+    const reviewed = await preview();
+    expect(reviewed.enrolments[0].after).toMatchObject({ effective_status: "In progress", awarded_credits: 10, calculated_credits: 0 });
+    expect(await scalar("select to_jsonb(enrolment) value from enrolments enrolment where id=$1", [enrolmentId])).toEqual(original);
+    await activate(reviewed);
+    expect(await evaluate()).toMatchObject({ effective_status: "In progress", awarded_credits: 10, activation: { preserved_credits: 10, original_record: { status: "planned", credits: 10 } } });
+    expect((await evaluate()).historical).toBeUndefined();
+    expect(await scalar("select jsonb_build_object('status',status,'credits',credits_awarded,'mark',final_mark,'grade',grade) value from enrolments where id=$1", [enrolmentId])).toEqual({ status: "planned", credits: 10, mark: null, grade: null });
+    expect(await scalar("select count(*)::int value from audit_events where action='assessment.ActivateCurrentEnrolment' and entity_id=$1", [enrolmentId])).toBe(1);
+    await expect(activate(reviewed)).rejects.toThrow(/already activated/);
+  });
+  it("preserves 10 through Fail, resit, Pass, correction and reversal; credit overrides are independent", async () => {
+    await activate();
+    const failed = await command(score(30));
+    expect(failed.assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 10, calculated_credits: 0 });
+    await command({ type: "ScheduleResit", component: "theory", note: "Next term sitting" });
+    expect((await evaluate()).effective_indicators).toContain("theory:Resit scheduled");
+    const passed = await command({ ...score(70), sitting_date: "2025-07-01" });
+    expect(passed.assessment).toMatchObject({ effective_status: "Pass", awarded_credits: 10 });
+    const corrected = await command({ ...score(20), type: "CorrectManualAttempt", attempt_id: passed.assessment.components.theory.id, sitting_date: "2025-07-01" });
+    expect(corrected).toMatchObject({ pass_reversed: true, assessment: { effective_status: "Fail", awarded_credits: 10 } });
+    expect(await scalar("select count(*)::int value from module_assessment_attempts where enrolment_id=$1", [enrolmentId])).toBe(2);
+    expect(await scalar("select count(*)::int value from module_assessment_attempt_revisions revision join module_assessment_attempts attempt on attempt.id=revision.attempt_id where attempt.enrolment_id=$1", [enrolmentId])).toBe(3);
+    await command({ type: "SetAssessmentOverride", kind: "credits", value: 0 });
+    expect((await evaluate()).awarded_credits).toBe(0);
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" });
+    expect((await evaluate()).awarded_credits).toBe(0);
+    await command({ type: "ClearAssessmentOverride", kind: "credits" });
+    expect((await evaluate()).awarded_credits).toBe(10);
+    await command({ type: "ClearAssessmentOverride", kind: "status" });
+    expect(await evaluate()).toMatchObject({ effective_status: "Fail", awarded_credits: 10 });
+  });
+  it("keeps new calculation for a zero-credit baseline and permits resits after term ends", async () => {
+    await db.exec("rollback; begin");
+    await db.query("update terms set status='active',starts_on=current_date-30,ends_on=current_date+30 where id=$1", [termId]);
+    await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'planned',0)", [enrolmentId]);
+    await activate();
+    expect((await evaluate()).awarded_credits).toBe(0);
+    await command(score(30));
+    await db.query("update terms set status='closed',ends_on=current_date-1 where id=$1", [termId]);
+    expect((await command({ ...score(80), sitting_date: "2025-07-01" })).assessment).toMatchObject({ effective_status: "Pass", awarded_credits: 10 });
+  });
+  it.each([
+    "update terms set status='closed' where id=$1",
+    "update terms set starts_on=current_date+1,ends_on=current_date+30 where id=$1",
+    "update terms set starts_on=current_date-30,ends_on=current_date-1 where id=$1"
+  ])("rejects non-current terms: %s", async sql => {
+    await db.query(sql, [termId]);
+    await expect(preview()).rejects.toThrow(/active current term/);
+  });
+  it("rejects stale reviews after requirements, plans or decisions change", async () => {
+    const reviewed = await preview();
+    await db.query("update enrolments set presentation_required_override=true where id=$1", [enrolmentId]);
+    await expect(activate(reviewed)).rejects.toThrow(/changed.*preview/i);
+  });
+  it("rejects a changed global plan rather than silently adopting it", async () => {
+    const reviewed = await preview();
+    await plan({ theory_pass_mark: 60 });
+    await expect(activate(reviewed)).rejects.toThrow(/changed.*preview/i);
+  });
+  it("rejects a preview after new attendance evidence even when the outcome is unchanged", async () => {
+    const reviewed = await preview();
+    const sessionId = randomUUID();
+    await db.query("insert into attendance_sessions(id,term_id,session_date,starts_at,ends_at,location) values($1,$2,current_date,'09:00','17:00','Synthetic room')", [sessionId, termId]);
+    await db.query("insert into attendance_records(session_id,student_id,status) values($1,$2,'attended')", [sessionId, studentId]);
+    await expect(activate(reviewed)).rejects.toThrow(/changed.*preview/i);
+    await activate();
+    expect((await evaluate()).effective_status).toBe("In progress");
+  });
+  it("activates a preserved In progress record without changing its original status", async () => {
+    await db.exec("rollback; begin");
+    await db.query("update terms set status='active',starts_on=current_date-30,ends_on=current_date+30 where id=$1", [termId]);
+    await db.query("update enrolments set assessment_plan_id=null,status='in_progress',credits_awarded=10 where id=$1", [enrolmentId]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'in_progress',10)", [enrolmentId]);
+    await activate();
+    expect((await command(score(30))).assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 10, activation: { original_record: { status: "in_progress" } } });
+    expect(await scalar("select status::text value from enrolments where id=$1", [enrolmentId])).toBe("in_progress");
+  });
+  it("rejects result or decision history even when a decision is cleared", async () => {
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "In progress" });
+    await command({ type: "ClearAssessmentOverride", kind: "status" });
+    await expect(preview()).rejects.toThrow(/academic evidence/);
+  });
+  it("rejects legacy scores, inactive participation and missing global plans", async () => {
+    await db.exec("savepoint eligibility");
+    await db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'theory','manual',$3,70,50,true,false,current_date)", [studentId, offeringId, randomUUID()]);
+    await expect(preview()).rejects.toThrow(/academic evidence/);
+    await db.exec("rollback to eligibility");
+    await db.query("update students set status='withdrawn' where id=$1", [studentId]);
+    await expect(preview()).rejects.toThrow(/active student/);
+    await db.exec("rollback to eligibility");
+    await db.query("update course_modules set active=false where id=$1", [moduleId]);
+    await expect(preview()).rejects.toThrow(/active student/);
+    await db.exec("rollback to eligibility");
+    await db.query("update course_modules set assessment_plan_id=null where id=$1", [moduleId]);
+    await expect(preview()).rejects.toThrow(/global module assessment plan/);
+  });
+  it("uses global weighted practical requirements without failing unfinished current teaching", async () => {
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ physics_weighting: true, practical_pass_mark: 50 });
+    await db.query("update module_offerings set attendance_days_required_first_practical=2,attendance_days_required_subsequent_practical=2,presentation_required=true where id=$1", [offeringId]);
+    await activate();
+    expect(await evaluate()).toMatchObject({ effective_status: "In progress", awarded_credits: 10, attendance_actual: 0, attendance_required: 2, presentation_pending: true, effective_indicators: [] });
+    await command({ ...score(80), items: [{ kind: "mcq", score: 80 }, { kind: "physics", score: 60 }] });
+    expect((await evaluate()).components.theory.score).toBe(70);
+    await command(score(70, "practical"));
+    expect((await evaluate()).effective_status).toBe("In progress");
+    const afterTerm = await scalar<AssessmentEvaluation>("select assessment_evaluate($1,current_date+31) value", [enrolmentId]);
+    expect(afterTerm).toMatchObject({ effective_status: "Fail", awarded_credits: 10 });
+    expect(afterTerm.effective_indicators).toEqual(expect.arrayContaining(["Attendance non-compliance", "Presentation incomplete"]));
+  });
+  it("uses Coursework/Viva combined Theory without introducing MCQ or Practical", async () => {
+    await plan({ theory_scheme: "coursework_viva", requires_coursework: true, requires_viva: true });
+    await activate();
+    const result = await command({ ...score(65), items: [{ kind: "coursework", score: 60 }, { kind: "viva", score: 70 }] });
+    expect(result.assessment).toMatchObject({ effective_status: "Pass", awarded_credits: 10, components: { theory: { score: 65 } } });
+    expect(result.assessment.components.practical).toBeUndefined();
+  });
+  it("rejects tampered previews and hides activation reasons from teaching-role projections", async () => {
+    const reviewed = await preview();
+    reviewed.enrolments[0].after.awarded_credits = 0;
+    await expect(activate(reviewed)).rejects.toThrow(/changed.*preview/i);
+    await activate();
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await db.exec("set local role authenticated");
+    expect(await scalar("select count(*)::int value from assessment_current_activations")).toBe(0);
+    const assessment = await evaluate();
+    expect(assessment.activation?.preserved_credits).toBe(10);
+    expect(JSON.stringify(assessment)).not.toContain("Reviewed current cohort only");
+    await db.exec("reset role");
+  });
+  it("requires an active administrator, explicit confirmation, a reason and unique scope", async () => {
+    const reviewed = await preview();
+    await expect(activate(reviewed, [enrolmentId], " ")).rejects.toThrow(/reason/);
+    await expect(activationQuery("select activate_current_assessments($1::uuid[],$2::jsonb,'Reviewed',false) value", [[enrolmentId], JSON.stringify(reviewed)])).rejects.toThrow(/Confirm/);
+    await expect(preview([enrolmentId, enrolmentId])).rejects.toThrow(/unique/);
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await expect(preview()).rejects.toThrow(/administrator/i);
+    await expect(activate(reviewed)).rejects.toThrow(/administrator/i);
+  });
+  it("rejects a mixed eligible/archive batch atomically", async () => {
+    await expect(activate({}, [enrolmentId, protectedEnrolment])).rejects.toThrow(/ongoing|active current term/);
+    expect(await scalar("select count(*)::int value from assessment_current_activations")).toBe(0);
+    expect((await evaluate()).historical?.protected).toBe(true);
+  });
+  it("retains immutable originals and ledger, without changing historical archives", async () => {
+    const archived = await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment]);
+    await activate();
+    await db.exec("savepoint immutable_check");
+    await expect(db.query("update enrolments set credits_awarded=0 where id=$1", [enrolmentId])).rejects.toThrow(/Historical academic baseline/);
+    await db.exec("rollback to immutable_check");
+    await expect(db.query("delete from assessment_current_activations where enrolment_id=$1", [enrolmentId])).rejects.toThrow(/immutable/i);
+    await db.exec("rollback to immutable_check");
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment])).toEqual(archived);
+  });
+});
 
 describe("protected ongoing lifecycle", () => {
   beforeEach(async () => { await db.exec("begin"); });

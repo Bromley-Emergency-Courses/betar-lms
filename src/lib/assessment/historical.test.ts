@@ -28,6 +28,22 @@ const outcome: AssessmentOutcome = {
 };
 
 describe("historical assessment continuity", () => {
+  it.each(["In progress", "Fail", "Pass"] as const)("keeps activated %s authoritative while exporting original credits", status => {
+    const activated = { ...outcome, legacy_status: "planned", legacy_final_mark: null, legacy_grade: null,
+      assessment: { ...outcome.assessment, needs_plan: false, effective_status: status, calculated_status: status,
+        awarded_credits: 10, calculated_credits: status === "Pass" ? 10 : 0, effective_indicators: [], overrides: [], components: { theory: historicalComponent([], "theory") },
+        activation: { activated_at: "2026-10-28", plan_id: "plan", preserved_credits: 10,
+          original_record: { status: "planned", credits: 10, final_mark: null, grade: null, captured_at: "2026-10-27" } }
+      } as AssessmentEvaluation };
+    const [retained] = retainHistoricalOutcomes([activated], []);
+    expect(retained).toBe(activated);
+    expect(retained.assessment.historical).toBeUndefined();
+    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }))).not.toContain("Recorded");
+    const csv = assessmentExportCsv("outcomes", [retained], [], []);
+    expect(csv).toContain(`,${status},${status},`);
+    expect(csv).toContain("existing credits retained unless explicitly amended");
+    expect(csv).toContain("planned,10");
+  });
   it("shows the current In progress state rather than the captured Planned label", () => {
     const assessment = {
       ...outcome.assessment, effective_status: "In progress", awarded_credits: 10,

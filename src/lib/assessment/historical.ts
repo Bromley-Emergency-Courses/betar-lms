@@ -20,6 +20,7 @@ export function historicalComponent(results: HistoricalAssessmentResult[], compo
 
 export function retainHistoricalOutcomes(outcomes: AssessmentOutcome[], results: HistoricalAssessmentResult[]): AssessmentOutcome[] {
   return outcomes.map(outcome => {
+    if (outcome.assessment.activation) return outcome;
     const recorded = results.filter(row => row.enrolment_id === outcome.enrolment_id);
     const unreviewed = recorded.filter(row => !row.reviewed_backfill);
     const hasModernEvidence = Object.values(outcome.assessment.components ?? {}).some(component => component?.attempt_count) || outcome.assessment.overrides?.length || outcome.assessment.disposition;
