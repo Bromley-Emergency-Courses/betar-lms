@@ -55,6 +55,19 @@ beforeEach(() => {
 });
 
 describe("staff companion server reads", () => {
+  it("returns historical scores and current protected status in the selected Staff profile without enabling writes", async () => {
+    outcomes[0] = { ...outcomes[0], assessment: { needs_plan: true, effective_status: "In progress", effective_indicators: [],
+      historical: { protected: true, status: "planned", current_term_in_progress: true, credits: 10, final_mark: null, grade: null, review_flags: [] },
+      components: { theory: { origin: "Historical record", score: 72, attempt_count: 1 }, practical: { origin: "Historical record", score: null, attempt_count: 0 } },
+      overrides: [{ kind: "credits", value: 10, reason: "Private administrative explanation" }]
+    } } as unknown as AssessmentSummary;
+    const profile = (await readStaffCompanion({ studentId: identifier(100) })).profile!;
+    expect(profile.modules[0]).toMatchObject({ status: "In progress", theory: "72% (recorded)", practical: "Not recorded" });
+    expect(profile.teachingOfferingIds).toEqual([]);
+    expect(profile.presentationOfferingIds).toEqual([]);
+    expect(JSON.stringify(profile)).not.toContain("Private administrative explanation");
+    expect(readAssessmentSummaries).toHaveBeenCalledWith([identifier(200)]);
+  });
   it("can retain a selected student on Overview without replacing the roster with their profile", async () => {
     const data = await readStaffCompanion({ screen: "overview", studentId: identifier(100) });
     expect(data.profile).toBeNull();
