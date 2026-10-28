@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
+import { assessmentWorkflowMode } from "@/lib/assessment/feature";
 
 export async function GET() {
+  const mode = assessmentWorkflowMode();
+  const assessmentEnabled = mode !== "off";
   return NextResponse.json({
     endpoint: "/api/exam-adapters/results",
     method: "POST",
-    authentication: "Bearer token matching EXAM_ADAPTER_SHARED_SECRET",
+    authentication: assessmentEnabled ? "Bearer token matching EXAM_ADAPTER_SHARED_SECRET plus an active administrator session" : "Bearer token matching EXAM_ADAPTER_SHARED_SECRET",
+    assessmentWorkflowMode: mode,
+    requiredHeaders: ["authorization", "content-type", ...(assessmentEnabled ? ["x-assessment-reason"] : [])],
     payload: [
       {
         sourceSystem: "theory_portal",
@@ -22,6 +27,8 @@ export async function GET() {
       }
     ],
     notes: [
+      "In shadow/live mode, machine-only bearer credentials are insufficient; an active administrator session and non-empty x-assessment-reason are required.",
+      "The administrator's Exam Portal sync is a separate outbound pull and does not call this endpoint.",
       "cccuStudentId is preferred once CCCU registration is complete.",
       "temporaryId is accepted before CCCU registration.",
       "score and passMark are percentages from 0 to 100.",

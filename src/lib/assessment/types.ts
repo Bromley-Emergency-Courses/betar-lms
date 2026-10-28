@@ -39,6 +39,7 @@ export interface ComponentResult {
   arrangement_state: "active" | "completed" | "cancelled" | null; note: string | null;
 }
 export interface AssessmentEvaluation {
+  activation?: { activated_at: string; plan_id: string; preserved_credits: number | null; original_record: { status: string; credits: number; final_mark: number | null; grade: string | null; captured_at: string } };
   historical?: { protected?: boolean; current_term_in_progress?: boolean; status: string; credits?: number; final_mark: number | null; grade: string | null; review_flags: string[]; captured_at?: string; capture_reference?: string };
   enrolment_id: string; revision: number; needs_plan?: boolean; plan: AssessmentPlan;
   student_id: string; module_id: string; original_term_id: string;

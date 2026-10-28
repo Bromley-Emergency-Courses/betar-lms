@@ -8,17 +8,18 @@ function cell(value: unknown): string {
 
 export function assessmentExportCsv(report: "outcomes" | "attempts" | "reconciliation" | "cccu", outcomes: AssessmentOutcome[], attempts: AssessmentAttempt[], sources: AssessmentSource[], historicalResults: HistoricalAssessmentResult[] = []): string {
   let rows: unknown[][];
-  const includeBasis = historicalResults.length > 0 || outcomes.some(outcome => outcome.assessment.historical);
+  const includeBasis = historicalResults.length > 0 || outcomes.some(outcome => outcome.assessment.historical || outcome.assessment.activation);
   if (report === "outcomes") {
     rows = [["Student ID", "Student Name", "Original Cohort", "Module Code", "Theory", "Practical", "Effective Status", "Calculated Status", "Indicators", "Theory Attempts", "Practical Attempts", "Credits", "Calculated Credits", "Overrides"]];
     if (includeBasis) rows[0].push("Record basis", "Recorded Final mark", "Recorded Grade", "Original recorded status", "Original recorded credits");
     for (const row of outcomes) {
       const assessment = row.assessment;
+      const original = assessment.historical ?? assessment.activation?.original_record;
       rows.push([row.student_identifier, row.student_name, row.original_cohort, row.module_code, assessment.components?.theory?.score,
         !assessment.historical && assessment.plan?.mode === "online" ? "N/A" : assessment.components?.practical?.score, assessment.historical?.protected ? assessment.effective_status : assessment.historical?.status ?? assessment.effective_status, assessment.historical ? "" : assessment.calculated_status,
         assessment.effective_indicators, assessment.components?.theory?.attempt_count, assessment.components?.practical?.attempt_count,
         assessment.awarded_credits, assessment.historical ? "" : assessment.calculated_credits, assessment.historical && !assessment.historical.protected ? "" : assessment.overrides,
-        ...(includeBasis ? [assessment.historical ? "Historical record — original preserved; amendments audited" : "New workflow", assessment.historical?.final_mark, assessment.historical?.grade, assessment.historical?.status, assessment.historical ? assessment.historical.credits ?? row.legacy_credits : ""] : [])]);
+        ...(includeBasis ? [assessment.historical ? "Historical record — original preserved; amendments audited" : assessment.activation ? `Activated current enrolment — original preserved; ${assessment.activation.preserved_credits === null ? "calculated credits" : "existing credits retained unless explicitly amended"}` : "New workflow", original?.final_mark, original?.grade, original?.status, original ? original.credits ?? row.legacy_credits : ""] : [])]);
     }
   } else if (report === "reconciliation") {
     rows = [["Source", "Source Key", "Student ID", "Student Name", "Module", "Component", "Lifecycle", "Conflict", "Identity Override", "Replacement Agrees", "Latest Payload"]];
