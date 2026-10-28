@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { AssessmentEvaluation, AssessmentIngestionSummary } from "./types";
 import type { WorkspaceAttendance } from "../student-workspace";
 import type { EnrolmentWorkspace } from "../student-enrolment";
@@ -116,6 +116,7 @@ beforeAll(async () => {
   await db.query("insert into students(id,temporary_id,first_name,last_name,email,programme,status) values($1::uuid,$1::text,'Historical','Failure','failure@example.test','pgcert','active')", [failedStudent]);
   await db.query("insert into enrolments(id,student_id,offering_id,status,credits_awarded) values($1,$2,$3,'failed',0)", [protectedFailedEnrolment, failedStudent, protectedOffering]);
   await db.exec(readFileSync("supabase/migrations/0079_historical_outcome_protection.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0080_protected_current_teaching.sql", "utf8"));
 }, 30000);
 
 beforeEach(async () => {
@@ -917,6 +918,11 @@ async function teachingDefinition() {
   return (await teachingOptions()).definitions.find(row => row.id === definitionId)!;
 }
 
+async function protectCurrentTeaching(status = "planned") {
+  await db.query("update enrolments set assessment_plan_id=null,status=$2::enrolment_status where id=$1", [enrolmentId,status]);
+  await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,$2,0)", [enrolmentId,status]);
+}
+
 describe("teacher calendar plans", () => {
   let sessionId: string;
   let nextSessionId: string;
@@ -1031,14 +1037,35 @@ describe("teacher calendar plans", () => {
     await db.query("update attendance_sessions set term_id=$2 where id=$1", [nextSessionId,legacyPresentationTerm]);
     await expect(save(await input({ sessionId: nextSessionId }))).rejects.toThrow("existing date");
   });
-  it("does not offer another presentation when earlier evidence carries into a repeat enrolment", async () => {
-    await saveTeaching(await presentationInput());
-    await db.query("select set_config('test.actor',$1,false)", [adminId]); await command(score(30));
-    const nextTerm = randomUUID(), nextOffering = randomUUID(), nextEnrolment = randomUUID();
-    await db.query("insert into terms(id,name,starts_on,ends_on,status) values($1::uuid,$1::text,'2025-09-01','2025-12-31','active')", [nextTerm]);
-    await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity,presentation_required) values($1,$2,$3,0,10,true)", [nextOffering,moduleId,nextTerm]);
-    await db.query("insert into enrolments(id,student_id,offering_id) values($1,$2,$3)", [nextEnrolment,studentId,nextOffering]);
-    expect((await options()).offerings.find(offering => offering.id === nextOffering)?.canPresent).toBe(false);
+  it.each([false,true])("does not offer another presentation when earlier evidence carries into a repeat enrolment (protected legacy: %s)", async protectedLegacy => {
+    await db.exec("begin");
+    try {
+      await saveTeaching(await presentationInput());
+      await db.query("select set_config('test.actor',$1,false)", [adminId]); await command(score(30));
+      const nextTerm = randomUUID(), nextOffering = randomUUID(), nextEnrolment = randomUUID();
+      await db.query("insert into terms(id,name,starts_on,ends_on,status) values($1::uuid,$1::text,'2025-09-01','2025-12-31','active')", [nextTerm]);
+      await db.query("insert into module_offerings(id,module_id,term_id,price_pence,capacity,presentation_required) values($1,$2,$3,0,10,true)", [nextOffering,moduleId,nextTerm]);
+      await db.query("insert into enrolments(id,student_id,offering_id) values($1,$2,$3)", [nextEnrolment,studentId,nextOffering]);
+      if (protectedLegacy) {
+        enrolmentId = nextEnrolment;
+        await protectCurrentTeaching();
+      }
+      expect((await options()).offerings.find(offering => offering.id === nextOffering)?.canPresent).toBe(false);
+      expect((await teachingOptions()).presentations!.some(offering => offering.id === nextOffering)).toBe(false);
+    } finally { await db.exec("rollback"); }
+  });
+  it("allows attendance and presentation planning for protected current enrolments without an exam plan", async () => {
+    await db.exec("begin");
+    try {
+      await protectCurrentTeaching();
+      expect((await options()).offerings[0].canPresent).toBe(true);
+      await save(await input());
+      await save(await input({ kind: "presentation" }));
+      expect((await options()).offerings[0].plannedSessionId).toBe(sessionId);
+      expect((await options()).sessions.find(session => session.id === sessionId)?.expected).toBe(true);
+      expect((await evaluate()).effective_status).toBe("Planned");
+      expect(await scalar<number>("select count(*)::int value from attendance_records where student_id=$1", [studentId])).toBe(0);
+    } finally { await db.exec("rollback"); }
   });
 });
 
@@ -1255,6 +1282,68 @@ describe("student teaching workspace", () => {
   beforeEach(async () => {
     await db.exec("update terms set status='draft' where status='active'");
     await db.query("update terms set status='active' where id=$1", [termId]);
+  });
+  describe("protected current teaching", () => {
+    beforeEach(async () => { await db.exec("begin"); });
+    afterEach(async () => { await db.exec("rollback"); });
+    it.each(["planned", "in_progress", "failed"])("allows current teaching on a protected legacy %s enrolment without an assessment plan", async status => {
+      await protectCurrentTeaching(status);
+      const baseline = await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId]);
+      const before = await evaluate();
+      expect((await teachingOptions()).offerings.map(offering => offering.id)).toEqual([offeringId]);
+      const saved = await saveTeaching(await teachingInput());
+      expect(await scalar("select summary value from encounter_logs where id=$1", [saved.id])).toBe("Observed scan");
+      expect((await evaluate()).effective_status).toBe(before.effective_status);
+      expect(await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId])).toEqual(baseline);
+    });
+    it("records and edits protected current teaching evidence without altering original academic fields", async () => {
+      await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+      await db.query("update module_offerings set presentation_required=true where id=$1", [offeringId]);
+      await protectCurrentTeaching();
+      const before = await scalar("select jsonb_build_object('status',status,'credits',credits_awarded,'mark',final_mark,'grade',grade) value from enrolments where id=$1", [enrolmentId]);
+      const definition = await teachingDefinition();
+      await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+      const formative = await saveTeaching(await teachingInput("formative", { definition_id: definition.id, definition_token: definition.token, assessed_item_ids: ["image"], overall_score: 3, comments: null }));
+      expect(await scalar("select staff_user_id value from assessment_attempts where id=$1", [formative.id])).toBe(teacherId);
+      const presentation = await saveTeaching(await presentationInput());
+      await editPresentation(await presentationEdit({ comments: "Corrected feedback" }));
+      expect(await scalar("select revision value from presentation_scores where id=$1", [presentation.id])).toBe(2);
+      await db.query("select set_config('test.actor',$1,false)", [adminId]);
+      await saveTeaching(await presentationInput());
+      expect(await scalar<number>("select count(*)::int value from presentation_events where enrolment_id=$1", [enrolmentId])).toBe(1);
+      expect(await scalar<number>("select count(*)::int value from module_assessment_attempts where enrolment_id=$1", [enrolmentId])).toBe(0);
+      expect(await scalar("select jsonb_build_object('status',status,'credits',credits_awarded,'mark',final_mark,'grade',grade) value from enrolments where id=$1", [enrolmentId])).toEqual(before);
+      await db.exec("savepoint exam_guard");
+      await expect(command(score(70))).rejects.toThrow("plan");
+      await db.exec("rollback to savepoint exam_guard");
+      await expect(db.query("update enrolments set status='completed' where id=$1", [enrolmentId])).rejects.toThrow("Historical academic baseline");
+    });
+    it.each(["closed term", "inactive student", "inactive module", "cancelled", "Pass", "Abandoned", "Module deferred", "Assessment deferred", "disposition", "deferral"])("retains the %s blocker for a protected unplanned enrolment and rejects open drafts", async blocker => {
+      await db.query("update module_offerings set presentation_required=false where id=$1", [offeringId]);
+      await protectCurrentTeaching();
+      const draft = await teachingInput();
+      const presentation = await presentationInput();
+      if (blocker === "closed term") await db.query("update terms set status='closed' where id=$1", [termId]);
+      else if (blocker === "inactive student") await db.query("update students set status='withdrawn' where id=$1", [studentId]);
+      else if (blocker === "inactive module") await db.query("update course_modules set active=false where id=$1", [moduleId]);
+      else if (blocker === "cancelled") await db.query("insert into enrolment_cancellations(enrolment_id,actor_id,reason,before_record) select id,$2,'Synthetic cancellation',to_jsonb(enrolment) from enrolments enrolment where id=$1", [enrolmentId,adminId]);
+      else if (blocker === "disposition") await db.query("insert into enrolment_disposition_events(enrolment_id,disposition,reason,actor_id) values($1,'Abandoned','Synthetic disposition',$2)", [enrolmentId,adminId]);
+      else if (blocker === "deferral") await db.query("insert into module_assessment_arrangements(enrolment_id,component,kind,state,note,reason,actor_id) values($1,'theory','assessment_deferral','active','Later sitting','Synthetic deferral',$2)", [enrolmentId,adminId]);
+      else await command({ type: "SetAssessmentOverride", kind: "status", value: blocker });
+      expect((await teachingOptions()).offerings).toEqual([]);
+      expect((await teachingOptions()).presentations).toEqual([]);
+      await db.exec("savepoint teaching_guard");
+      await expect(saveTeaching(draft)).rejects.toThrow("active student");
+      await db.exec("rollback to savepoint teaching_guard");
+      await expect(saveTeaching(presentation)).rejects.toThrow("Presentation scoring");
+    });
+    it("keeps protected-teaching eligibility helpers private", async () => {
+      for (const role of ["anon", "authenticated", "service_role"]) {
+        for (const helper of ["student_teaching_plan_ready(uuid,jsonb)", "student_teaching_presentation_pending(uuid,jsonb)"]) {
+          expect(await scalar<boolean>("select has_function_privilege($1,$2,'EXECUTE') value", [role,helper])).toBe(false);
+        }
+      }
+    });
   });
   it("scopes options to enrolled offerings and active module definitions without finance data", async () => {
     const definition = await teachingDefinition();
