@@ -13,6 +13,11 @@ import {
 import { parseAdmissionLeadAdministrativeDetails } from "@/lib/admission-lead-administration";
 import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
 import { requirePermission } from "@/lib/auth";
+import { studentDetailsSchema as studentSchema } from "@/lib/student-details";
+import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessment/feature";
+import { ingestAssessmentSource } from "@/lib/assessment";
+import { inboundAssessmentSource, practicalAssessmentSources } from "@/lib/assessment/adapters";
+import { ingestPortalAssessmentResults } from "@/lib/assessment/portal-ingestion";
 import { correspondenceEmailFailed } from "@/lib/email-delivery";
 import {
   normalizeInboundExamResult,
@@ -27,6 +32,8 @@ import { getLmsData } from "@/lib/lms-data";
 import { presentationRubricCriteria } from "@/lib/presentation-rubric";
 import { sendPortalMagicLinkEmail } from "@/lib/portal-email";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase";
+import { saveStudentPhotoChange } from "@/lib/student-photo-service";
+import { saveLegacyTeaching } from "@/lib/student-teaching-legacy";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -303,30 +310,6 @@ export async function deleteModuleOffering(formData: FormData) {
   revalidateCourseConfig();
 }
 
-const studentSchema = z.object({
-  cccu_student_id: z.string().nullable(),
-  temporary_id: z.string().min(2).max(80),
-  first_name: z.string().min(1).max(80),
-  last_name: z.string().min(1).max(80),
-  email: z.string().email(),
-  phone: z.string().nullable(),
-  status: z.enum(["prospect", "active", "completed", "withdrawn", "deferred", "interrupted"]),
-  admission_stage: z.enum([
-    "interest",
-    "application_invited",
-    "submitted",
-    "reviewed",
-    "offered",
-    "rejected",
-    "accepted",
-    "cccu_registration_pending",
-    "cccu_registration_complete"
-  ]),
-  programme: z.enum(["pgcert", "microcredential"]),
-  start_term_id: z.string().uuid().nullable(),
-  notes: z.string().nullable()
-});
-
 export async function createStudent(formData: FormData) {
   await requirePermission("manage_admissions");
   const parsed = studentSchema.parse({
@@ -398,56 +381,12 @@ export async function deleteStudent(formData: FormData) {
   redirect("/students");
 }
 
-const allowedStudentPhotoTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
-
 export async function uploadStudentPhoto(formData: FormData) {
   await requirePermission("manage_everything");
   const studentId = idSchema.parse(value(formData, "student_id"));
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) {
-    throw new Error("Choose a student photo to upload.");
-  }
-  if (!allowedStudentPhotoTypes.has(file.type)) {
-    throw new Error("Student photos must be PNG, JPG, or WEBP images.");
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    throw new Error("Student photos must be 10MB or smaller.");
-  }
-
-  const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-  const objectPath = `${studentId}/${crypto.randomUUID()}.${extension}`;
-  const supabase = await createSupabaseServerClient();
-  const { data: student, error: studentError } = await supabase
-    .from("students")
-    .select("id, photo_path")
-    .eq("id", studentId)
-    .single();
-  if (studentError) {
-    throw new Error(studentError.message);
-  }
-
-  const { error: uploadError } = await supabase.storage
-    .from("student-photos")
-    .upload(objectPath, file, {
-      contentType: file.type,
-      upsert: false
-    });
-  if (uploadError) {
-    throw new Error(uploadError.message);
-  }
-
-  const { error: updateError } = await supabase.from("students").update({ photo_path: objectPath }).eq("id", studentId);
-  if (updateError) {
-    await supabase.storage.from("student-photos").remove([objectPath]);
-    throw new Error(updateError.message);
-  }
-
-  if (student.photo_path) {
-    await supabase.storage.from("student-photos").remove([student.photo_path]);
-  }
-
-  revalidatePath("/students");
-  revalidatePath(`/students/${studentId}`);
+  formData.set("operation", "upload");
+  const result = await saveStudentPhotoChange(formData);
+  if (!result.ok) throw new Error(result.error);
   redirect(`/students/${studentId}?mode=edit`);
 }
 
@@ -455,29 +394,10 @@ export async function deleteStudentPhoto(formData: FormData) {
   await requirePermission("manage_everything");
   requireDeleteConfirmation(formData);
   const studentId = idSchema.parse(value(formData, "student_id"));
-  const supabase = await createSupabaseServerClient();
-  const { data: student, error: studentError } = await supabase
-    .from("students")
-    .select("id, photo_path")
-    .eq("id", studentId)
-    .single();
-  if (studentError) {
-    throw new Error(studentError.message);
-  }
-  if (student.photo_path) {
-    const { error: removeError } = await supabase.storage.from("student-photos").remove([student.photo_path]);
-    if (removeError) {
-      throw new Error(removeError.message);
-    }
-  }
-
-  const { error: updateError } = await supabase.from("students").update({ photo_path: null }).eq("id", studentId);
-  if (updateError) {
-    throw new Error(updateError.message);
-  }
-
-  revalidatePath("/students");
-  revalidatePath(`/students/${studentId}`);
+  formData.set("operation", "remove");
+  formData.set("confirm_remove", "yes");
+  const result = await saveStudentPhotoChange(formData);
+  if (!result.ok) throw new Error(result.error);
   redirect(`/students/${studentId}?mode=edit`);
 }
 
@@ -764,6 +684,10 @@ const enrolmentSchema = z.object({
 
 export async function createEnrolment(formData: FormData) {
   await requirePermission("manage_course");
+  if (assessmentWorkflowMode() === "live") {
+    formData.set("status", "planned");
+    formData.set("credits_awarded", "0");
+  }
   const parsed = enrolmentSchema.parse({
     student_id: value(formData, "student_id"),
     offering_id: value(formData, "offering_id"),
@@ -798,6 +722,7 @@ export async function createEnrolment(formData: FormData) {
 
 export async function updateEnrolment(formData: FormData) {
   await requirePermission("manage_course");
+  if (assessmentWorkflowMode() === "live") throw new Error("Use the assessment workflow to change outcomes or overrides.");
   const enrolmentId = idSchema.parse(value(formData, "enrolment_id"));
   const studentId = idSchema.parse(value(formData, "student_id"));
   const parsed = enrolmentSchema.pick({ status: true, credits_awarded: true }).parse({
@@ -811,16 +736,12 @@ export async function updateEnrolment(formData: FormData) {
       presentation_required_override: optionalBoolean(formData, "presentation_required_override")
     });
 
-  const finalMark = optionalValue(formData, "final_mark");
-  const grade = optionalValue(formData, "grade");
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("enrolments")
     .update({
       ...parsed,
-      ...requirementOverrides,
-      final_mark: finalMark ? Number(finalMark) : null,
-      grade
+      ...requirementOverrides
     })
     .eq("id", enrolmentId);
   if (error) {
@@ -828,9 +749,7 @@ export async function updateEnrolment(formData: FormData) {
       const { error: retryError } = await supabase
         .from("enrolments")
         .update({
-          ...parsed,
-          final_mark: finalMark ? Number(finalMark) : null,
-          grade
+          ...parsed
         })
         .eq("id", enrolmentId);
       if (!retryError) {
@@ -901,9 +820,8 @@ export async function createFinanceRecord(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/finance");
-  revalidatePath(`/students/${parsed.student_id}`);
-  redirect("/finance?mode=edit");
+  revalidatePath("/", "layout");
+  redirect(`/finance?mode=edit&student=${parsed.student_id}&term=${parsed.term_id}`);
 }
 
 export async function updateFinanceRecord(formData: FormData) {
@@ -917,9 +835,8 @@ export async function updateFinanceRecord(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/finance");
-  revalidatePath(`/students/${parsed.student_id}`);
-  redirect("/finance?mode=edit");
+  revalidatePath("/", "layout");
+  redirect(`/finance?mode=edit&student=${parsed.student_id}&term=${parsed.term_id}`);
 }
 
 export async function deleteFinanceRecord(formData: FormData) {
@@ -934,9 +851,8 @@ export async function deleteFinanceRecord(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/finance");
-  revalidatePath(`/students/${studentId}`);
-  redirect("/finance?mode=edit");
+  revalidatePath("/", "layout");
+  redirect(`/finance?mode=edit&student=${studentId}`);
 }
 
 export async function saveStudentProfileFinance(formData: FormData) {
@@ -951,7 +867,7 @@ export async function saveStudentProfileFinance(formData: FormData) {
 
   const supabase = await createSupabaseServerClient();
   const { data: enrolments, error: enrolmentsError } = await supabase
-    .from("enrolments")
+    .from("active_module_enrolments")
     .select("offering_id")
     .eq("student_id", studentId);
   if (enrolmentsError) {
@@ -1029,6 +945,15 @@ export async function importExamResultsJson(formData: FormData) {
 
   const parsed = parseExamAdapterPayload(payload);
   const data = await getLmsData();
+  let assessmentSummaryParam = "";
+  if (assessmentWorkflowEnabled()) {
+    const summary = await ingestAssessmentSource(parsed.map(result => inboundAssessmentSource(result, data, value(formData,"assessment_reason"))));
+    assessmentSummaryParam = `&assessmentSummary=${encodeURIComponent(JSON.stringify(summary))}`;
+    if (assessmentWorkflowMode() === "live") {
+      revalidatePath("/", "layout");
+      redirect(`/assessments?mode=edit&summary=${encodeURIComponent(JSON.stringify(summary))}`);
+    }
+  }
   const normalized = parsed.map((result) => normalizeInboundExamResult(result, data));
   const supabase = await createSupabaseServerClient();
   const acceptedResults = await persistNormalizedExamResults(supabase, normalized);
@@ -1050,11 +975,12 @@ export async function importExamResultsJson(formData: FormData) {
     }
   });
   statusUpdates.forEach((update) => revalidatePath(`/students/${update.studentId}`));
-  redirect("/exams?mode=edit");
+  redirect(`/exams?mode=edit${assessmentSummaryParam}`);
 }
 
 export async function createManualOverallExamResult(formData: FormData) {
   await requirePermission("manage_course");
+  if (assessmentWorkflowMode() === "live") throw new Error("Use Add exam score on the original Module Enrolment.");
   const studentId = idSchema.parse(value(formData, "student_id"));
   const offeringId = idSchema.parse(value(formData, "offering_id"));
   const score = z.coerce.number().min(0).max(100).parse(value(formData, "score"));
@@ -1139,6 +1065,18 @@ export async function importPracticalExamResultsCsv(formData: FormData) {
   }
 
   const moduleCodeMap = parsePracticalModuleCodeMap(value(formData, "module_code_map"));
+  let assessmentSummaryParam = "";
+  if (assessmentWorkflowEnabled()) {
+    const adapted=practicalAssessmentSources(parsedCsv.data,data,{termName:term.name,takenOn,passMark,moduleCodeMap,reason:value(formData,"assessment_reason")});
+    const summary=await ingestAssessmentSource(adapted.sources);
+    summary.rejected+=adapted.rejected.length;
+    summary.errors.push(...adapted.rejected);
+    assessmentSummaryParam = `&assessmentSummary=${encodeURIComponent(JSON.stringify(summary))}`;
+    if (assessmentWorkflowMode() === "live") {
+      revalidatePath("/", "layout");
+      redirect(`/assessments?mode=edit&summary=${encodeURIComponent(JSON.stringify(summary))}`);
+    }
+  }
   const parsed = practicalCsvRowsToInboundExamResults(parsedCsv.data, {
     termName: term.name,
     takenOn,
@@ -1167,7 +1105,7 @@ export async function importPracticalExamResultsCsv(formData: FormData) {
   statusUpdates.forEach((update) => revalidatePath(`/students/${update.studentId}`));
   const accepted = normalized.filter((result) => result.ok).length;
   const rejected = normalized.length - accepted;
-  redirect(`/exams?mode=edit&practicalAccepted=${accepted}&practicalRejected=${rejected}`);
+  redirect(`/exams?mode=edit&practicalAccepted=${accepted}&practicalRejected=${rejected}${assessmentSummaryParam}`);
 }
 
 const examPortalMappingSchema = z.object({
@@ -1567,6 +1505,17 @@ export async function syncExamPortalMapping(formData: FormData) {
     redirect("/exams?mode=edit");
   }
 
+  let assessmentSummaryParam = "";
+  if (assessmentWorkflowEnabled()) {
+    const summary = await ingestPortalAssessmentResults({ portal_exam_id: String(mapping.portal_exam_id), module_id: mapping.module_id ? String(mapping.module_id) : null,
+      term_id: String(mapping.term_id), portal_exam_kind: String(mapping.portal_exam_kind), physics_required: Boolean(mapping.physics_required) }, portalResponse.results, value(formData,"assessment_reason"));
+    assessmentSummaryParam = `&assessmentSummary=${encodeURIComponent(JSON.stringify(summary))}`;
+    if (assessmentWorkflowMode() === "live") {
+      revalidatePath("/", "layout");
+      redirect(`/assessments?mode=edit&summary=${encodeURIComponent(JSON.stringify(summary))}`);
+    }
+  }
+
   const { data: students, error: studentsError } = await supabase
     .from("students")
     .select("id, cccu_student_id");
@@ -1633,11 +1582,12 @@ export async function syncExamPortalMapping(formData: FormData) {
   revalidatePath("/exams");
   revalidatePath("/");
   revalidatePath("/students");
-  redirect("/exams?mode=edit");
+  redirect(`/exams?mode=edit${assessmentSummaryParam}`);
 }
 
 export async function resolveExamPortalSubmission(formData: FormData) {
   await requirePermission("manage_course");
+  if (assessmentWorkflowMode() === "live") throw new Error("Use Match imported result in the assessment workflow.");
   const submissionId = idSchema.parse(value(formData, "submission_id"));
   const studentId = idSchema.parse(value(formData, "student_id"));
   const supabase = await createSupabaseServerClient();
@@ -1735,7 +1685,7 @@ export async function generateFinanceRecordsForTerm(formData: FormData) {
   }
 
   const { data: enrolments, error: enrolmentsError } = await supabase
-    .from("enrolments")
+    .from("active_module_enrolments")
     .select("student_id, offering_id, status")
     .in("offering_id", offeringIds);
   if (enrolmentsError) {
@@ -1771,8 +1721,7 @@ export async function generateFinanceRecordsForTerm(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/finance");
-  [...expectedByStudent.keys()].forEach((studentId) => revalidatePath(`/students/${studentId}`));
+  revalidatePath("/", "layout");
   redirect("/finance?mode=edit");
 }
 
@@ -1842,8 +1791,7 @@ export async function createAttendanceSession(formData: FormData) {
 
   await replaceExpectedAttendance(String(session.id), expectedStudentIds);
 
-  revalidatePath("/attendance");
-  revalidatePath("/reception");
+  revalidatePath("/", "layout");
 }
 
 export async function updateAttendanceSession(formData: FormData) {
@@ -1867,8 +1815,7 @@ export async function updateAttendanceSession(formData: FormData) {
     await replaceExpectedAttendance(sessionId, selectedStudentIds(formData));
   }
 
-  revalidatePath("/attendance");
-  revalidatePath("/reception");
+  revalidatePath("/", "layout");
 }
 
 export async function deleteAttendanceSession(formData: FormData) {
@@ -1882,8 +1829,7 @@ export async function deleteAttendanceSession(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/attendance");
-  revalidatePath("/reception");
+  revalidatePath("/", "layout");
 }
 
 const adminAttendanceRecordSchema = z.object({
@@ -1939,6 +1885,8 @@ async function resolveAttendanceStudentId(
 
 function revalidateAttendance(studentId?: string) {
   revalidatePath("/");
+  revalidatePath("/students");
+  revalidatePath("/assessments");
   revalidatePath("/attendance");
   revalidatePath("/reception");
   if (studentId) {
@@ -1947,7 +1895,7 @@ function revalidateAttendance(studentId?: string) {
 }
 
 function revalidateStudentFinance(studentId: string) {
-  revalidatePath("/");
+  revalidatePath("/", "layout");
   revalidatePath("/finance");
   revalidatePath("/students");
   revalidatePath(`/students/${studentId}`);
@@ -2101,7 +2049,7 @@ export async function saveStudentProfileAttendance(formData: FormData) {
 
   const supabase = await createSupabaseServerClient();
   const { data: enrolments, error: enrolmentsError } = await supabase
-    .from("enrolments")
+    .from("active_module_enrolments")
     .select("offering_id")
     .eq("student_id", studentId);
   if (enrolmentsError) {
@@ -2295,9 +2243,7 @@ export async function checkInStudent(formData: FormData) {
     }
   }
 
-  revalidatePath("/attendance");
-  revalidatePath("/reception");
-  revalidatePath(`/students/${studentId}`);
+  revalidateAttendance(studentId);
 }
 
 export async function checkOutStudent(formData: FormData) {
@@ -2335,9 +2281,7 @@ export async function checkOutStudent(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/attendance");
-  revalidatePath("/reception");
-  revalidatePath(`/students/${studentId}`);
+  revalidateAttendance(studentId);
 }
 
 function todayIsoDate(): string {
@@ -2345,7 +2289,7 @@ function todayIsoDate(): string {
 }
 
 export async function createEncounterLog(formData: FormData) {
-  const profile = await requirePermission("record_teaching");
+  await requirePermission("record_teaching");
   const parsed = z
     .object({
       student_id: z.string().uuid(),
@@ -2362,21 +2306,13 @@ export async function createEncounterLog(formData: FormData) {
       concern_level: value(formData, "concern_level") || "none"
     });
 
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("encounter_logs").insert({
-    ...parsed,
-    staff_user_id: profile.id
-  });
-  if (error) {
-    throw new Error(error.message);
-  }
+  await saveLegacyTeaching({ ...parsed, id: value(formData, "command_id"), kind: "observation" });
 
-  revalidatePath("/staff");
-  revalidatePath(`/students/${parsed.student_id}`);
+  revalidatePath("/", "layout");
 }
 
 export async function createAssessmentAttempt(formData: FormData) {
-  const profile = await requirePermission("record_teaching");
+  await requirePermission("record_teaching");
   const definitionId = idSchema.parse(value(formData, "definition_id"));
   const assessedItemIds = formData
     .getAll("assessed_item_ids")
@@ -2426,28 +2362,23 @@ export async function createAssessmentAttempt(formData: FormData) {
     throw new Error(`Overall score must be between ${definition.score_min} and ${definition.score_max}.`);
   }
 
-  const { error } = await supabase.from("assessment_attempts").insert({
+  await saveLegacyTeaching({
     ...parsed,
+    id: value(formData, "command_id"),
+    kind: "formative",
     definition_id: definitionId,
-    staff_user_id: profile.id,
-    assessed_item_ids: assessedItemIds,
-    scores: {}
+    assessed_item_ids: assessedItemIds
   });
-  if (error) {
-    throw new Error(error.message);
-  }
 
-  revalidatePath("/staff");
-  revalidatePath(`/students/${parsed.student_id}`);
+  revalidatePath("/", "layout");
 }
 
 export async function createPresentationScore(formData: FormData) {
-  const profile = await requirePermission("record_teaching");
+  await requirePermission("record_teaching");
   const scoreSchema = z.coerce.number().int().min(1).max(5);
   const scores = Object.fromEntries(
     presentationRubricCriteria.map((criterion) => [criterion.id, scoreSchema.parse(value(formData, criterion.id))])
   );
-  const totalScore = Object.values(scores).reduce((total, score) => total + score, 0);
 
   const parsed = z
     .object({
@@ -2456,6 +2387,7 @@ export async function createPresentationScore(formData: FormData) {
       occurred_on: z.string().min(1),
       presentation_type: z.enum(["case_presentation", "journal_club"]),
       duration_minutes: z.coerce.number().int().positive(),
+      time_penalty: z.number().int().min(0).max(50),
       comments: z.string().nullable()
     })
     .parse({
@@ -2464,22 +2396,18 @@ export async function createPresentationScore(formData: FormData) {
       occurred_on: value(formData, "occurred_on") || todayIsoDate(),
       presentation_type: value(formData, "presentation_type"),
       duration_minutes: value(formData, "duration_minutes"),
+      time_penalty: formData.has("time_penalty") ? (value(formData, "time_penalty") === "" ? NaN : Number(value(formData, "time_penalty"))) : 0,
       comments: optionalValue(formData, "comments")
     });
 
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("presentation_scores").insert({
+  await saveLegacyTeaching({
     ...parsed,
-    staff_user_id: profile.id,
-    scores,
-    total_score: totalScore
+    id: value(formData, "command_id"),
+    kind: "presentation",
+    scores
   });
-  if (error) {
-    throw new Error(error.message);
-  }
 
-  revalidatePath("/staff");
-  revalidatePath(`/students/${parsed.student_id}`);
+  revalidatePath("/", "layout");
 }
 
 function parseAssessmentDomains(formData: FormData) {

@@ -1,6 +1,7 @@
 import { Download } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { requirePermission } from "@/lib/auth";
+import { assessmentWorkflowEnabled } from "@/lib/assessment/feature";
 
 const exports = [
   {
@@ -19,6 +20,7 @@ export default async function ExportsPage() {
   await requirePermission("manage_everything");
   return (
     <AppShell title="Exports" subtitle="Operational exports and CCCU-ready data outputs">
+      {assessmentWorkflowEnabled()?<section className="panel"><h2>Assessment reports</h2><div className="toolbar">{["outcomes","attempts","reconciliation"].map(report=><a className="button" key={report} href={`/api/exports/assessments?report=${report}`}>{report} CSV</a>)}</div></section>:null}
       <section className="grid grid-2">
         {exports.map((exportItem) => (
           <div className="panel" key={exportItem.href}>

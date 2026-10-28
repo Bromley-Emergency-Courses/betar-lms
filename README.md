@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-The app runs with seeded demo data when Supabase environment variables are not configured.
+In development and tests only, the app uses in-memory demo data when Supabase environment variables are not configured. Production builds (including hosted previews) never fall back to demo data or a demo administrator: missing configuration blocks requests with a service-unavailable response. Set the intended Supabase URL and anonymous key before building; never promote a synthetic-target build to production. This does not run database seeds.
 
 ## Supabase Setup
 
@@ -40,6 +40,12 @@ npm run admin:create -- admin@example.com "Admin Name"
 The script prints a generated temporary password unless you pass one as the third argument.
 
 ## Verification
+
+Assessment workflow setup, local Docker rehearsal and rollout gates are documented in [docs/assessment-workflow-rollout.md](docs/assessment-workflow-rollout.md). The workflow defaults to disabled; no production cutover is part of its installation.
+
+The isolated student-workspace integration checkpoint, saved assessment actions, guarded launcher and browser checks are documented in [docs/student-workspace-development.md](docs/student-workspace-development.md). The broader workspace integration and production acceptance remain incomplete.
+
+The default-off staff companion and its phone/tablet validation are documented in [docs/staff-companion-development.md](docs/staff-companion-development.md). It reuses assessment/student-workspace data; teaching, author-owned presentation editing, manual penalties and calendar planning share guarded commands behind a separate default-off teaching flag. Additive migrations 0075–0077 and compatible readers/actions must deploy together. Production rollout remains separately gated.
 
 ```bash
 npm run lint

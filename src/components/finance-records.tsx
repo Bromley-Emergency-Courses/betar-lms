@@ -153,7 +153,7 @@ export function FinanceTools({ data }: { data: AppData }) {
   );
 }
 
-export function FinanceRecords({ data, studentId }: { data: AppData; studentId?: string }) {
+export function FinanceRecords({ data, studentId, termId }: { data: AppData; studentId?: string; termId?: string }) {
   return (
     <section className="section">
       <div className="section-header">
@@ -162,12 +162,12 @@ export function FinanceRecords({ data, studentId }: { data: AppData; studentId?:
           <p>Edit CCCU invoice and payment reconciliation</p>
         </div>
       </div>
-      <FinanceReconciliationTable key={studentId ?? "all"} data={data} editable initialStudentId={studentId} />
+      <FinanceReconciliationTable key={`${studentId}:${termId}`} data={data} editable initialStudentId={studentId} initialTermId={termId} />
     </section>
   );
 }
 
-export function FinanceOverview({ data, studentId }: { data: AppData; studentId?: string }) {
+export function FinanceOverview({ data, studentId, termId }: { data: AppData; studentId?: string; termId?: string }) {
   const totalExpected = data.financeRecords.reduce((total, record) => total + record.expectedAmountPence, 0);
   const totalInvoiced = data.financeRecords.reduce((total, record) => total + (record.invoiceAmountPence ?? 0), 0);
   const totalPaid = data.financeRecords.reduce((total, record) => total + (record.paidAmountPence ?? 0), 0);
@@ -213,7 +213,7 @@ export function FinanceOverview({ data, studentId }: { data: AppData; studentId?
             Export CSV
           </Link>
         </div>
-        <FinanceReconciliationTable key={studentId ?? "all"} data={data} initialStudentId={studentId} />
+        <FinanceReconciliationTable key={`${studentId}:${termId}`} data={data} initialStudentId={studentId} initialTermId={termId} />
       </section>
     </>
   );

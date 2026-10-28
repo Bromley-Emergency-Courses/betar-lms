@@ -6,12 +6,14 @@ import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
+import { TeachingCommandIdentity } from "@/components/teaching-command-identity";
 import {
   createAssessmentAttempt,
   createEncounterLog,
   createPresentationScore
 } from "@/lib/admin-actions";
 import { presentationRubricGroups } from "@/lib/presentation-rubric";
+import { presentationBreakdown } from "@/lib/presentation-display";
 import { studentDisplayName } from "@/lib/rules";
 import type { AppData, Enrolment, PresentationScore, Student } from "@/lib/types";
 
@@ -211,11 +213,13 @@ function StaffWorkflowContent({
             </Field>
           </FormGrid>
           <form id="staff-selector" action="/staff">
+            <input type="hidden" name="view" value="legacy" />
             <button className="button">Load selection</button>
           </form>
         </div>
 
         <form className="panel grid" action={createEncounterLog}>
+          <TeachingCommandIdentity key={`${selectedStudent.id}:${selectedOffering.id}`} />
           <input type="hidden" name="student_id" value={selectedStudent.id} />
           <input type="hidden" name="offering_id" value={selectedOffering.id} />
           <div className="section-header">
@@ -259,6 +263,7 @@ function StaffWorkflowContent({
           ) : (
             assessmentDefinitions.map((definition) => (
               <form className="grid" action={createAssessmentAttempt} key={definition.id}>
+                <TeachingCommandIdentity key={`${selectedStudent.id}:${selectedOffering.id}`} />
                 <input type="hidden" name="student_id" value={selectedStudent.id} />
                 <input type="hidden" name="offering_id" value={selectedOffering.id} />
                 <input type="hidden" name="definition_id" value={definition.id} />
@@ -304,6 +309,7 @@ function StaffWorkflowContent({
         </div>
 
         <form className="panel grid" action={createPresentationScore}>
+          <TeachingCommandIdentity key={`${selectedStudent.id}:${selectedOffering.id}`} />
           <input type="hidden" name="student_id" value={selectedStudent.id} />
           <input type="hidden" name="offering_id" value={selectedOffering.id} />
           <div className="section-header">
@@ -353,6 +359,10 @@ function StaffWorkflowContent({
               </fieldset>
             ))}
           </div>
+          <Field label="Time penalty (points)" htmlFor="presentation-penalty">
+            <input id="presentation-penalty" name="time_penalty" className="input" type="number" inputMode="numeric" min="0" max="50" step="1" defaultValue="0" required style={{ minHeight: 44, fontSize: 16 }} />
+          </Field>
+          <p className="muted">Already scored this presentation? Open the student profile’s Teaching records and choose Edit your score. Only your own submission can be edited.</p>
           <Field label="Comments" htmlFor="presentation-comments">
             <textarea id="presentation-comments" name="comments" className="textarea" />
           </Field>
@@ -408,6 +418,7 @@ function StaffWorkflowContent({
                 <span className="muted small">{presentation.occurredOn}</span>
                 <div>
                   <strong>Presentation score: {presentation.totalScore}</strong>
+                  <dl>{presentationBreakdown(presentation.scores, presentation.totalScore, presentation.timePenalty).map(detail => <div key={detail.label}><dt>{detail.label}</dt><dd>{detail.value}</dd></div>)}</dl>
                   {metadata ? <p className="muted small">{metadata}</p> : null}
                   <p>{presentation.comments ?? "No comments recorded"}</p>
                 </div>

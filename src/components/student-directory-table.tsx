@@ -1,7 +1,8 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { StatusPill } from "@/components/status-pill";
 import { StudentLink } from "@/components/student-link";
@@ -96,15 +97,32 @@ function SortButton({
   );
 }
 
-export function StudentDirectoryTable({ data, initialSearch = "" }: { data: AppData; initialSearch?: string }) {
-  const [query, setQuery] = useState(initialSearch);
-  const [programmeFilter, setProgrammeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | StudentStatus>("all");
-  const [admissionFilter, setAdmissionFilter] = useState<"all" | AdmissionStage>("all");
-  const [creditFilter, setCreditFilter] = useState<CreditFilter>("all");
-  const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
-  const [sortKey, setSortKey] = useState<SortKey>("student");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+export function StudentDirectoryTable({ data }: { data: Pick<AppData, "students" | "encounters" | "enrolments" | "examResults"> }) {
+  const searchParams = useSearchParams();
+  const query = searchParams.get("q") ?? "";
+  const programmeFilter = searchParams.get("programme") ?? "all";
+  const statusFilter = searchParams.get("status") ?? "all";
+  const admissionFilter = searchParams.get("admission") ?? "all";
+  const creditFilter = searchParams.get("credits") ?? "all";
+  const riskFilter = searchParams.get("risk") ?? "all";
+  const sortKey = (searchParams.get("sort") ?? "student") as SortKey;
+  const sortDirection: SortDirection = searchParams.get("direction") === "desc" ? "desc" : "asc";
+  const returnTo = `/students${searchParams.size ? `?${searchParams}` : ""}`;
+
+  function updateFilters(values: Record<string, string>) {
+    const next = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries(values)) {
+      if (!value || value === "all") next.delete(key);
+      else next.set(key, value);
+    }
+    window.history.replaceState(null, "", `/students${next.size ? `?${next}` : ""}`);
+  }
+  const setQuery = (value: string) => updateFilters({ q: value });
+  const setProgrammeFilter = (value: string) => updateFilters({ programme: value });
+  const setStatusFilter = (value: string) => updateFilters({ status: value });
+  const setAdmissionFilter = (value: string) => updateFilters({ admission: value });
+  const setCreditFilter = (value: string) => updateFilters({ credits: value });
+  const setRiskFilter = (value: string) => updateFilters({ risk: value });
 
   const rows = useMemo<StudentRow[]>(
     () =>
@@ -173,22 +191,14 @@ export function StudentDirectoryTable({ data, initialSearch = "" }: { data: AppD
 
   function handleSort(nextSortKey: SortKey) {
     if (nextSortKey === sortKey) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      updateFilters({ direction: sortDirection === "asc" ? "desc" : "asc" });
       return;
     }
-    setSortKey(nextSortKey);
-    setSortDirection("asc");
+    updateFilters({ sort: nextSortKey, direction: "asc" });
   }
 
   function clearFilters() {
-    setQuery("");
-    setProgrammeFilter("all");
-    setStatusFilter("all");
-    setAdmissionFilter("all");
-    setCreditFilter("all");
-    setRiskFilter("all");
-    setSortKey("student");
-    setSortDirection("asc");
+    updateFilters({ q: "", programme: "all", status: "all", admission: "all", credits: "all", risk: "all", sort: "student", direction: "asc" });
   }
 
   return (
@@ -303,7 +313,7 @@ export function StudentDirectoryTable({ data, initialSearch = "" }: { data: AppD
               {filteredRows.map((row) => (
                 <tr key={row.student.id}>
                   <td>
-                    <StudentLink student={row.student} />
+                    <StudentLink student={row.student} href={`/students/${row.student.id}?returnTo=${encodeURIComponent(returnTo)}`} />
                   </td>
                   <td>{row.student.programme}</td>
                   <td>

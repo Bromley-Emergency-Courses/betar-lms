@@ -15,6 +15,8 @@ import {
 import { requireCurrentStaffProfile } from "@/lib/auth";
 import { visibleNavigationForRole } from "@/lib/access";
 import { signOut } from "@/app/login/actions";
+import { WorkspaceAppMenu } from "./workspace-app-menu";
+import focusedStyles from "./focused-workspace.module.css";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -34,19 +36,27 @@ export async function AppShell({
   subtitle,
   titleMedia,
   actions,
-  children
+  children,
+  workspace = false,
+  workspaceLabel,
+  focused = false,
+  hideTitle = false
 }: {
   title: string;
   subtitle?: string;
   titleMedia?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  workspace?: boolean;
+  workspaceLabel?: string;
+  focused?: boolean;
+  hideTitle?: boolean;
 }) {
   const profile = await requireCurrentStaffProfile();
   const visibleItems = new Set(visibleNavigationForRole(profile.role));
 
   return (
-    <div className="shell">
+    <div className={`shell${workspace ? " workspace-shell" : ""}${workspace && focused ? ` ${focusedStyles.focused}` : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">B</div>
@@ -77,7 +87,11 @@ export async function AppShell({
         </form>
       </aside>
       <main className="main">
-        <header className="topbar">
+        {workspace ? <WorkspaceAppMenu label={workspaceLabel}>
+          <nav className="nav" aria-label="Application">{navItems.filter(item => visibleItems.has(item.label)).map(item => <Link href={item.href} key={item.href}>{item.label}</Link>)}</nav>
+          <form action={signOut} className="workspace-mobile-account"><span>{profile.fullName} · {profile.role}</span><button className="button" type="submit">Sign out</button></form>
+        </WorkspaceAppMenu> : null}
+        {!hideTitle ? <header className="topbar">
           <div className="topbar-title">
             {titleMedia}
             <div>
@@ -86,7 +100,7 @@ export async function AppShell({
             </div>
           </div>
           {actions ? <div className="toolbar">{actions}</div> : null}
-        </header>
+        </header> : null}
         <div className="content">{children}</div>
       </main>
     </div>

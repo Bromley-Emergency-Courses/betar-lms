@@ -7,7 +7,16 @@ import { EmptyState } from "@/components/empty-state";
 import { Field, FormGrid } from "@/components/forms";
 import { StatusPill } from "@/components/status-pill";
 import { StudentProfilePhoto } from "@/components/student-profile-photo";
+import { StudentWorkspace } from "@/components/student-workspace";
+import { loadWorkspaceTeaching } from "@/app/students/teaching-actions";
+import { buildStudentWorkspaceData } from "@/lib/student-workspace";
+import { EnrolmentAssessments } from "@/components/enrolment-assessments";
+import { readStudentAttendance } from "@/lib/student-attendance-store";
+import { assessmentPrototypeEnabled, assessmentWorkflowEnabled, assessmentWorkflowMode, studentWorkspaceEnabled } from "@/lib/assessment/feature";
 import { requirePermission } from "@/lib/auth";
+import { can } from "@/lib/access";
+import { readAssessmentRecords, readAssessmentWorkspace } from "@/lib/assessment";
+import { StudentWorkspacePrototype } from "../prototype/student-workspace-prototype";
 import {
   createEnrolment,
   deleteEnrolment,
@@ -136,15 +145,38 @@ export default async function StudentProfilePage({
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{ mode?: string; variant?: string; cases?: string; view?: string; returnTo?: string }>;
 }) {
   const profile = await requirePermission("view_students");
   const { id } = await params;
-  const { mode } = await searchParams;
+  const { mode, variant, cases, view, returnTo } = await searchParams;
   const editMode = profile.role === "admin" && mode === "edit";
   const { data, student } = await getStudentProfileData(id);
   if (!student) {
     notFound();
+  }
+  const prototype = assessmentPrototypeEnabled(variant);
+  if (studentWorkspaceEnabled() && !prototype && view !== "legacy" && !editMode) {
+    const [records, attendance] = await Promise.all([readAssessmentRecords(student.id), readStudentAttendance(student.id)]);
+    const canFinance = can(profile.role, "manage_finance");
+    const workspaceData = buildStudentWorkspaceData(data, student.id, canFinance);
+    if (can(profile.role, "record_teaching")) {
+      const teachingOptions = await loadWorkspaceTeaching(student.id);
+      if (teachingOptions.ok) for (const record of workspaceData.teaching) {
+        const own = teachingOptions.options.presentations?.find(offering => offering.ownScore?.id === record.id && !offering.ownScore.requiresReview);
+        if (own) record.editableOfferingId = own.id;
+      }
+    }
+    return <AppShell title="Student workspace" workspace hideTitle>
+      <StudentWorkspace student={student} data={{ ...workspaceData, attendance }} {...records} canEdit={profile.role === "admin"} canFinance={canFinance} canTeach={can(profile.role, "record_teaching")} returnTo={returnTo} />
+    </AppShell>;
+  }
+  if (prototype) {
+    const workspace = await readAssessmentWorkspace(student.id);
+    const canFinance = can(profile.role, "manage_finance");
+    return <AppShell title="Student workspace" subtitle="One student · connected records">
+      <StudentWorkspacePrototype key={`${student.id}-${cases}`} student={student} variant={variant as "A" | "B" | "C"} examples={cases === "examples"} canEdit={profile.role === "admin"} canFinance={canFinance} canTeach={can(profile.role, "record_teaching")} staffName={profile.fullName} outcomes={workspace.outcomes} attempts={workspace.attempts} data={{ terms: data.terms, modules: data.modules, offerings: data.offerings, enrolments: data.enrolments, sessions: data.sessions, attendance: data.attendance, encounters: data.encounters, assessmentAttempts: data.assessmentAttempts, presentationScores: data.presentationScores, staffUsers: data.staffUsers, financeRecords: canFinance ? data.financeRecords : [] }} />
+    </AppShell>;
   }
 
   const enrolments = data.enrolments.filter((enrolment) => enrolment.studentId === student.id);
@@ -216,6 +248,7 @@ export default async function StudentProfilePage({
           studentName={studentDisplayName(student)}
           initials={`${student.firstName.slice(0, 1)}${student.lastName.slice(0, 1)}`}
           hasPhoto={Boolean(student.photoUrl)}
+          version={student.profileRevision}
         />
       }
       actions={
@@ -395,7 +428,7 @@ export default async function StudentProfilePage({
             </select>
           </Field>
           <FormGrid>
-            <Field label="Status" htmlFor="enrolment-status">
+            {assessmentWorkflowMode() !== "live" ? <><Field label="Status" htmlFor="enrolment-status">
                               <select id="enrolment-status" name="status" className="select" defaultValue="planned">
                                 <option value="planned">Planned</option>
                                 <option value="in_progress">In progress</option>
@@ -409,6 +442,7 @@ export default async function StudentProfilePage({
                             <Field label="Credits awarded" htmlFor="credits-awarded">
                               <input id="credits-awarded" name="credits_awarded" className="input" type="number" min="0" defaultValue="0" />
                             </Field>
+                            </> : <p>Status and credits are calculated from assessment evidence.</p>}
                             <Field label="Attendance override" htmlFor="attendance-days-required-override">
                               <input
                                 id="attendance-days-required-override"
@@ -453,6 +487,7 @@ export default async function StudentProfilePage({
           </div>
           <form className="grid" action={uploadStudentPhoto}>
             <input type="hidden" name="student_id" value={student.id} />
+            <input type="hidden" name="expected_revision" value={student.profileRevision ?? ""} />
             <Field label="Photo" htmlFor="student-photo">
               <input id="student-photo" name="photo" className="input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" required />
             </Field>
@@ -463,6 +498,7 @@ export default async function StudentProfilePage({
           </form>
           {student.photoUrl ? (
             <form action={deleteStudentPhoto}>
+              <input type="hidden" name="expected_revision" value={student.profileRevision ?? ""} />
               <DeleteWarning name="student profile photo" idName="student_id" idValue={student.id} />
               <button className="button danger">Remove photo</button>
             </form>
@@ -474,11 +510,11 @@ export default async function StudentProfilePage({
       <section className="section">
         <div className="section-header">
           <div>
-            <h2>Enrolments</h2>
+            <h2>{assessmentWorkflowMode() === "live" ? "Module assessments" : "Enrolments"}</h2>
             <p>Term module offering and enrolment status</p>
           </div>
         </div>
-        {enrolments.length === 0 ? (
+        {assessmentWorkflowMode() === "live" ? <EnrolmentAssessments studentId={student.id} editMode={editMode} terms={data.terms} /> : enrolments.length === 0 ? (
           <EmptyState title="No enrolments recorded" detail="This student does not yet have module enrolments in Supabase." />
         ) : !editMode ? (
           <div className="panel profile-enrolment-list">
@@ -542,12 +578,7 @@ export default async function StudentProfilePage({
                             <Field label="Credits" htmlFor={`enrolment-credits-${enrolment.id}`}>
                               <input id={`enrolment-credits-${enrolment.id}`} name="credits_awarded" className="input" type="number" min="0" defaultValue={enrolment.creditsAwarded} />
                             </Field>
-                            <Field label="Final mark" htmlFor={`enrolment-mark-${enrolment.id}`}>
-                              <input id={`enrolment-mark-${enrolment.id}`} name="final_mark" className="input" type="number" min="0" max="100" step="0.01" defaultValue={enrolment.finalMark ?? ""} />
-                            </Field>
-                            <Field label="Grade" htmlFor={`enrolment-grade-${enrolment.id}`}>
-                              <input id={`enrolment-grade-${enrolment.id}`} name="grade" className="input" defaultValue={enrolment.grade ?? ""} />
-                            </Field>
+                            {enrolment.finalMark !== undefined || enrolment.grade ? <p>Legacy reconciliation (read-only): Final mark {enrolment.finalMark ?? "not recorded"} · Grade {enrolment.grade ?? "not recorded"}</p> : null}
                             <Field label="Attendance override" htmlFor={`enrolment-attendance-override-${enrolment.id}`}>
                               <input
                                 id={`enrolment-attendance-override-${enrolment.id}`}
@@ -597,7 +628,7 @@ export default async function StudentProfilePage({
           </div>
           )}
       </section>
-
+      {assessmentWorkflowEnabled() && assessmentWorkflowMode() !== "live" ? <EnrolmentAssessments studentId={student.id} editMode={editMode} terms={data.terms} /> : null}
       <section className="section">
         <div className="section-header">
           <div>

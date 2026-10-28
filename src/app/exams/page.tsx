@@ -5,6 +5,8 @@ import { ExamResultsTable, ExamSummary, ExamTools } from "@/components/exam-reco
 import { requirePermission } from "@/lib/auth";
 import { getExamPortalPickerExams } from "@/lib/exam-portal";
 import { getLmsData } from "@/lib/lms-data";
+import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessment/feature";
+import { EnrolmentAssessments } from "@/components/enrolment-assessments";
 
 export default async function ExamsPage({
   searchParams
@@ -15,10 +17,11 @@ export default async function ExamsPage({
     student?: string;
     practicalAccepted?: string;
     practicalRejected?: string;
+    assessmentSummary?: string;
   }>;
 }) {
   const profile = await requirePermission("view_students");
-  const { mode, examSearch = "", student, practicalAccepted, practicalRejected } = await searchParams;
+  const { mode, examSearch = "", student, practicalAccepted, practicalRejected, assessmentSummary } = await searchParams;
   const editMode = profile.role === "admin" && mode === "edit";
   const [data, portalExams] = await Promise.all([
     getLmsData(),
@@ -60,6 +63,8 @@ export default async function ExamsPage({
         </>
       }
     >
+      {assessmentSummary ? <p role="status">Assessment ingestion summary: {assessmentSummary}</p> : null}
+      {assessmentWorkflowEnabled() ? <p><Link className="button" href={`/assessments?mode=${editMode ? "edit" : "view"}`}>Assessment register, matching and reconciliation</Link></p> : null}
       {editMode ? (
         <ExamTools
           data={data}
@@ -75,8 +80,7 @@ export default async function ExamsPage({
           }
         />
       ) : null}
-      <ExamSummary data={data} studentId={student} />
-      <ExamResultsTable data={data} studentId={student} />
+      {assessmentWorkflowMode() === "live" ? <EnrolmentAssessments studentId={student} editMode={editMode} terms={data.terms} /> : <><ExamSummary data={data} studentId={student} /><ExamResultsTable data={data} studentId={student} /></>}
     </AppShell>
   );
 }

@@ -3,27 +3,46 @@ import { Eye, Plus } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Field, FormGrid } from "@/components/forms";
 import { StudentDirectoryTable } from "@/components/student-directory-table";
+import { StudentCreation } from "@/components/student-creation";
 import { requirePermission } from "@/lib/auth";
 import { createStudent } from "@/lib/admin-actions";
 import { getLmsData } from "@/lib/lms-data";
+import { StudentDirectoryPrototype } from "./prototype/student-workspace-prototype";
+import { readAssessmentWorkspace, readAssessmentTable } from "@/lib/assessment";
+import type { AssessmentOutcome } from "@/lib/assessment/types";
+import { assessmentPrototypeEnabled, studentWorkspaceEnabled } from "@/lib/assessment/feature";
 
 export default async function StudentsPage({
   searchParams
 }: {
-  searchParams: Promise<{ q?: string; mode?: string }>;
+  searchParams: Promise<{ q?: string; mode?: string; variant?: string }>;
 }) {
   const profile = await requirePermission("view_students");
-  const { q, mode } = await searchParams;
+  const { mode, variant } = await searchParams;
   const addMode = profile.role === "admin" && mode === "add";
   const data = await getLmsData();
+  const integrated = studentWorkspaceEnabled();
+  const prototype = variant === "A" && assessmentPrototypeEnabled(variant);
+  if (integrated && !prototype) {
+    const outcomes = await readAssessmentTable<AssessmentOutcome>("assessment_outcomes");
+    data.enrolments = data.enrolments.map(enrolment => {
+      const assessment = outcomes.find(outcome => outcome.enrolment_id === enrolment.id)?.assessment;
+      return assessment ? { ...enrolment, assessment, creditsAwarded: assessment.awarded_credits ?? 0 } : enrolment;
+    });
+  }
+  if (prototype) {
+    const workspace = await readAssessmentWorkspace();
+    return <AppShell title="Students" subtitle="Find a student, then open their workspace"><StudentDirectoryPrototype students={data.students} outcomes={workspace.outcomes} /></AppShell>;
+  }
 
   return (
     <AppShell
+      workspace={integrated}
       title="Students"
       subtitle="Profiles, enrolments, finance, attendance, documents, and progression"
       actions={
         profile.role === "admin" ? (
-          addMode ? (
+          integrated ? <StudentCreation terms={data.terms.map(term => ({ id: term.id, name: term.name }))} initiallyOpen={addMode} /> : addMode ? (
             <Link className="button" href="/students">
               <Eye size={16} />
               View mode
@@ -37,7 +56,7 @@ export default async function StudentsPage({
         ) : null
       }
     >
-      {addMode ? (
+      {addMode && !integrated ? (
       <form id="add-student" className="panel grid" action={createStudent}>
         <div className="section-header">
           <div>
@@ -114,7 +133,8 @@ export default async function StudentsPage({
       </form>
       ) : null}
 
-      <StudentDirectoryTable data={data} initialSearch={q ?? ""} />
+      {integrated ? <p><Link href="/assessments">All-student assessments</Link></p> : null}
+      <StudentDirectoryTable data={{ students: data.students, enrolments: data.enrolments, encounters: data.encounters, examResults: data.examResults }} />
     </AppShell>
   );
 }

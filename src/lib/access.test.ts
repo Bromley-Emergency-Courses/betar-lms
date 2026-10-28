@@ -15,6 +15,7 @@ describe("role permissions", () => {
 
   it("limits reception to check-in navigation", () => {
     expect(can("reception", "use_reception")).toBe(true);
+    expect(can("reception", "record_teaching")).toBe(false);
     expect(can("reception", "view_students")).toBe(false);
     expect(visibleNavigationForRole("reception")).toEqual(["Reception"]);
   });

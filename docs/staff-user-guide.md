@@ -222,6 +222,26 @@ If the page says there is no active term or no active enrolled students, an admi
 
 > Screenshot placeholder: staff teaching workflow
 
+### Phone And Tablet Companion (When Enabled)
+
+The focused companion is available in `Staff` only when enabled for your environment. Otherwise the existing workflow above remains in use. The companion has three destinations:
+
+| Destination | Use it to |
+| --- | --- |
+| Overview | Choose a term, switch between module progress and the term-date register, search students, and filter All / Here today / At risk. Attendance is attended/required for the term, not a separate total to add across modules. |
+| Student | Read enrolments grouped by their original term, Theory/Practical results, teaching records and term-filtered attendance dates. Planned dates are labelled separately from actual attendance. |
+| Add record | Choose a student, then an eligible module, then an encounter, formative score, presentation score or teaching plan. |
+
+Use `Change student` to switch people. `App menu` contains the wider LMS navigation and sign-out. `Existing staff workflow` returns to the older Staff screen. Academic results in the companion are read-only; `Pending`, `N/A` and `Unavailable` do not mean a zero score.
+
+**Teaching eligibility:** active students/modules in an active term can receive input while their enrolment is Planned, In progress or Fail, provided the assessment plan has been reviewed. Passed, deferred, abandoned, cancelled and historical enrolments cannot receive ordinary teaching records or plans. The narrow exception is scoring an already-recorded presentation after Pass while its original term remains active; other assessors may submit and authors may edit their own score.
+
+**Presentation scoring:** a student gives one presentation per requiring module; presentations for two modules can share a date. Several staff can score the same presentation, but each assessor submits once. Use the full rubric and a whole-number manual time penalty (0 if none); the saved total is the rubric subtotal minus that penalty. The LMS does not infer a penalty from duration. Open the score breakdown and choose `Edit your score` for your own eligible submission. Other authors' scores and the shared presentation date/type/duration are not editable here.
+
+**Planning:** choose an existing teaching date. Attendance plans apply to the term; presentation plans apply to the selected module. These plans are independent: changing one does not move or cancel the others, and neither records actual attendance or a completed presentation. If no dates are available, ask an administrator to update the calendar. An already-complete or carried-over presentation cannot receive another plan.
+
+**If a save is interrupted:** keep your draft and read the message. A save that could not be confirmed may already have reached the server. Review the student's records or reopen the plan before entering a replacement. An unchanged encounter retry uses the same record identity; a repeated presentation submission directs you to edit the existing score. Stale score edits and plans are rejected rather than overwriting newer data. Reopen to obtain the latest information before making another change. `Discard changes` closes the local draft; it does not undo anything already saved on the server.
+
 ## Finance
 
 Use `Finance` to reconcile expected module costs, CCCU invoice status, payments, balances, and notes.

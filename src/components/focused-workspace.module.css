@@ -1,0 +1,10 @@
+.focused { display: block; }
+.focused > :global(.sidebar) { display: none; }
+.focused :global(.content) { padding: 0; }
+.focused :global(.workspace-app-menu) { display: block; position: sticky; top: 0; z-index: 30; background: #f6f4ef; border-bottom: 1px solid #dfe7dc; }
+.focused :global(.workspace-app-menu-bar) { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 18px; max-width: 1220px; margin: auto; }
+.focused :global(.workspace-app-menu-bar) span { display: grid; font-size: 14px; gap: 2px; }
+.focused :global(.workspace-app-menu-bar) small { font-size: 11px; color: #647667; }
+.focused :global(.workspace-app-menu-content) { padding: 16px 18px; max-width: 1220px; margin: auto; max-height: calc(100dvh - var(--workspace-app-height, 60px)); overflow-y: auto; }
+.focused :global(.workspace-app-menu-content) :global(.nav) a { color: #294737; border: 1px solid #dfe7dc; }
+.focused :global(.workspace-app-menu-content[hidden]) { display: none; }

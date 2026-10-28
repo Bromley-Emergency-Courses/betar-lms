@@ -1,4 +1,5 @@
 import type { AppData } from "@/lib/types";
+import { requireDemoDataAllowed } from "@/lib/demo-mode";
 
 export const appData: AppData = {
   admissionLeads: [],
@@ -1053,5 +1054,6 @@ export const appData: AppData = {
 };
 
 export function getAppData(): AppData {
+  requireDemoDataAllowed();
   return appData;
 }
