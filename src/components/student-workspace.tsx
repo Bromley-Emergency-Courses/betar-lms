@@ -42,11 +42,12 @@ export function WorkspaceRefresh() {
   return null;
 }
 
-export function StudentWorkspace({ student, data, outcomes, attempts, historicalResults = [], revisions, sourceEvidence, terms, decisions, canEdit, canFinance, canTeach, returnTo }: {
+export function StudentWorkspace({ student, data, outcomes, attempts, historicalResults = [], revisions, sourceEvidence, terms, decisions, canEdit, canFinance, canTeach, returnTo, assessmentPaused = false }: {
   student: Student; data: StudentWorkspaceData; outcomes: AssessmentOutcome[]; attempts: AssessmentAttempt[]; revisions: AssessmentRevision[];
   canEdit: boolean; canFinance: boolean; returnTo?: string; terms: Array<{ id: string; name: string }>; decisions: AssessmentDecision[];
   sourceEvidence: AssessmentSourceEvidence[]; canTeach: boolean;
   historicalResults?: HistoricalAssessmentResult[];
+  assessmentPaused?: boolean;
 }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -141,7 +142,7 @@ export function StudentWorkspace({ student, data, outcomes, attempts, historical
           <section className={styles.panel}>{heading("Student details", "Contact, programme and student lifecycle.")}<dl className={styles.facts}><div><dt>Programme</dt><dd>{student.programme === "pgcert" ? "PGCert POCUS" : "Microcredential"}</dd></div><div><dt>Admission stage</dt><dd>{student.admissionStage.replaceAll("_", " ")}</dd></div><div><dt>Temporary ID</dt><dd>{student.temporaryId}</dd></div><div><dt>CCCU student ID</dt><dd>{student.cccuStudentId ?? "Not recorded"}</dd></div></dl>{student.notes ? <p>{student.notes}</p> : null}</section>
           <section className={styles.panel}>{heading("Latest teaching records", "Observations, formative assessments and presentations.")}{data.teaching.slice(0, 2).map(record => <article className={styles.teachingRecord} key={record.id}><strong>{record.type} · {record.module}</strong><p>{record.text || "Structured score recorded"}</p><small>{record.author} · {dateLabel(record.date)}</small></article>)}{!data.teaching.length ? <p className={styles.empty}>No teaching records yet.</p> : null}<button className={styles.textButton} onClick={() => navigate("teaching")}>View all teaching records <ArrowUpRight size={15} /></button></section>
         </div> : null}
-        {tab === "modules" ? <section className={styles.panel}>{canEdit ? <StudentEnrolmentActions studentId={student.id} studentName={`${student.firstName} ${student.lastName}`} /> : null}<AssessmentRegister outcomes={outcomes} attempts={attempts} historicalResults={historicalResults} revisions={revisions} sourceEvidence={sourceEvidence} terms={terms} decisions={decisions} canEdit={canEdit} studentScoped onAttendance={termId => navigate("attendance", termId)} /></section> : null}
+        {tab === "modules" ? <section className={styles.panel}>{canEdit && !assessmentPaused ? <StudentEnrolmentActions studentId={student.id} studentName={`${student.firstName} ${student.lastName}`} /> : null}<AssessmentRegister outcomes={outcomes} attempts={attempts} historicalResults={historicalResults} revisions={revisions} sourceEvidence={sourceEvidence} terms={terms} decisions={decisions} canEdit={canEdit && !assessmentPaused} studentScoped onAttendance={termId => navigate("attendance", termId)} /></section> : null}
         {tab === "attendance" ? <StudentAttendanceSection studentId={student.id} studentName={name} records={data.attendance} terms={data.terms} sessionTerms={data.terms.filter(candidate => outcomes.some(outcome => outcome.assessment.original_term_id === candidate.id && !["Abandoned", "Module deferred"].includes(outcome.assessment.disposition ?? "")))} canEdit={canEdit} /> : null}
         {tab === "teaching" ? <StudentTeachingSection studentId={student.id} records={data.teaching} canTeach={canTeach} /> : null}
         {tab === "finance" && canFinance ? <StudentFinanceSection studentId={student.id} records={data.finance} /> : null}

@@ -5,13 +5,13 @@ import CoursePage from "@/app/course/page";
 import { requirePermission } from "@/lib/auth";
 import { getLmsData } from "@/lib/lms-data";
 import { readAssessmentTable } from "@/lib/assessment";
-import { assessmentWorkflowEnabled } from "@/lib/assessment/feature";
+import { assessmentOperationsPaused, assessmentWorkflowEnabled } from "@/lib/assessment/feature";
 import { getAppData } from "./seed";
 
 vi.mock("@/lib/auth", () => ({ requirePermission: vi.fn() }));
 vi.mock("@/lib/lms-data", () => ({ getLmsData: vi.fn() }));
 vi.mock("@/lib/assessment", () => ({ readAssessmentTable: vi.fn() }));
-vi.mock("@/lib/assessment/feature", () => ({ assessmentWorkflowEnabled: vi.fn() }));
+vi.mock("@/lib/assessment/feature", () => ({ assessmentWorkflowEnabled: vi.fn(), assessmentOperationsPaused: vi.fn(() => false) }));
 vi.mock("@/lib/admin-actions", () => ({ createCourseModule: vi.fn(), createModuleOffering: vi.fn(), createTerm: vi.fn() }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock("@/components/course-records", () => ({
@@ -35,6 +35,13 @@ beforeEach(() => {
 });
 
 describe("minimal Course assessment integration", () => {
+  it("keeps configuration readable but suppresses editors during limited reopening", async () => {
+    vi.mocked(assessmentOperationsPaused).mockReturnValue(true);
+    const html = await render("edit");
+    expect(html).toContain("Existing course overview");
+    expect(html).not.toContain("Add Module");
+    expect(readAssessmentTable).not.toHaveBeenCalled();
+  });
   it("leaves the normal course overview unchanged without querying assessment plans", async () => {
     expect(await render()).toContain("Existing course overview");
     expect(readAssessmentTable).not.toHaveBeenCalled();

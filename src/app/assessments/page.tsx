@@ -4,7 +4,7 @@ import { AssessmentRegister } from "@/components/assessment-register";
 import { WorkspaceRefresh } from "@/components/student-workspace";
 import { EnrolmentAssessments } from "@/components/enrolment-assessments";
 import { requirePermission } from "@/lib/auth";
-import { assessmentPrototypeEnabled, assessmentWorkflowEnabled, studentWorkspaceEnabled } from "@/lib/assessment/feature";
+import { assessmentOperationsPaused, assessmentPrototypeEnabled, assessmentWorkflowEnabled, studentWorkspaceEnabled } from "@/lib/assessment/feature";
 import { readAssessmentRecords, readAssessmentWorkspace, readAssessmentTable } from "@/lib/assessment";
 import { getLmsData } from "@/lib/lms-data";
 import { AssessmentUiPrototype } from "./prototype/assessment-ui-prototype";
@@ -19,10 +19,10 @@ export default async function AssessmentsPage({searchParams}:{searchParams:Promi
     return <AppShell title="Assessments" subtitle="Results, resits and next steps" workspace actions={<Link className="button" href="/students">Students directory</Link>}>
       <WorkspaceRefresh />
       <p className="muted">Development review · Saved results, imported corrections, exclusions/restorations, exceptional decisions and resit arrangements.</p>
-      <AssessmentRegister {...records} canEdit={profile.role === "admin"} />
+      <AssessmentRegister {...records} canEdit={profile.role === "admin" && !assessmentOperationsPaused()} />
     </AppShell>;
   }
-  const editMode=profile.role==="admin" && params.mode==="edit";
+  const editMode=profile.role==="admin" && params.mode==="edit" && !assessmentOperationsPaused();
   const [workspace,data]=await Promise.all([readAssessmentWorkspace(params.student),getLmsData()]);
   if (prototype) {
     return <AppShell title="Assessments" subtitle="Results, resits and next steps">

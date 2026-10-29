@@ -12,7 +12,7 @@ import { loadWorkspaceTeaching } from "@/app/students/teaching-actions";
 import { buildStudentWorkspaceData } from "@/lib/student-workspace";
 import { EnrolmentAssessments } from "@/components/enrolment-assessments";
 import { readStudentAttendance } from "@/lib/student-attendance-store";
-import { assessmentPrototypeEnabled, assessmentWorkflowEnabled, assessmentWorkflowMode, studentWorkspaceEnabled } from "@/lib/assessment/feature";
+import { assessmentOperationsPaused, assessmentPrototypeEnabled, assessmentWorkflowEnabled, assessmentWorkflowMode, studentWorkspaceEnabled } from "@/lib/assessment/feature";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/access";
 import { readAssessmentRecords, readAssessmentWorkspace } from "@/lib/assessment";
@@ -168,7 +168,7 @@ export default async function StudentProfilePage({
       }
     }
     return <AppShell title="Student workspace" workspace hideTitle>
-      <StudentWorkspace student={student} data={{ ...workspaceData, attendance }} {...records} canEdit={profile.role === "admin"} canFinance={canFinance} canTeach={can(profile.role, "record_teaching")} returnTo={returnTo} />
+      <StudentWorkspace student={student} data={{ ...workspaceData, attendance }} {...records} canEdit={profile.role === "admin"} canFinance={canFinance} canTeach={can(profile.role, "record_teaching")} returnTo={returnTo} assessmentPaused={assessmentOperationsPaused()} />
     </AppShell>;
   }
   if (prototype) {

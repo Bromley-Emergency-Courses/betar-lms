@@ -7,6 +7,10 @@ export function assessmentWorkflowEnabled(): boolean {
   return assessmentWorkflowMode() !== "off";
 }
 
+export function assessmentOperationsPaused(): boolean {
+  return process.env.ASSESSMENT_OPERATIONS_PAUSED === "true";
+}
+
 export function assessmentPrototypeEnabled(variant?: string): boolean {
   return process.env.NODE_ENV === "development" && assessmentWorkflowEnabled() && ["A", "B", "C"].includes(variant ?? "");
 }

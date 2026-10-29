@@ -122,6 +122,8 @@ beforeAll(async () => {
   await db.exec(readFileSync("supabase/migrations/0082_current_assessment_activation.sql", "utf8"));
   expect(await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment")).toEqual(preservedBeforeActivationMigration);
   expect(await scalar("select count(*)::int value from assessment_current_activations")).toBe(0);
+  await db.exec(readFileSync("supabase/migrations/0083_assessment_operational_pause.sql", "utf8"));
+  expect(await scalar("select writes_paused value from assessment_operational_controls")).toBe(false);
 }, 30000);
 
 beforeEach(async () => {
@@ -135,6 +137,70 @@ beforeEach(async () => {
   await db.query("insert into public.enrolments(id,student_id,offering_id) values($1,$2,$3)", [enrolmentId,studentId,offeringId]);
 });
 afterAll(async () => { await db?.close(); });
+
+describe("temporary teaching-only reopening", () => {
+  beforeEach(async () => {
+    await db.exec("begin");
+    await db.exec("update assessment_operational_controls set writes_paused=true");
+  });
+  afterEach(async () => { await db.exec("rollback"); });
+  async function rejected(sql: string, parameters: unknown[] = []) {
+    await db.exec("savepoint paused_request");
+    await expect(db.query(sql, parameters)).rejects.toThrow("temporarily paused");
+    await db.exec("rollback to savepoint paused_request");
+  }
+  it.each([
+    "exam_results", "module_assessment_plans", "module_assessment_source_results", "module_assessment_source_versions",
+    "module_assessment_attempts", "module_assessment_attempt_revisions", "module_assessment_items",
+    "module_assessment_arrangements", "enrolment_disposition_events", "enrolment_assessment_overrides",
+    "assessment_legacy_backfill", "assessment_attempt_events", "assessment_historical_outcomes",
+    "assessment_current_activations", "assessment_rollout", "enrolment_cancellations", "course_modules", "module_offerings", "terms"
+  ])("blocks direct deletion on %s, including no-row statements", async table => {
+    await rejected(`delete from public.${table} where false`);
+  });
+  it("blocks legacy enrolment edits, inserts, deletes and forged projections", async () => {
+    await rejected("update enrolments set credits_awarded=20 where id=$1", [enrolmentId]);
+    await rejected("update enrolments set assessment_projection='{}',assessment_revision=assessment_revision+1 where id=$1", [enrolmentId]);
+    await rejected("delete from enrolments where id=$1", [enrolmentId]);
+    await rejected("insert into enrolments(student_id,offering_id) values($1,$2)", [studentId,offeringId]);
+    await rejected("truncate enrolments cascade");
+  });
+  it("rejects exam entry and override RPCs atomically", async () => {
+    const revision = (await evaluate()).revision;
+    await rejected("select execute_assessment_command($1::jsonb,$2)", [JSON.stringify({ enrolment_id: enrolmentId, reason: "Paused test", ...score(60) }),revision]);
+    await rejected("select execute_assessment_command($1::jsonb,$2)", [JSON.stringify({ enrolment_id: enrolmentId, reason: "Paused test", type: "SetAssessmentOverride", kind: "credits", value: 20 }),revision]);
+    expect(await scalar("select count(*)::int value from module_assessment_attempts where enrolment_id=$1", [enrolmentId])).toBe(0);
+  });
+  it("permits observations and keeps the original protected outcome and credits", async () => {
+    await db.exec("update assessment_operational_controls set writes_paused=false");
+    await db.query("update terms set status='active' where id=$1", [termId]);
+    await protectCurrentTeaching();
+    const before = await evaluate();
+    const draft = await teachingInput();
+    await db.exec("update assessment_operational_controls set writes_paused=true");
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await saveTeaching(draft);
+    expect((await evaluate()).effective_status).toBe(before.effective_status);
+    expect((await evaluate()).awarded_credits).toBe(before.awarded_credits);
+  });
+  it("does not give application roles permission to lift the pause", async () => {
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      expect(await scalar("select has_table_privilege($1,'assessment_operational_controls','UPDATE') value", [role])).toBe(false);
+      expect(await scalar("select has_function_privilege($1,'guard_paused_assessment_writes()','EXECUTE') value", [role])).toBe(false);
+    }
+  });
+  it("retains no imported source or attempts while paused", async () => {
+    const key = randomUUID();
+    const result = await ingest([source(key)]);
+    expect(result.rejected).toBe(1);
+    expect(await scalar("select count(*)::int value from module_assessment_source_results where source_key=$1", [key])).toBe(0);
+  });
+  it("allows ordinary assessment operations only after an explicit database release", async () => {
+    await db.exec("update assessment_operational_controls set writes_paused=false");
+    await command(score(60));
+    expect((await evaluate()).components.theory?.score).toBe(60);
+  });
+});
 
 describe("reviewed current assessment activation", () => {
   beforeEach(async () => {
@@ -1536,12 +1602,13 @@ describe("student teaching workspace", () => {
       expect((await evaluate()).effective_status).toBe(before.effective_status);
       expect(await scalar("select to_jsonb(baseline) value from assessment_historical_outcomes baseline where enrolment_id=$1", [enrolmentId])).toEqual(baseline);
     });
-    it("records and edits protected current teaching evidence without altering original academic fields", async () => {
+    it.each([false, true])("records and edits protected current teaching evidence with assessment pause %s", async paused => {
       await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
       await db.query("update module_offerings set presentation_required=true where id=$1", [offeringId]);
       await protectCurrentTeaching();
       const before = await scalar("select jsonb_build_object('status',status,'credits',credits_awarded,'mark',final_mark,'grade',grade) value from enrolments where id=$1", [enrolmentId]);
       const definition = await teachingDefinition();
+      await db.query("update assessment_operational_controls set writes_paused=$1", [paused]);
       await db.query("select set_config('test.actor',$1,false)", [teacherId]);
       const formative = await saveTeaching(await teachingInput("formative", { definition_id: definition.id, definition_token: definition.token, assessed_item_ids: ["image"], overall_score: 3, comments: null }));
       expect(await scalar("select staff_user_id value from assessment_attempts where id=$1", [formative.id])).toBe(teacherId);
@@ -1556,7 +1623,7 @@ describe("student teaching workspace", () => {
       await db.exec("savepoint exam_guard");
       await expect(command(score(70))).rejects.toThrow("plan");
       await db.exec("rollback to savepoint exam_guard");
-      await expect(db.query("update enrolments set status='completed' where id=$1", [enrolmentId])).rejects.toThrow("Historical academic baseline");
+      await expect(db.query("update enrolments set status='completed' where id=$1", [enrolmentId])).rejects.toThrow(paused ? "temporarily paused" : "Historical academic baseline");
     });
     it.each(["closed term", "inactive student", "inactive module", "cancelled", "Pass", "Abandoned", "Module deferred", "Assessment deferred", "disposition", "deferral"])("retains the %s blocker for a protected unplanned enrolment and rejects open drafts", async blocker => {
       await db.query("update module_offerings set presentation_required=false where id=$1", [offeringId]);

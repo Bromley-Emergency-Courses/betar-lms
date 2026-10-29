@@ -12,7 +12,7 @@ import { Field, FormGrid } from "@/components/forms";
 import { requirePermission } from "@/lib/auth";
 import { createCourseModule, createModuleOffering, createTerm } from "@/lib/admin-actions";
 import { getLmsData } from "@/lib/lms-data";
-import { assessmentWorkflowEnabled } from "@/lib/assessment/feature";
+import { assessmentOperationsPaused, assessmentWorkflowEnabled } from "@/lib/assessment/feature";
 import { readAssessmentTable } from "@/lib/assessment";
 import type { AssessmentPlan } from "@/lib/assessment/types";
 
@@ -23,7 +23,7 @@ export default async function CoursePage({
 }) {
   await requirePermission("manage_course");
   const { mode } = await searchParams;
-  const editMode = mode === "edit";
+  const editMode = mode === "edit" && !assessmentOperationsPaused();
   const data = await getLmsData();
   const assessmentPlans = editMode && assessmentWorkflowEnabled() ? await readAssessmentTable<AssessmentPlan>("module_assessment_plans") : undefined;
 
