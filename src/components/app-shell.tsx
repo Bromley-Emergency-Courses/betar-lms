@@ -17,6 +17,7 @@ import { visibleNavigationForRole } from "@/lib/access";
 import { signOut } from "@/app/login/actions";
 import { WorkspaceAppMenu } from "./workspace-app-menu";
 import focusedStyles from "./focused-workspace.module.css";
+import { assessmentOperationsPaused } from "@/lib/assessment/feature";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -101,7 +102,10 @@ export async function AppShell({
           </div>
           {actions ? <div className="toolbar">{actions}</div> : null}
         </header> : null}
-        <div className="content">{children}</div>
+        <div className="content">
+          {assessmentOperationsPaused() ? <p className="panel" role="status">Teaching is open: observations, presentation scoring and attendance are available for eligible current enrolments. Exam changes, imports, enrolment changes and course configuration changes are temporarily paused. Existing results remain readable.</p> : null}
+          {children}
+        </div>
       </main>
     </div>
   );

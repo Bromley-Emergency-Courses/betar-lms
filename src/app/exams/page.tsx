@@ -5,7 +5,7 @@ import { ExamResultsTable, ExamSummary, ExamTools } from "@/components/exam-reco
 import { requirePermission } from "@/lib/auth";
 import { getExamPortalPickerExams } from "@/lib/exam-portal";
 import { getLmsData } from "@/lib/lms-data";
-import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessment/feature";
+import { assessmentOperationsPaused, assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessment/feature";
 import { EnrolmentAssessments } from "@/components/enrolment-assessments";
 
 export default async function ExamsPage({
@@ -22,7 +22,7 @@ export default async function ExamsPage({
 }) {
   const profile = await requirePermission("view_students");
   const { mode, examSearch = "", student, practicalAccepted, practicalRejected, assessmentSummary } = await searchParams;
-  const editMode = profile.role === "admin" && mode === "edit";
+  const editMode = profile.role === "admin" && mode === "edit" && !assessmentOperationsPaused();
   const [data, portalExams] = await Promise.all([
     getLmsData(),
     editMode ? getExamPortalPickerExams(examSearch) : Promise.resolve([])
