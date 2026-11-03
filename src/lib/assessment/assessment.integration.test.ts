@@ -34,6 +34,7 @@ async function scalar<Value>(sql: string, parameters: unknown[] = []): Promise<V
 }
 async function evaluate() { return scalar<AssessmentEvaluation>("select public.read_enrolment_assessment($1) value", [enrolmentId]); }
 async function command(input: Record<string, unknown>, revision?: number) {
+  if (input.type === "RecordHistoricalScore" && !input.expected_plan_id) input = { ...input, expected_plan_id: (await evaluate()).historical?.score_plan?.id };
   return scalar<{ assessment: AssessmentEvaluation; pass_reversed: boolean }>("select public.execute_assessment_command($1::jsonb,$2) value", [JSON.stringify({ enrolment_id: enrolmentId, reason: "Reviewed fixture evidence", ...input }), revision ?? (await evaluate()).revision]);
 }
 async function plan(input: Record<string, unknown> = {}) {
@@ -126,9 +127,119 @@ beforeAll(async () => {
   expect(await scalar("select writes_paused value from assessment_operational_controls")).toBe(false);
   await db.exec(readFileSync("supabase/migrations/0084_historical_preserving_cutover.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/0085_portal_import_pause.sql", "utf8"));
+  const originalHistoricalScores = await scalar("select jsonb_agg(to_jsonb(result) order by id) value from exam_results result");
+  await db.exec(readFileSync("supabase/migrations/0086_historical_score_amendments.sql", "utf8"));
+  expect(await scalar("select jsonb_agg(to_jsonb(result) order by id) value from exam_results result")).toEqual(originalHistoricalScores);
   expect(await scalar("select assessment_portal_imports_paused() value")).toBe(true);
   await db.exec("update assessment_operational_controls set portal_imports_paused=false");
 }, 30000);
+
+describe("audited historical score editing", () => {
+  beforeEach(async () => { await db.exec("begin"); enrolmentId = protectedEnrolment; });
+  afterEach(async () => { await db.exec("rollback"); });
+  async function historicalResult(component = "theory") {
+    return scalar<{ id: string; score: number; amendment_revision: number; original_score: number; amendment_history: unknown[] }>("select to_jsonb(result) value from assessment_historical_results result where enrolment_id=$1 and component::text=$2 order by taken_on desc,attempt_number desc limit 1", [enrolmentId, component]);
+  }
+  async function correct(value: number, component = "theory") {
+    const result = await historicalResult(component);
+    return command({ type: "CorrectHistoricalScore", result_id: result.id, score: value, items: [] });
+  }
+  it("preserves originals and credits while correcting outcomes without historical teaching failures", async () => {
+    const original = await scalar("select jsonb_agg(to_jsonb(result) order by id) value from exam_results result");
+    expect((await evaluate()).effective_status).toBe("Pass");
+    expect((await correct(30)).assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 10, effective_indicators: ["theory:Resit required"] });
+    const passed = await correct(75);
+    expect(passed.assessment).toMatchObject({ effective_status: "Pass", awarded_credits: 10, effective_indicators: [], historical: { scores_amended: true, teaching_requirements_ignored: true } });
+    expect(await historicalResult()).toMatchObject({ score: 75, original_score: 70, amendment_revision: 2 });
+    expect((await historicalResult()).amendment_history).toHaveLength(2);
+    expect(await scalar("select jsonb_agg(to_jsonb(result) order by id) value from exam_results result")).toEqual(original);
+    expect(await scalar("select status::text value from enrolments where id=$1", [enrolmentId])).toBe("completed");
+  });
+  it("adds missing component totals and awards previously unawarded credits after an explicit save", async () => {
+    enrolmentId = protectedFailedEnrolment;
+    await command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "missing", sitting_date: "2024-05-01", score: 80, items: [] });
+    expect((await evaluate()).effective_status).toBe("In progress");
+    await command({ type: "RecordHistoricalScore", component: "practical", entry_kind: "missing", sitting_date: "2024-05-01", score: 70, items: [] });
+    expect(await evaluate()).toMatchObject({ effective_status: "Pass", awarded_credits: 10, effective_indicators: [] });
+    expect(await scalar("select recorded_status value from assessment_historical_outcomes where enrolment_id=$1", [enrolmentId])).toBe("failed");
+  });
+  it("retains the failed attempt when recording a plan-validated resit", async () => {
+    await correct(30);
+    await command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "resit", sitting_date: "2024-06-01", items: [{ kind: "mcq", score: 80 }] });
+    expect(await evaluate()).toMatchObject({ effective_status: "Pass", components: { theory: { score: 80, attempt_count: 2 } } });
+    expect(await scalar("select jsonb_agg(score order by taken_on) value from assessment_historical_results where enrolment_id=$1 and component='theory'", [enrolmentId])).toEqual([30,80]);
+  });
+  it("does not let later course or attendance changes recalculate the saved historical outcome", async () => {
+    await correct(75);
+    const before = (await evaluate()).components;
+    await scalar("select save_module_assessment_plan($1::jsonb,$2) value", [JSON.stringify({ module_id: protectedModule, theory_scheme: "mcq", theory_pass_mark: 95, practical_pass_mark: 95, reason: "Future rules" }), (await evaluate()).historical?.score_plan?.id]);
+    expect(await evaluate()).toMatchObject({ effective_status: "Pass", awarded_credits: 10, components: before });
+  });
+  it("keeps exceptional status and credit decisions independent and clears status back to the edited calculation", async () => {
+    await correct(20);
+    await command({ type: "SetAssessmentOverride", kind: "status", value: "Pass" });
+    expect(await evaluate()).toMatchObject({ effective_status: "Pass", calculated_status: "Fail", awarded_credits: 10 });
+    await command({ type: "ClearAssessmentOverride", kind: "status" });
+    expect(await evaluate()).toMatchObject({ effective_status: "Fail", awarded_credits: 10 });
+  });
+  it("rejects stale saves, foreign results and direct amendment writes", async () => {
+    const result = await historicalResult();
+    const revision = (await evaluate()).revision;
+    await correct(60);
+    await db.exec("savepoint invalid");
+    await expect(command({ type: "CorrectHistoricalScore", result_id: result.id, score: 20 }, revision)).rejects.toThrow("Reload");
+    await db.exec("rollback to invalid");
+    await expect(command({ type: "CorrectHistoricalScore", result_id: randomUUID(), score: 20 })).rejects.toThrow("from this enrolment");
+    await db.exec("rollback to invalid; set local role authenticated");
+    await expect(db.exec("delete from assessment_historical_score_changes")).rejects.toThrow("permission denied");
+    await db.exec("rollback to invalid");
+  });
+  it("requires an administrator and respects the operational pause without unlocking Portal imports", async () => {
+    const result = await historicalResult();
+    await db.exec("savepoint blocked");
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await expect(command({ type: "CorrectHistoricalScore", result_id: result.id, score: 50 })).rejects.toThrow();
+    await db.exec("rollback to blocked; update assessment_operational_controls set writes_paused=true,portal_imports_paused=true");
+    await db.exec("savepoint paused");
+    await expect(correct(30)).rejects.toThrow("paused");
+    await db.exec("rollback to paused; update assessment_operational_controls set writes_paused=false");
+    await correct(30);
+    expect(await scalar("select portal_imports_paused value from assessment_operational_controls")).toBe(true);
+  });
+  it("validates global plan freshness, dates, duplicates and failed predecessors", async () => {
+    await db.exec("savepoint invalid");
+    await expect(command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "resit", sitting_date: "2024-06-01", items: [{ kind: "mcq", score: 80 }] })).rejects.toThrow("failed component");
+    await db.exec("rollback to invalid");
+    await expect(command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "missing", sitting_date: "2024-05-01", score: 70 })).rejects.toThrow("already exists");
+    await db.exec("rollback to invalid");
+    enrolmentId = protectedFailedEnrolment;
+    await expect(command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "missing", sitting_date: "2024-05-01", score: 70, expected_plan_id: randomUUID() })).rejects.toThrow("plan changed");
+    await db.exec("rollback to invalid");
+    await expect(command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "missing", sitting_date: "2999-05-01", score: 70 })).rejects.toThrow("future date");
+    await db.exec("rollback to invalid");
+  });
+  it("applies physics weighting to a new resit and retains that plan when correcting it", async () => {
+    await correct(30);
+    await scalar("select save_module_assessment_plan($1::jsonb,$2) value", [JSON.stringify({ module_id: protectedModule, theory_scheme: "mcq", physics_weighting: true, theory_pass_mark: 50, practical_pass_mark: 50, reason: "Reviewed physics plan" }), (await evaluate()).historical?.score_plan?.id]);
+    await db.exec("savepoint missing_item");
+    await expect(command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "resit", sitting_date: "2024-06-01", items: [{ kind: "mcq", score: 90 }] })).rejects.toThrow("items are missing");
+    await db.exec("rollback to missing_item");
+    await command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "resit", sitting_date: "2024-06-01", items: [{ kind: "mcq", score: 90 }, { kind: "physics", score: 50 }] });
+    expect((await evaluate()).components.theory.score).toBe(70);
+    const result = await historicalResult();
+    await command({ type: "CorrectHistoricalScore", result_id: result.id, items: [{ kind: "mcq", score: 90 }, { kind: "physics", score: 30 }] });
+    expect((await evaluate()).components.theory).toMatchObject({ score: 60, attempt_count: 2 });
+    expect((await historicalResult()).amendment_history).toHaveLength(2);
+  });
+  it("retains amendment evidence as a cancellation blocker and rejects crossing into current attempts", async () => {
+    await correct(30);
+    expect(await scalar("select exists(select 1 from enrolment_evidence_retention where enrolment_id=$1 and source_table='assessment_historical_score_changes') value", [enrolmentId])).toBe(true);
+    expect(await scalar<string[]>("select student_enrolment_cancellation_reasons($1) value", [enrolmentId])).not.toHaveLength(0);
+    await db.exec("savepoint mixed");
+    await expect(scalar("select assessment_new_attempt($1,'theory',$2::jsonb,'Manual') value", [enrolmentId,JSON.stringify(score(70))])).rejects.toThrow("historical score amendments");
+    await db.exec("rollback to mixed");
+  });
+});
 
 beforeEach(async () => {
   await db.query("select set_config('test.actor',$1,false)", [adminId]);

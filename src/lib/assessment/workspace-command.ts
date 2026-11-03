@@ -12,6 +12,8 @@ const item = z.union([
 const score = { score: percentage.optional(), sitting_date: z.iso.date(), sitting_term_id: z.uuid().optional(), items: z.array(item).max(4) };
 const override = { kind: z.enum(["status", "credits", "indicator"]), indicator: z.enum(assessmentIndicators).optional() };
 const commandSchema = z.discriminatedUnion("type", [
+  z.strictObject({ ...base, type: z.literal("RecordHistoricalScore"), component, expected_plan_id: z.uuid(), entry_kind: z.enum(["missing", "resit"]), sitting_date: z.iso.date(), score: percentage.optional(), items: z.array(z.strictObject({ kind: z.enum(["mcq", "physics", "coursework", "viva"]), score: percentage })).max(4) }),
+  z.strictObject({ ...base, type: z.literal("CorrectHistoricalScore"), result_id: z.uuid(), score: percentage.optional(), items: z.array(z.strictObject({ kind: z.enum(["mcq", "physics", "coursework", "viva"]), score: percentage })).max(4) }),
   z.strictObject({ ...base, type: z.literal("AddManualAttempt"), component, ...score, previous_result_unavailable: z.string().trim().min(1).max(4000).optional() }),
   z.strictObject({ ...base, type: z.literal("CorrectManualAttempt"), attempt_id: z.uuid(), ...score }),
   z.strictObject({ ...base, type: z.literal("CorrectImportedAttempt"), attempt_id: z.uuid(), source_id: z.uuid(), expected_source_revision: z.number().int().nonnegative(), score: percentage.optional(), items: z.array(item).max(4) }),

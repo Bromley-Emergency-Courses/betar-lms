@@ -20,7 +20,7 @@ export function historicalComponent(results: HistoricalAssessmentResult[], compo
 
 export function retainHistoricalOutcomes(outcomes: AssessmentOutcome[], results: HistoricalAssessmentResult[]): AssessmentOutcome[] {
   return outcomes.map(outcome => {
-    if (outcome.assessment.activation) return outcome;
+    if (outcome.assessment.activation || outcome.assessment.historical?.scores_amended) return outcome;
     const recorded = results.filter(row => row.enrolment_id === outcome.enrolment_id);
     const unreviewed = recorded.filter(row => !row.reviewed_backfill);
     const hasModernEvidence = Object.values(outcome.assessment.components ?? {}).some(component => component?.attempt_count) || outcome.assessment.overrides?.length || outcome.assessment.disposition;
@@ -29,7 +29,7 @@ export function retainHistoricalOutcomes(outcomes: AssessmentOutcome[], results:
     const theory = historicalComponent(recorded, "theory");
     const practical = historicalComponent(recorded, "practical");
     const flags = new Set<string>();
-    if (unreviewed.length) flags.add("Historical results retained — reconciliation required");
+    if (unreviewed.length && !outcome.assessment.historical?.editable_scores) flags.add("Historical results retained — reconciliation required");
     if (!statuses[outcome.legacy_status]) flags.add("Historical status requires review");
     if (outcome.legacy_status === "failed" || outcome.legacy_status === "resit" || theory.passed === false || practical.passed === false) flags.add("Historical failure / resit requires review");
     if (recorded.some(row => row.prior_attempt_missing || ((row.is_resit || row.attempt_number > 1) && !row.resit_of_result_id))) flags.add("Earlier attempt reference requires review");
@@ -41,7 +41,7 @@ export function retainHistoricalOutcomes(outcomes: AssessmentOutcome[], results:
     if (outcome.assessment.historical?.protected) return { ...outcome, assessment: {
       ...outcome.assessment,
       historical: { ...outcome.assessment.historical, review_flags: [...flags] },
-      components: unreviewed.length || !Object.keys(outcome.assessment.components ?? {}).length ? { theory, practical } : outcome.assessment.components
+      components: !outcome.assessment.historical.scores_amended && (unreviewed.length || !Object.keys(outcome.assessment.components ?? {}).length) ? { theory, practical } : outcome.assessment.components
     } };
     return { ...outcome, assessment: {
       ...outcome.assessment,

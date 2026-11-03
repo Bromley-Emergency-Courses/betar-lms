@@ -15,6 +15,8 @@ export interface AssessmentScoreInput {
 type CommandBase = { enrolment_id: string; reason: string };
 type SourceCommand = { source_id: string; expected_source_revision: number; identity_override_reason?: string; previous_result_unavailable?: string };
 export type AssessmentCommand = CommandBase & (
+  | { type: "RecordHistoricalScore"; component: AssessmentComponent; entry_kind: "missing" | "resit"; expected_plan_id: string; sitting_date: string; score?: number; items: AssessmentItemInput[] }
+  | { type: "CorrectHistoricalScore"; result_id: string; score?: number; items: AssessmentItemInput[] }
   | { type: "CreateModuleEnrolment"; student_id: string; offering_id: string; offering_token: string; attendance_days: number | null; presentation_required: boolean | null }
   | { type: "SetEnrolmentRequirements"; student_id: string; expected_token: string; attendance_days: number | null; presentation_required: boolean | null }
   | { type: "RemoveModuleEnrolment"; student_id: string; expected_token: string; confirmed: true }
@@ -40,7 +42,7 @@ export interface ComponentResult {
 }
 export interface AssessmentEvaluation {
   activation?: { activated_at: string; plan_id: string; preserved_credits: number | null; original_record: { status: string; credits: number; final_mark: number | null; grade: string | null; captured_at: string } };
-  historical?: { protected?: boolean; current_term_in_progress?: boolean; status: string; credits?: number; final_mark: number | null; grade: string | null; review_flags: string[]; captured_at?: string; capture_reference?: string };
+  historical?: { protected?: boolean; current_term_in_progress?: boolean; editable_scores?: boolean; scores_amended?: boolean; teaching_requirements_ignored?: boolean; score_plan?: AssessmentPlan | null; status: string; credits?: number; final_mark: number | null; grade: string | null; review_flags: string[]; captured_at?: string; capture_reference?: string };
   enrolment_id: string; revision: number; needs_plan?: boolean; plan: AssessmentPlan;
   student_id: string; module_id: string; original_term_id: string;
   components: { theory: ComponentResult; practical?: ComponentResult };
@@ -52,6 +54,10 @@ export interface AssessmentEvaluation {
   pass_reversed?: boolean;
 }
 export interface HistoricalAssessmentResult {
+  amendment_revision?: number | null; original_score?: number | null; amendment_plan_id?: string | null;
+  amendment_items?: AssessmentItemInput[] | null;
+  amendment_plan?: AssessmentPlan | null;
+  amendment_history?: Array<{ revision: number; score: number; reason: string; created_at: string; actor_name: string; items: AssessmentItemInput[] }>;
   id: string; enrolment_id: string | null; student_id: string; offering_id: string;
   student_identifier: string; student_name: string; module_code: string; module_title: string;
   original_cohort: string; original_term_id: string; component: AssessmentComponent;

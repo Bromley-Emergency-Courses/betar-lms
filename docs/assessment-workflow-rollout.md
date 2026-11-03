@@ -98,6 +98,18 @@ The following stay in review: ambiguous teaching enrolments, missing/duplicate p
 
 Resolve or document every shadow difference. The comparison exposes complete new component projections, legacy/new statuses and credits, row counts and legacy hashes. Import reconciliation exports expose source payload hashes through the database projection and source versions; source payloads remain available in the register. Duplicate assessment-only teaching enrolments are reported, never automatically merged.
 
+## Audited historical score editing
+
+Migration `0086` adds administrator-only historical score amendments without changing the original `exam_results` or captured historical outcomes. Installing it does not recalculate existing records, activate enrolments, lift either pause or enable imports. Release requires separate approval; local validation is not a production migration.
+
+- Administrators can record a missing Theory/Practical component total, correct an existing result or record a resit from the student assessment register. Every save requires a reason and the current enrolment revision. Original scores and all amendments remain visible in history; a resit does not replace its failed predecessor.
+- Original corrections retain the sitting date, attempt identity and recorded pass mark. Missing historical totals do not invent MCQ/physics/coursework/viva inputs. New missing results use the reviewed global plan's pass mark; new resits require its assessment items and weighting. Plans and pass marks remain read-only in the student profile. Corrections to newly entered resits use their frozen plan.
+- Only an explicit historical score save starts exam-based recalculation for that enrolment. Missing historical attendance and presentations are excluded. The resulting calculation is frozen against subsequent global plan or teaching changes until another explicit score save. Exceptional decisions remain authoritative and can amend status, credits and flags.
+- Existing positive historical credits remain protected until an explicit credit decision. Previously zero-credit records may earn calculated credits after an explicit passing score save. Clearing an exceptional status after a score amendment restores the exam calculation, not the original archived status; clearing a credit override restores any protected positive award.
+- Amended historical enrolments cannot subsequently be activated or backfilled into the current workflow. Histories already linked to current-workflow attempts, cancelled enrolments, ambiguous ownership and ambiguous latest sittings require review rather than an automatic conversion. Legacy Final mark and Grade remain separate archived fields, not component scores.
+
+Validate with `npx vitest run --maxWorkers=2`, the isolated Docker rehearsal and `node scripts/historical-score-edit-smoke.mjs .context/assessment-browser/login.json` against the synthetic local app. The browser script creates labelled synthetic fixtures only on the guarded local stack and retains its evidence under `.context/historical-score-edits/`; it must never target production.
+
 ## Pilot and production gate
 
 ### Manual-first release scope
