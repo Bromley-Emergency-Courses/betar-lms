@@ -49,7 +49,8 @@ await insert("module_offerings", { id: historicalOffering, module_id: historical
 await insert("enrolments", { id: historicalEnrolment, student_id: historicalStudent, offering_id: historicalOffering, status: "completed", credits_awarded: 10, final_mark: 72, grade: "Merit", attendance_days_required_override: 2, presentation_required_override: true });
 await insert("exam_results", ["theory", "practical"].map(component => ({ student_id: historicalStudent, offering_id: historicalOffering, component_type: component, source_system: "manual", source_attempt_id: randomUUID(), score: 72, pass_mark: 50, passed: true, resit_required: false, taken_on: "2025-05-20", attempt_number: 1, is_resit: false, prior_attempt_missing: false })));
 execFileSync("docker", ["exec", "-i", liveContainer, "psql", "-Xq", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"], {
-  input: `insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits,recorded_final_mark,recorded_grade,capture_reference)
+  input: `update enrolments set assessment_plan_id=null where id='${historicalEnrolment}';
+    insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits,recorded_final_mark,recorded_grade,capture_reference)
     select id,status::text,credits_awarded,final_mark,grade,'Synthetic live-mode browser fixture only' from enrolments where id='${historicalEnrolment}';`,
   encoding: "utf8", stdio: ["pipe", "pipe", "pipe"]
 });
@@ -107,7 +108,7 @@ try {
   checks.push("Shadow workspace previews additive passing results while the official CCCU export stays legacy-authoritative");
   await stopApp();
   const denied = await admin.rpc("set_assessment_rollout", { requested_mode: "live", evidence: {}, change_reason: "Synthetic missing evidence must fail" }); assert.match(denied.error?.message ?? "", /Missing rollout sign-off/);
-  await rpc("set_assessment_rollout", { requested_mode: "live", evidence: Object.fromEntries(["reconciliation_review", "sanitized_rehearsal", "pilot_signoff", "backup_restore", "module_plans_review"].map(gate => [gate, `SYNTHETIC ONLY: ${fixtureId}; not production sign-off`])), change_reason: "Authorized isolated synthetic cutover rehearsal" });
+  await rpc("set_assessment_rollout", { requested_mode: "live", evidence: Object.fromEntries(["reconciliation_review", "sanitized_rehearsal", "pilot_signoff", "backup_restore", "module_plans_review", "historical_outcomes_review"].map(gate => [gate, `SYNTHETIC ONLY: ${fixtureId}; not production sign-off`])), change_reason: "Authorized isolated synthetic cutover rehearsal" });
   page = await startApp("live", false); assert.equal(await page.getByRole("navigation", { name: "Student sections", exact: true }).count(), 0);
   assert.deepEqual((await official(page)).map(row => row.Score).sort(), ["30", "70"]);
   checks.push("Database rejects missing sign-off; live projections work independently of the integrated workspace flag");
@@ -130,10 +131,12 @@ try {
   assert.equal((await evaluate()).components.theory.attempt_count, 3); assert.equal((await evaluate()).awarded_credits, 10);
   checks.push("A browser correction reverses Pass/credits without creating a resit; a later live-only resit restores Pass with all three attempts retained");
   await page.goto(`${base}/students/${historicalStudent}?tab=modules`);
-  await page.getByText("Historical · completed", { exact: true }).waitFor();
+  await page.getByText("Recorded · completed", { exact: true }).waitFor();
   const protectedOutcome = await historicalEvaluation();
   assert.equal(protectedOutcome.effective_status, "Pass"); assert.equal(protectedOutcome.awarded_credits, 10);
-  assert.equal(protectedOutcome.attendance_actual, 0); assert.deepEqual(protectedOutcome.effective_indicators, []);
+  const recordedAttendance = await admin.from("attendance_records").select("id", { count: "exact", head: true }).eq("student_id", historicalStudent);
+  assert.equal(recordedAttendance.error, null); assert.equal(recordedAttendance.count, 0);
+  assert.deepEqual(protectedOutcome.effective_indicators, []);
   const historicalExport = await page.request.get(`${base}/api/exports/cccu-exam-results`); assert.equal(historicalExport.status(), 200);
   const originalRows = Papa.parse(await historicalExport.text(), { header: true, skipEmptyLines: true }).data.filter(row => row["Student ID"] === historicalIdentifier);
   assert.equal(originalRows.length, 2); assert(originalRows.every(row => row.Score === "72" && row["Record basis"].startsWith("Historical record")));

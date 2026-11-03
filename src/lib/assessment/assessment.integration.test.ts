@@ -124,6 +124,7 @@ beforeAll(async () => {
   expect(await scalar("select count(*)::int value from assessment_current_activations")).toBe(0);
   await db.exec(readFileSync("supabase/migrations/0083_assessment_operational_pause.sql", "utf8"));
   expect(await scalar("select writes_paused value from assessment_operational_controls")).toBe(false);
+  await db.exec(readFileSync("supabase/migrations/0084_historical_preserving_cutover.sql", "utf8"));
 }, 30000);
 
 beforeEach(async () => {
@@ -137,6 +138,74 @@ beforeEach(async () => {
   await db.query("insert into public.enrolments(id,student_id,offering_id) values($1,$2,$3)", [enrolmentId,studentId,offeringId]);
 });
 afterAll(async () => { await db?.close(); });
+
+describe("historical-preserving rollout", () => {
+  beforeEach(async () => { await db.exec("begin"); });
+  afterEach(async () => { await db.exec("rollback"); });
+  const evidence = { reconciliation_review: "Synthetic review", sanitized_rehearsal: "Synthetic rehearsal", pilot_signoff: "Synthetic pilot", backup_restore: "Synthetic recovery", module_plans_review: "Synthetic plans", historical_outcomes_review: "Synthetic preserved archive review" };
+  async function cutover(signoffs: Record<string, string> = evidence) {
+    await db.exec("savepoint rollout_request");
+    try { return await scalar("select set_assessment_rollout('live',$1,'Synthetic cutover') value", [JSON.stringify(signoffs)]); }
+    catch (error) { await db.exec("rollback to rollout_request"); throw error; }
+    finally { await db.exec("release savepoint rollout_request"); }
+  }
+  it("allows reviewed protected archives without assigning modern plans or changing original outcomes", async () => {
+    await db.query("update enrolments set assessment_plan_id=null where id=any($1::uuid[])", [[protectedEnrolment, protectedFailedEnrolment]]);
+    expect(await scalar("select count(*)::int value from course_modules where active and assessment_plan_id is null")).toBe(0);
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment])).toMatchObject({ historical: { protected: true }, effective_status: "Pass", awarded_credits: 10 });
+    const originals = await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment");
+    const baselines = await scalar("select jsonb_agg(to_jsonb(baseline) order by enrolment_id) value from assessment_historical_outcomes baseline");
+    await cutover();
+    expect(await scalar("select mode value from assessment_rollout")).toBe("live");
+    expect(await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment")).toEqual(originals);
+    expect(await scalar("select jsonb_agg(to_jsonb(baseline) order by enrolment_id) value from assessment_historical_outcomes baseline")).toEqual(baselines);
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment])).toMatchObject({ effective_status: "Pass", awarded_credits: 10, historical: { protected: true } });
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedFailedEnrolment])).toMatchObject({ effective_status: "Fail", awarded_credits: 0, historical: { protected: true } });
+  });
+  it("requires a separate historical review and does not partially change rollout on rejection", async () => {
+    await expect(cutover({ ...evidence, historical_outcomes_review: " " })).rejects.toThrow("historical_outcomes_review");
+    expect(await scalar("select mode value from assessment_rollout")).toBe("shadow");
+  });
+  it("still rejects unprotected enrolments without a reviewed plan", async () => {
+    await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+    await expect(cutover()).rejects.toThrow("reviewed assessment plan");
+  });
+  it("still requires a reviewed global plan for active modules even when their enrolments are protected", async () => {
+    await db.query("update course_modules set assessment_plan_id=null where id=$1", [protectedModule]);
+    await expect(cutover()).rejects.toThrow("reviewed assessment plan");
+  });
+  it("retains an inherited reviewed plan when the global mode changes for future enrolments", async () => {
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ practical_pass_mark: 50 }); await adopt();
+    const inherited = planId;
+    await db.query("update course_modules set mode='online' where id=$1", [moduleId]);
+    await plan();
+    await cutover();
+    expect((await evaluate()).plan).toMatchObject({ id: inherited, mode: "practical" });
+  });
+  it("does not mistake protected current ongoing enrolments for archives even with an assigned plan", async () => {
+    await db.query("update terms set status='active',starts_on=current_date-30,ends_on=current_date+30 where id=$1", [termId]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'planned',0)", [enrolmentId]);
+    await expect(cutover()).rejects.toThrow("Current ongoing enrolments require reviewed activation");
+    await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+    const preview = await scalar("select preview_current_assessment_activation($1::uuid[]) value", [[enrolmentId]]);
+    await scalar("select activate_current_assessments($1::uuid[],$2::jsonb,'Synthetic activation',true) value", [[enrolmentId], JSON.stringify(preview)]);
+    await cutover();
+    expect(await scalar("select mode value from assessment_rollout")).toBe("live");
+  });
+  it("rejects mismatched preserved fields rather than recalculating them", async () => {
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'completed',10)", [enrolmentId]);
+    await expect(cutover()).rejects.toThrow("Historical baseline mismatch");
+  });
+  it("retains the operational pause and administrator boundary", async () => {
+    await db.exec("update assessment_operational_controls set writes_paused=true");
+    await expect(cutover()).rejects.toThrow("temporarily paused");
+    await db.exec("update assessment_operational_controls set writes_paused=false");
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await expect(cutover()).rejects.toThrow(/administrator|admin/i);
+    expect(await scalar("select mode value from assessment_rollout")).toBe("shadow");
+  });
+});
 
 describe("temporary teaching-only reopening", () => {
   beforeEach(async () => {
@@ -2352,6 +2421,7 @@ describe("assessment PostgreSQL commands and evaluator", () => {
     expect((await evaluate()).plan.mode).toBe("practical");
     expect((await evaluate()).attendance_required).toBe(3);
     expect((await evaluate()).calculated_indicators).toContain("Attendance non-compliance");
+    await plan();
   });
   it("rejects retroactive attempt ordering and incompatible plan changes", async () => {
     await command(score(30));
@@ -2387,7 +2457,7 @@ describe("assessment PostgreSQL commands and evaluator", () => {
   });
   it("requires sign-offs and blocks legacy writes at cutover, with reversible rollback", async () => {
     await expect(scalar("select public.set_assessment_rollout('live','{}','Cutover') value")).rejects.toThrow("sign-off");
-    await scalar("select public.set_assessment_rollout('live',$1,'Synthetic sign-offs') value",[JSON.stringify({reconciliation_review:"review",sanitized_rehearsal:"fixture",pilot_signoff:"cohort",backup_restore:"backup",module_plans_review:"review"})]);
+    await scalar("select public.set_assessment_rollout('live',$1,'Synthetic sign-offs') value",[JSON.stringify({reconciliation_review:"review",sanitized_rehearsal:"fixture",pilot_signoff:"cohort",backup_restore:"backup",module_plans_review:"review",historical_outcomes_review:"review"})]);
     try {
       await expect(db.query("update enrolments set credits_awarded=10 where id=$1",[enrolmentId])).rejects.toThrow("read-only");
       await expect(db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'theory','theory_portal',$3,70,50,true,false,'2025-06-15')",[studentId,offeringId,randomUUID()])).rejects.toThrow("read-only");
