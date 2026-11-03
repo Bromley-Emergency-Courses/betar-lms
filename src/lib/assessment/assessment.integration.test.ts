@@ -68,7 +68,7 @@ beforeAll(async () => {
   await db.exec(`create role anon; create role authenticated; create role service_role;
     create schema auth; create table auth.users(id uuid primary key);
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.actor',true),'')::uuid $$;`);
-  for (const file of ["0001_betar_lms_schema", "0003_formative_assessment_workflow", "0005_term_attendance_sessions", "0010_attendance_admin_note", "0012_enrolment_resit_completion_requirements", "0013_exam_result_attempt_metadata"]) {
+  for (const file of ["0001_betar_lms_schema", "0003_formative_assessment_workflow", "0005_term_attendance_sessions", "0007_exam_portal_sync", "0010_attendance_admin_note", "0012_enrolment_resit_completion_requirements", "0013_exam_result_attempt_metadata"]) {
     await db.exec(readFileSync(`supabase/migrations/${file}.sql`, "utf8").replace('create extension if not exists "pgcrypto";', ""));
   }
   await db.exec("alter table public.audit_events add column reason text;");
@@ -124,6 +124,10 @@ beforeAll(async () => {
   expect(await scalar("select count(*)::int value from assessment_current_activations")).toBe(0);
   await db.exec(readFileSync("supabase/migrations/0083_assessment_operational_pause.sql", "utf8"));
   expect(await scalar("select writes_paused value from assessment_operational_controls")).toBe(false);
+  await db.exec(readFileSync("supabase/migrations/0084_historical_preserving_cutover.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/0085_portal_import_pause.sql", "utf8"));
+  expect(await scalar("select assessment_portal_imports_paused() value")).toBe(true);
+  await db.exec("update assessment_operational_controls set portal_imports_paused=false");
 }, 30000);
 
 beforeEach(async () => {
@@ -137,6 +141,137 @@ beforeEach(async () => {
   await db.query("insert into public.enrolments(id,student_id,offering_id) values($1,$2,$3)", [enrolmentId,studentId,offeringId]);
 });
 afterAll(async () => { await db?.close(); });
+
+describe("separate automatic import pause", () => {
+  beforeEach(async () => { await db.exec("update assessment_operational_controls set portal_imports_paused=true"); });
+  afterEach(async () => { await db.exec("reset role; update assessment_operational_controls set portal_imports_paused=false, writes_paused=false"); });
+
+  it("allows manual failure, scheduling and resit without changing historical awards", async () => {
+    const historical = await scalar("select jsonb_agg(to_jsonb(baseline) order by enrolment_id) value from assessment_historical_outcomes baseline");
+    await command(score(40));
+    await command({ type: "ScheduleResit", component: "theory", note: "Reviewed next sitting" });
+    await command({ ...score(75), sitting_date: "2025-07-15" });
+    expect((await evaluate()).components.theory).toMatchObject({ score: 75, passed: true });
+    expect(await scalar("select count(*)::int value from module_assessment_attempts where enrolment_id=$1", [enrolmentId])).toBe(2);
+    expect(await scalar("select jsonb_agg(to_jsonb(baseline) order by enrolment_id) value from assessment_historical_outcomes baseline")).toEqual(historical);
+  });
+
+  it("blocks Portal and mixed batches atomically while retaining manual CSV ingestion", async () => {
+    const input = source();
+    const csv = { ...source(), source_system: "Practical CSV" };
+    await expect(ingest([csv, input])).rejects.toThrow("Automatic exam imports are temporarily paused");
+    expect(await scalar("select count(*)::int value from module_assessment_source_results where source_key in ($1,$2)", [input.source_key, csv.source_key])).toBe(0);
+    expect((await ingest([csv])).created).toBe(1);
+  });
+
+  it("blocks direct Portal source insertion and legacy Portal mappings", async () => {
+    await expect(db.query("insert into module_assessment_source_results(source_system,source_key,student_identifier,module_id,component) values('Portal',$1,$2,$3,'theory')", [randomUUID(),studentId,moduleId])).rejects.toThrow("temporarily paused");
+    await expect(db.query("insert into exam_portal_mappings(portal_exam_id,term_id,module_id) values($1,$2,$3)", [randomUUID(),termId,moduleId])).rejects.toThrow("temporarily paused");
+    await expect(db.exec("update exam_results set score=score where source_system='theory_portal'")).rejects.toThrow("temporarily paused");
+    await expect(db.exec("delete from exam_portal_submissions where false")).rejects.toThrow("temporarily paused");
+  });
+
+  it("blocks new Portal versions but still permits an audited manual replacement", async () => {
+    await db.exec("update assessment_operational_controls set portal_imports_paused=false");
+    const input = source();
+    await ingest([input]);
+    const attempt = (await evaluate()).components.theory.id;
+    const sourceId = await scalar<string>("select id value from module_assessment_source_results where source_key=$1", [input.source_key]);
+    await db.exec("update assessment_operational_controls set portal_imports_paused=true");
+    await expect(ingest([{ ...input, score: 80 }])).rejects.toThrow("temporarily paused");
+    await expect(db.query("insert into module_assessment_source_versions(source_id,revision,payload_hash,payload) values($1,2,'blocked','{}')", [sourceId])).rejects.toThrow("temporarily paused");
+    await sourceCommand("CorrectImportedAttempt", input.source_key, { attempt_id: attempt, items: [{ kind: "mcq", score: 65 }] });
+    expect((await evaluate()).components.theory.score).toBe(65);
+  });
+
+  it("does not let application roles lift the pause or call the unguarded ingestion function", async () => {
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      expect(await scalar("select has_function_privilege($1,'public.ingest_assessment_source_before_portal_pause(jsonb)','execute') value", [role])).toBe(false);
+      expect(await scalar("select has_table_privilege($1,'public.assessment_operational_controls','update') value", [role])).toBe(false);
+    }
+    await db.exec("set role authenticated");
+    expect(await scalar("select assessment_portal_imports_paused() value")).toBe(true);
+    await expect(ingest([source()])).rejects.toThrow("temporarily paused");
+  });
+
+  it("fails closed without its singleton and retains the global pause", async () => {
+    await db.exec("begin; delete from assessment_operational_controls");
+    expect(await scalar("select assessment_portal_imports_paused() value")).toBe(true);
+    await db.exec("rollback; update assessment_operational_controls set portal_imports_paused=false,writes_paused=true");
+    expect(await scalar("select assessment_portal_imports_paused() value")).toBe(true);
+    await expect(command(score(75))).rejects.toThrow("temporarily paused");
+  });
+});
+
+describe("historical-preserving rollout", () => {
+  beforeEach(async () => { await db.exec("begin"); });
+  afterEach(async () => { await db.exec("rollback"); });
+  const evidence = { reconciliation_review: "Synthetic review", sanitized_rehearsal: "Synthetic rehearsal", pilot_signoff: "Synthetic pilot", backup_restore: "Synthetic recovery", module_plans_review: "Synthetic plans", historical_outcomes_review: "Synthetic preserved archive review" };
+  async function cutover(signoffs: Record<string, string> = evidence) {
+    await db.exec("savepoint rollout_request");
+    try { return await scalar("select set_assessment_rollout('live',$1,'Synthetic cutover') value", [JSON.stringify(signoffs)]); }
+    catch (error) { await db.exec("rollback to rollout_request"); throw error; }
+    finally { await db.exec("release savepoint rollout_request"); }
+  }
+  it("allows reviewed protected archives without assigning modern plans or changing original outcomes", async () => {
+    await db.exec("update assessment_operational_controls set portal_imports_paused=true");
+    await db.query("update enrolments set assessment_plan_id=null where id=any($1::uuid[])", [[protectedEnrolment, protectedFailedEnrolment]]);
+    expect(await scalar("select count(*)::int value from course_modules where active and assessment_plan_id is null")).toBe(0);
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment])).toMatchObject({ historical: { protected: true }, effective_status: "Pass", awarded_credits: 10 });
+    const originals = await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment");
+    const baselines = await scalar("select jsonb_agg(to_jsonb(baseline) order by enrolment_id) value from assessment_historical_outcomes baseline");
+    await cutover();
+    expect(await scalar("select mode value from assessment_rollout")).toBe("live");
+    expect(await scalar("select assessment_portal_imports_paused() value")).toBe(true);
+    expect(await scalar("select jsonb_agg(to_jsonb(enrolment) order by id) value from enrolments enrolment")).toEqual(originals);
+    expect(await scalar("select jsonb_agg(to_jsonb(baseline) order by enrolment_id) value from assessment_historical_outcomes baseline")).toEqual(baselines);
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedEnrolment])).toMatchObject({ effective_status: "Pass", awarded_credits: 10, historical: { protected: true } });
+    expect(await scalar("select read_enrolment_assessment($1) value", [protectedFailedEnrolment])).toMatchObject({ effective_status: "Fail", awarded_credits: 0, historical: { protected: true } });
+  });
+  it("requires a separate historical review and does not partially change rollout on rejection", async () => {
+    await expect(cutover({ ...evidence, historical_outcomes_review: " " })).rejects.toThrow("historical_outcomes_review");
+    expect(await scalar("select mode value from assessment_rollout")).toBe("shadow");
+  });
+  it("still rejects unprotected enrolments without a reviewed plan", async () => {
+    await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+    await expect(cutover()).rejects.toThrow("reviewed assessment plan");
+  });
+  it("still requires a reviewed global plan for active modules even when their enrolments are protected", async () => {
+    await db.query("update course_modules set assessment_plan_id=null where id=$1", [protectedModule]);
+    await expect(cutover()).rejects.toThrow("reviewed assessment plan");
+  });
+  it("retains an inherited reviewed plan when the global mode changes for future enrolments", async () => {
+    await db.query("update course_modules set mode='practical' where id=$1", [moduleId]);
+    await plan({ practical_pass_mark: 50 }); await adopt();
+    const inherited = planId;
+    await db.query("update course_modules set mode='online' where id=$1", [moduleId]);
+    await plan();
+    await cutover();
+    expect((await evaluate()).plan).toMatchObject({ id: inherited, mode: "practical" });
+  });
+  it("does not mistake protected current ongoing enrolments for archives even with an assigned plan", async () => {
+    await db.query("update terms set status='active',starts_on=current_date-30,ends_on=current_date+30 where id=$1", [termId]);
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'planned',0)", [enrolmentId]);
+    await expect(cutover()).rejects.toThrow("Current ongoing enrolments require reviewed activation");
+    await db.query("update enrolments set assessment_plan_id=null where id=$1", [enrolmentId]);
+    const preview = await scalar("select preview_current_assessment_activation($1::uuid[]) value", [[enrolmentId]]);
+    await scalar("select activate_current_assessments($1::uuid[],$2::jsonb,'Synthetic activation',true) value", [[enrolmentId], JSON.stringify(preview)]);
+    await cutover();
+    expect(await scalar("select mode value from assessment_rollout")).toBe("live");
+  });
+  it("rejects mismatched preserved fields rather than recalculating them", async () => {
+    await db.query("insert into assessment_historical_outcomes(enrolment_id,recorded_status,recorded_credits) values($1,'completed',10)", [enrolmentId]);
+    await expect(cutover()).rejects.toThrow("Historical baseline mismatch");
+  });
+  it("retains the operational pause and administrator boundary", async () => {
+    await db.exec("update assessment_operational_controls set writes_paused=true");
+    await expect(cutover()).rejects.toThrow("temporarily paused");
+    await db.exec("update assessment_operational_controls set writes_paused=false");
+    await db.query("select set_config('test.actor',$1,false)", [teacherId]);
+    await expect(cutover()).rejects.toThrow(/administrator|admin/i);
+    expect(await scalar("select mode value from assessment_rollout")).toBe("shadow");
+  });
+});
 
 describe("temporary teaching-only reopening", () => {
   beforeEach(async () => {
@@ -2352,6 +2487,7 @@ describe("assessment PostgreSQL commands and evaluator", () => {
     expect((await evaluate()).plan.mode).toBe("practical");
     expect((await evaluate()).attendance_required).toBe(3);
     expect((await evaluate()).calculated_indicators).toContain("Attendance non-compliance");
+    await plan();
   });
   it("rejects retroactive attempt ordering and incompatible plan changes", async () => {
     await command(score(30));
@@ -2387,7 +2523,7 @@ describe("assessment PostgreSQL commands and evaluator", () => {
   });
   it("requires sign-offs and blocks legacy writes at cutover, with reversible rollback", async () => {
     await expect(scalar("select public.set_assessment_rollout('live','{}','Cutover') value")).rejects.toThrow("sign-off");
-    await scalar("select public.set_assessment_rollout('live',$1,'Synthetic sign-offs') value",[JSON.stringify({reconciliation_review:"review",sanitized_rehearsal:"fixture",pilot_signoff:"cohort",backup_restore:"backup",module_plans_review:"review"})]);
+    await scalar("select public.set_assessment_rollout('live',$1,'Synthetic sign-offs') value",[JSON.stringify({reconciliation_review:"review",sanitized_rehearsal:"fixture",pilot_signoff:"cohort",backup_restore:"backup",module_plans_review:"review",historical_outcomes_review:"review"})]);
     try {
       await expect(db.query("update enrolments set credits_awarded=10 where id=$1",[enrolmentId])).rejects.toThrow("read-only");
       await expect(db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'theory','theory_portal',$3,70,50,true,false,'2025-06-15')",[studentId,offeringId,randomUUID()])).rejects.toThrow("read-only");

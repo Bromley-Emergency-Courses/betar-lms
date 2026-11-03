@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { syncExamPortalMapping } from "./admin-actions";
+import { createExamPortalMapping, importExamResultsJson, resolveExamPortalSubmission, syncExamPortalMapping, updateExamPortalMapping } from "./admin-actions";
 import { requirePermission } from "./auth";
 import { createSupabaseServerClient } from "./supabase";
 import { ingestPortalAssessmentResults } from "./assessment/portal-ingestion";
+import { requireAutomaticExamImportsOpen } from "./assessment/import-pause";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -10,6 +11,7 @@ vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error
 vi.mock("./auth", () => ({ requirePermission: vi.fn() }));
 vi.mock("./supabase", () => ({ createSupabaseServerClient: vi.fn() }));
 vi.mock("./assessment/portal-ingestion", () => ({ ingestPortalAssessmentResults: vi.fn() }));
+vi.mock("./assessment/import-pause", () => ({ requireAutomaticExamImportsOpen: vi.fn() }));
 
 const mappingId = "68000000-0000-4000-8000-000000000001";
 const mapping = { id: mappingId, portal_exam_id: "synthetic-exam", module_id: "68000000-0000-4000-8000-000000000002", term_id: "68000000-0000-4000-8000-000000000003", portal_exam_kind: "module_theory", physics_required: true };
@@ -27,6 +29,7 @@ function form() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(requireAutomaticExamImportsOpen).mockReset();
   vi.stubEnv("ASSESSMENT_WORKFLOW_MODE", "live");
   vi.stubEnv("EXAM_PORTAL_LMS_RESULTS_URL", "https://portal.invalid/functions/v1/lms-results");
   vi.stubEnv("EXAM_PORTAL_LMS_API_SECRET", "synthetic-secret");
@@ -39,6 +42,19 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("administrator Portal pull compatibility", () => {
+  it.each([createExamPortalMapping, updateExamPortalMapping, resolveExamPortalSubmission, importExamResultsJson])("blocks other Portal/adapter mutation entry points before database access (%s)", async action => {
+    vi.mocked(requireAutomaticExamImportsOpen).mockRejectedValue(new Error("Automatic exam imports are temporarily paused"));
+    await expect(action(new FormData())).rejects.toThrow("temporarily paused");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createSupabaseServerClient).not.toHaveBeenCalled();
+  });
+  it("blocks paused sync before fetching results or changing any mapping", async () => {
+    vi.mocked(requireAutomaticExamImportsOpen).mockRejectedValue(new Error("Automatic exam imports are temporarily paused"));
+    await expect(syncExamPortalMapping(form())).rejects.toThrow("temporarily paused");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createSupabaseServerClient).not.toHaveBeenCalled();
+    expect(ingestPortalAssessmentResults).not.toHaveBeenCalled();
+  });
   it("pulls reviewed results directly from the Portal and routes live evidence without writing legacy tables", async () => {
     await expect(syncExamPortalMapping(form())).rejects.toThrow("Redirect: /assessments?");
     expect(requirePermission).toHaveBeenCalledExactlyOnceWith("manage_course");

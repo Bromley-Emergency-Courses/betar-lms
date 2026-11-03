@@ -47,7 +47,9 @@ These synthetic checks do not replace fresh encrypted live recovery and preserve
 
 ## Production gate and recovery
 
-Do not run local fixture code against production, bulk assign plans, remove baselines or fabricate rollout sign-offs. This transition neither satisfies the all-enrolments-plan live gate nor changes official shadow export authority. Archive disposition, genuine pilot/reconciliation sign-offs, public reopening and live assessment authority remain separate gates.
+Do not run local fixture code against production, bulk assign plans, remove baselines or fabricate rollout sign-offs. Activation alone does not satisfy the live gate or change official shadow export authority. Migration `0084` permits reviewed, unchanged historical baselines to remain without modern plans while requiring explicit activation for protected current ongoing enrolments. Historical review, genuine pilot/reconciliation sign-offs and live assessment authority remain separate gates.
+
+For the approved manual-first phase, migration `0085` keeps `assessment_operational_controls.portal_imports_paused=true` independently of the broader operational pause. Explicit current-enrolment activation and subsequent manual score/resit work do not require lifting this import lock. Verify it remains enabled before and after the separately approved transition; do not run Portal sync or adapter uploads as activation smoke tests. The live Portal integration remains a deferred, separately approved release scope.
 
 Before a production proposal, pin the reviewed code and migration hashes; refresh authorized read-only inventory and encrypted recovery evidence; compare every original academic record and intentional finance change; identify the exact reviewed cohort/global-plan IDs; and obtain separate migration/deployment/activation approval. Use the administrator's normal authenticated session for preview/apply. Never substitute a service-role write or fabricated session. Do not put private previews or cohort IDs in Git.
 

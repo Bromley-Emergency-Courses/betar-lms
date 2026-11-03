@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HistoricalAssessmentResults } from "@/components/historical-assessment-results";
 import { OutcomeBadge } from "@/components/assessment-register";
+import styles from "@/components/student-workspace.module.css";
 import { assessmentExportCsv } from "./exports";
 import { studentAcademicRisk } from "@/lib/rules";
 import type { Enrolment } from "@/lib/types";
@@ -28,6 +29,37 @@ const outcome: AssessmentOutcome = {
 };
 
 describe("historical assessment continuity", () => {
+  it.each([
+    { original: "completed", effective: "Pass", label: "Passed", tone: styles.good },
+    { original: "failed", effective: "Fail", label: "Failed", tone: styles.bad },
+    { original: "planned", effective: "Planned", label: "Not started", tone: styles.progress },
+    { original: "in_progress", effective: "In progress", label: "In progress", tone: styles.progress },
+    { original: "completed", effective: "Module deferred", label: "Module deferred", tone: styles.pending },
+    { original: "completed", effective: "Assessment deferred", label: "Assessment deferred", tone: styles.pending },
+    { original: "completed", effective: "Abandoned", label: "Abandoned", tone: styles.pending }
+  ])("uses the same $label badge and colour regardless of record age", ({ original, effective, label, tone }) => {
+    const modern = { needs_plan: false, effective_status: effective } as AssessmentEvaluation;
+    const expected = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: modern }));
+    expect(expected).toContain(`>${label}</span>`);
+    expect(expected).toContain(tone);
+    expect(expected).not.toContain(styles.neutral);
+    for (const protectedRecord of [false, true]) {
+      const historical = { ...modern, needs_plan: true, historical: {
+        protected: protectedRecord, status: original, credits: 10, final_mark: 73, grade: "Merit", review_flags: []
+      } } as AssessmentEvaluation;
+      const before = structuredClone(historical);
+      expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: historical }))).toBe(expected);
+      expect(historical).toEqual(before);
+    }
+  });
+
+  it("keeps missing-plan review visible for non-historical enrolments", () => {
+    const assessment = { needs_plan: true, effective_status: "Planned" } as AssessmentEvaluation;
+    const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment }));
+    expect(html).toContain(">Plan review required</span>");
+    expect(html).toContain(styles.pending);
+  });
+
   it.each(["In progress", "Fail", "Pass"] as const)("keeps activated %s authoritative while exporting original credits", status => {
     const activated = { ...outcome, legacy_status: "planned", legacy_final_mark: null, legacy_grade: null,
       assessment: { ...outcome.assessment, needs_plan: false, effective_status: status, calculated_status: status,
@@ -51,7 +83,8 @@ describe("historical assessment continuity", () => {
     } as AssessmentEvaluation;
     const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment }));
     expect(html).toContain(">In progress</span>");
-    expect(html).not.toContain("Recorded · planned");
+    expect(html).not.toContain("Recorded");
+    expect(html).toContain(styles.progress);
   });
   it("retains ongoing status and awarded credits through history merging and exports", () => {
     const ongoing = { ...outcome, legacy_status: "planned", legacy_final_mark: null, legacy_grade: null,
@@ -64,7 +97,7 @@ describe("historical assessment continuity", () => {
     expect(csv).toContain(",In progress,");
     expect(csv).toContain("planned,10");
     const amended = { ...retained.assessment, effective_status: "Planned", overrides: [{ kind: "status", value: "Planned", indicator: "", reason: "Explicit review" }] } as AssessmentEvaluation;
-    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: amended }))).toContain("Recorded · Planned (amended)");
+    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: amended }))).toContain("Not started (amended)");
   });
   it("does not label protected ongoing enrolments as historical teaching", () => {
     for (const status of ["planned", "in_progress"]) {
@@ -73,8 +106,9 @@ describe("historical assessment continuity", () => {
         historical: { protected: true, status, final_mark: null, grade: null, review_flags: [] }
       } as AssessmentEvaluation;
       const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment }));
-      expect(html).toContain(`Recorded · ${status.replaceAll("_", " ")}`);
-      expect(html).not.toContain("Historical ·");
+      expect(html).toContain(status === "planned" ? ">Not started</span>" : ">In progress</span>");
+      expect(html).not.toMatch(/Recorded|Historical/);
+      expect(html).toContain(styles.progress);
     }
   });
   it("preserves recorded outcome, credits and legacy marks without recalculating a failed score", () => {
@@ -90,7 +124,11 @@ describe("historical assessment continuity", () => {
     for (const status of ["resit", "deferred", "did_not_complete"]) {
       const [retained] = retainHistoricalOutcomes([{ ...outcome, legacy_status: status }], []);
       expect(retained.assessment.effective_status).toBe("Historical");
-      expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }))).toContain(`Historical · ${status.replaceAll("_", " ")}`);
+      const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }));
+      const label = status.replaceAll("_", " ");
+      expect(html).toContain(`>${label.charAt(0).toUpperCase() + label.slice(1)}</span>`);
+      expect(html).not.toMatch(/Recorded|Historical/);
+      expect(html).toContain(status === "did_not_complete" ? styles.bad : styles.pending);
     }
   });
 
@@ -151,7 +189,10 @@ describe("historical assessment continuity", () => {
     } as AssessmentEvaluation };
     const [retained] = retainHistoricalOutcomes([amended], [{ ...result, represented_by_attempt_id: "accepted", reviewed_backfill: true }]);
     expect(retained.assessment).toMatchObject({ effective_status: "Fail", awarded_credits: 0, historical: { protected: true, status: "completed", credits: 10 }, overrides: amended.assessment.overrides });
-    expect(renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }))).toContain("Recorded · Fail (amended)");
+    const html = renderToStaticMarkup(React.createElement(OutcomeBadge, { assessment: retained.assessment }));
+    expect(html).toContain("Failed (amended)");
+    expect(html).toContain(styles.bad);
+    expect(html).not.toMatch(/Recorded|Historical/);
     const csv = assessmentExportCsv("outcomes", [retained], [], []);
     expect(csv).toContain(",Fail,");
     expect(csv).toContain("Reviewed original decision");

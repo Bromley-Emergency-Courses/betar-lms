@@ -59,8 +59,8 @@ try {
   await page.getByLabel("Password", { exact: true }).fill(credentials.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL(`${base}${path}`);
-  await page.getByText("Historical · completed", { exact: true }).waitFor();
   const row = page.getByRole("row").filter({ hasText: title });
+  await row.getByText("Passed", { exact: true }).waitFor();
   assert.match(await row.innerText(), /75%/);
   assert.match(await row.innerText(), /42%/);
   await page.getByRole("button", { name: `View results for ${title}`, exact: true }).click();
@@ -78,7 +78,7 @@ try {
   await editor.getByRole("textbox", { name: /reason/i }).fill("Synthetic reviewed historical amendment");
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
   await editor.waitFor({ state: "hidden" });
-  await dialog.getByText("Historical · Fail (amended)", { exact: true }).waitFor();
+  await dialog.getByText("Failed (amended)", { exact: true }).waitFor();
   const amendedExport = await page.request.get(`${base}/api/exports/assessments?report=outcomes`);
   assert.equal(amendedExport.status(), 200);
   const amendedRow = Papa.parse(await amendedExport.text(), { header: true }).data.find(record => record["Student ID"] === identifier);
@@ -91,7 +91,7 @@ try {
   await editor.getByRole("textbox", { name: /reason/i }).fill("Synthetic restore original historical decision");
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
   await editor.waitFor({ state: "hidden" });
-  await dialog.getByText("Historical · completed", { exact: true }).waitFor();
+  await dialog.getByText("Passed", { exact: true }).waitFor();
   await dialog.getByText(/Decision history \(2\)/).click();
   await dialog.getByText("Synthetic reviewed historical amendment", { exact: true }).waitFor();
   await dialog.getByText("Synthetic restore original historical decision", { exact: true }).waitFor();

@@ -3,11 +3,13 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/exam-adapters/results/route";
 import { GET } from "@/app/api/exam-adapters/contract/route";
 import { getCurrentStaffProfile } from "./auth";
+import { automaticExamImportsPaused } from "./assessment/import-pause";
 import { getLmsData } from "./lms-data";
 import { ingestAssessmentSource } from "./assessment";
 import { persistNormalizedExamResults, syncEnrolmentStatusesForExamResults } from "./exam-adapters";
 
 vi.mock("server-only", () => ({}));
+vi.mock("./assessment/import-pause", async importOriginal => ({ ...await importOriginal<typeof import("./assessment/import-pause")>(), automaticExamImportsPaused: vi.fn(async () => false) }));
 vi.mock("./auth", () => ({ getCurrentStaffProfile: vi.fn() }));
 vi.mock("./lms-data", () => ({ getLmsData: vi.fn() }));
 vi.mock("./assessment", () => ({ ingestAssessmentSource: vi.fn() }));
@@ -21,6 +23,7 @@ function request(secret = "synthetic-secret", reason?: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(automaticExamImportsPaused).mockResolvedValue(false);
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("ASSESSMENT_WORKFLOW_MODE", "shadow");
   vi.stubEnv("EXAM_ADAPTER_SHARED_SECRET", "synthetic-secret");
@@ -30,6 +33,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("machine adapter and administrator import boundary", () => {
+  it.each(["off", "shadow", "live"])("rejects automated uploads before parsing or ingesting while paused in %s", async mode => {
+    vi.stubEnv("ASSESSMENT_WORKFLOW_MODE", mode);
+    vi.mocked(automaticExamImportsPaused).mockResolvedValue(true);
+    const response = await POST(request("synthetic-secret", "Reviewed import"));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toContain("temporarily paused");
+    expect(getLmsData).not.toHaveBeenCalled();
+    expect(ingestAssessmentSource).not.toHaveBeenCalled();
+    expect(persistNormalizedExamResults).not.toHaveBeenCalled();
+  });
   it.each(["shadow", "live"])("rejects machine-only credentials in %s without reading or writing academic data", async mode => {
     vi.stubEnv("ASSESSMENT_WORKFLOW_MODE", mode);
     vi.mocked(getCurrentStaffProfile).mockResolvedValue(null);

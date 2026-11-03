@@ -88,11 +88,13 @@ export function ExamTools({
   data,
   portalExams,
   portalSearch,
+  portalPaused = false,
   practicalImportSummary
 }: {
   data: AppData;
   portalExams: ExamPortalPickerExam[];
   portalSearch: string;
+  portalPaused?: boolean;
   practicalImportSummary?: {
     accepted: number;
     rejected: number;
@@ -115,7 +117,7 @@ export function ExamTools({
 
   return (
     <>
-      <section className="grid grid-2">
+      {portalPaused ? <p className="panel" role="status">Automatic exam imports are temporarily paused. Enter scores and resits manually in the student profile. Existing results remain readable.</p> : <section className="grid grid-2">
         <ExamPortalMappingForm terms={data.terms} modules={data.modules} portalExams={portalExams} />
 
         <div className="panel grid">
@@ -136,7 +138,7 @@ export function ExamTools({
             The LMS stores the selected exam ID in the background. Sync imports results once Exam Portal marks the exam reviewed and available for LMS.
           </p>
         </div>
-      </section>
+      </section>}
 
       <section className="grid grid-2">
         <form className="panel grid" action={importPracticalExamResultsCsv}>
@@ -233,7 +235,7 @@ export function ExamTools({
         </details> : <p>Enter Manual Theory or Practical scores from the original Module Enrolment in the assessment register.</p>}
       </section>
 
-      <section className="section">
+      {!portalPaused ? <section className="section">
         <div className="section-header">
           <div>
             <h2>Exam Portal Mappings</h2>
@@ -313,9 +315,9 @@ export function ExamTools({
             })}
           </div>
         )}
-      </section>
+      </section> : null}
 
-      {assessmentWorkflowMode() !== "live" ? <section className="section">
+      {!portalPaused && assessmentWorkflowMode() !== "live" ? <section className="section">
         <div className="section-header">
           <div>
             <h2>Exam Exceptions</h2>
@@ -407,7 +409,7 @@ export function ExamTools({
           </div>
         )}
       </section> : null}
-      <details className="panel">
+      {!portalPaused ? <details className="panel">
         <summary className="term-summary">
           <span>
             <strong>Manual JSON Import</strong>
@@ -425,7 +427,7 @@ export function ExamTools({
           {assessmentWorkflowEnabled() ? <label>Import reason<textarea className="textarea" name="assessment_reason" required /></label> : null}
           <button className="button primary">Import exam results</button>
         </form>
-      </details>
+      </details> : null}
     </>
   );
 }

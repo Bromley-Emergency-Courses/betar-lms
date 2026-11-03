@@ -52,6 +52,8 @@ for (const file of migrations.filter(file => Number(file.split("_")[0]) > Number
   applied.push(file);
 }
 assert.equal(sql(legacySnapshot), legacyBefore, "Additive migrations changed original legacy evidence");
+assert.match(sql("select portal_imports_paused from public.assessment_operational_controls;"), /t/);
+sql("update public.assessment_operational_controls set portal_imports_paused=false where singleton=true;");
 const actor = "select set_config('request.jwt.claim.sub','49000000-0000-4000-8000-000000000001',false);";
 sql(`${actor}${planStatements.join("\n")}
   do $$ declare enrolment record; begin
@@ -62,6 +64,7 @@ sql(`${actor}${planStatements.join("\n")}
         (public.read_enrolment_assessment(enrolment.id)->>'revision')::integer);
     end loop;
   end $$;`);
+writeFileSync(`${artifactDirectory}/import-pause-verification.txt`, sql(readFileSync("scripts/assessment-import-pause-verify.sql", "utf8")));
 writeFileSync(`${artifactDirectory}/verification.txt`, sql(readFileSync("scripts/assessment-rehearsal-verify.sql", "utf8")));
 assert.equal(sql(legacySnapshot), legacyBefore, "Backfill or replacement changed original legacy evidence");
 sql(`${actor} select public.execute_assessment_command(jsonb_build_object('type','CorrectManualAttempt','enrolment_id','49000000-0000-4000-8000-000000000012',
@@ -76,7 +79,7 @@ writeFileSync(`${artifactDirectory}/concurrency.json`, JSON.stringify(concurrent
 writeFileSync(`${artifactDirectory}/shadow-comparison.csv`, sql(`${actor} select * from public.assessment_shadow_comparison;`, true));
 const missingSignoff = await concurrentSql(`${actor} select public.set_assessment_rollout('live','{}','Synthetic missing sign-off must fail');`);
 assert.notEqual(missingSignoff.code, 0); assert.match(missingSignoff.output, /Missing rollout sign-off/);
-sql(`${actor} select public.set_assessment_rollout('live','{"reconciliation_review":"Synthetic only","sanitized_rehearsal":"Synthetic only","pilot_signoff":"Synthetic only","backup_restore":"Synthetic only","module_plans_review":"Synthetic only"}','Local gate rehearsal');`);
+sql(`${actor} select public.set_assessment_rollout('live','{"reconciliation_review":"Synthetic only","sanitized_rehearsal":"Synthetic only","pilot_signoff":"Synthetic only","backup_restore":"Synthetic only","module_plans_review":"Synthetic only","historical_outcomes_review":"Synthetic only"}','Local gate rehearsal');`);
 const guarded = await concurrentSql("update public.exam_results set score=99 where id='49000000-0000-4000-8000-000000000016';");
 if (guarded.code === 0 || !guarded.output.includes("read-only")) throw new Error("Legacy cutover write guard failed");
 sql(`${actor} select public.execute_assessment_command('{"type":"AddManualAttempt","component":"theory","enrolment_id":"49000000-0000-4000-8000-000000000012","items":[{"kind":"mcq","score":80}],"sitting_date":"2025-12-01","reason":"Synthetic live-only accepted resit"}',
