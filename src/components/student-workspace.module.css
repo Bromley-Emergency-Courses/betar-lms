@@ -39,6 +39,8 @@
 .badge { display: inline-flex; align-items: center; width: fit-content; border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600; line-height: 1.3; }
 .good { background: #e7f2e8; color: #285b36; }
 .bad { background: #fce9e9; color: #a62c2e; }
+.progress { background: #e8f0fc; color: #24558a; }
+.pending { background: #fff1d6; color: #80550b; }
 .neutral { background: #f0f0e9; color: #5c674d; }
 .flag { display: inline-block; font-size: 12px; padding: 6px 8px; background: #fff1d7; color: #835b16; border-radius: 5px; }
 .moduleList { display: grid; }

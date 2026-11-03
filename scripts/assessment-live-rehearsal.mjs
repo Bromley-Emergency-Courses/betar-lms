@@ -131,7 +131,7 @@ try {
   assert.equal((await evaluate()).components.theory.attempt_count, 3); assert.equal((await evaluate()).awarded_credits, 10);
   checks.push("A browser correction reverses Pass/credits without creating a resit; a later live-only resit restores Pass with all three attempts retained");
   await page.goto(`${base}/students/${historicalStudent}?tab=modules`);
-  await page.getByText("Recorded · completed", { exact: true }).waitFor();
+  await page.getByRole("row").filter({ hasText: "Synthetic historical practical module" }).getByText("Passed", { exact: true }).waitFor();
   const protectedOutcome = await historicalEvaluation();
   assert.equal(protectedOutcome.effective_status, "Pass"); assert.equal(protectedOutcome.awarded_credits, 10);
   const recordedAttendance = await admin.from("attendance_records").select("id", { count: "exact", head: true }).eq("student_id", historicalStudent);
