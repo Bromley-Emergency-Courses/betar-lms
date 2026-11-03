@@ -52,6 +52,8 @@ for (const file of migrations.filter(file => Number(file.split("_")[0]) > Number
   applied.push(file);
 }
 assert.equal(sql(legacySnapshot), legacyBefore, "Additive migrations changed original legacy evidence");
+assert.match(sql("select portal_imports_paused from public.assessment_operational_controls;"), /t/);
+sql("update public.assessment_operational_controls set portal_imports_paused=false where singleton=true;");
 const actor = "select set_config('request.jwt.claim.sub','49000000-0000-4000-8000-000000000001',false);";
 sql(`${actor}${planStatements.join("\n")}
   do $$ declare enrolment record; begin
@@ -62,6 +64,7 @@ sql(`${actor}${planStatements.join("\n")}
         (public.read_enrolment_assessment(enrolment.id)->>'revision')::integer);
     end loop;
   end $$;`);
+writeFileSync(`${artifactDirectory}/import-pause-verification.txt`, sql(readFileSync("scripts/assessment-import-pause-verify.sql", "utf8")));
 writeFileSync(`${artifactDirectory}/verification.txt`, sql(readFileSync("scripts/assessment-rehearsal-verify.sql", "utf8")));
 assert.equal(sql(legacySnapshot), legacyBefore, "Backfill or replacement changed original legacy evidence");
 sql(`${actor} select public.execute_assessment_command(jsonb_build_object('type','CorrectManualAttempt','enrolment_id','49000000-0000-4000-8000-000000000012',

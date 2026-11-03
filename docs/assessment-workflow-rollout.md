@@ -100,6 +100,14 @@ Resolve or document every shadow difference. The comparison exposes complete new
 
 ## Pilot and production gate
 
+### Manual-first release scope
+
+The owner approved manual score entry and resits before automatic imports. Migration `0085` adds an independent, owner-controlled `portal_imports_paused` switch, defaulting to `true`. Installing it does not lift the broader `writes_paused` restriction, activate enrolments or alter historical outcomes/credits. Existing manual Practical CSV tools remain separate; this is not permission to run a production CSV import.
+
+The application reads the database switch and fails closed if unavailable. While paused, Portal mapping changes, sync, legacy submission assignment, adapter JSON import and the automated results endpoint are disabled before outbound result fetching or ingestion. PostgreSQL independently rejects Portal source ingestion (including mixed batches), direct Portal source/version insertion and legacy Portal writes. Manual attempts, corrections, resit scheduling and exceptional decisions retain their normal permissions and historical safeguards. Existing imported evidence remains readable, and audited manual replacement of an existing import is still available where permitted. Application roles cannot lift either pause or call the pre-guard ingestion function.
+
+For this phased release, keep Portal imports paused through activation and manual-workflow cutover. Record the deferred integration scope explicitly in the genuine reconciliation/pilot sign-offs; synthetic tests and the direct-source local rehearsal are not live API authentication evidence. Complete the remaining historical/reporting/manual-pilot and backup gates below before separately approved deployment. Do not rotate the unavailable integration secret or enable imports as part of manual activation. A later, separately approved integration release must verify the live Portal transport, accepted results and retry behaviour before lifting `portal_imports_paused`. No extra environment variable is needed; the database is the source of truth.
+
 Production cutover is deliberately not performed by this change. Before enabling it:
 
 - Review the deployed read-only exception report and reconcile/document all differences.

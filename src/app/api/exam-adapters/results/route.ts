@@ -12,6 +12,7 @@ import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessm
 import { ingestAssessmentSource } from "@/lib/assessment";
 import { inboundAssessmentSource } from "@/lib/assessment/adapters";
 import { getCurrentStaffProfile } from "@/lib/auth";
+import { automaticExamImportsPaused, automaticImportPauseMessage } from "@/lib/assessment/import-pause";
 
 function isAuthorized(request: NextRequest): boolean {
   const configuredSecret = process.env.EXAM_ADAPTER_SHARED_SECRET;
@@ -25,6 +26,10 @@ function isAuthorized(request: NextRequest): boolean {
 export async function POST(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  if (await automaticExamImportsPaused()) {
+    return NextResponse.json({ error: automaticImportPauseMessage }, { status: 503 });
   }
 
   const payload = await request.json();

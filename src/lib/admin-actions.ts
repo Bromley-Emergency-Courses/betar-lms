@@ -15,6 +15,7 @@ import { admissionsStaffWorkspacesEnabled } from "@/lib/admissions-feature";
 import { requirePermission } from "@/lib/auth";
 import { studentDetailsSchema as studentSchema } from "@/lib/student-details";
 import { assessmentWorkflowEnabled, assessmentWorkflowMode } from "@/lib/assessment/feature";
+import { requireAutomaticExamImportsOpen } from "@/lib/assessment/import-pause";
 import { ingestAssessmentSource } from "@/lib/assessment";
 import { inboundAssessmentSource, practicalAssessmentSources } from "@/lib/assessment/adapters";
 import { ingestPortalAssessmentResults } from "@/lib/assessment/portal-ingestion";
@@ -931,6 +932,7 @@ export async function saveStudentProfileFinance(formData: FormData) {
 
 export async function importExamResultsJson(formData: FormData) {
   await requirePermission("manage_course");
+  await requireAutomaticExamImportsOpen();
   const rawJson = value(formData, "exam_results_json");
   if (!rawJson) {
     throw new Error("Paste exam adapter JSON before importing.");
@@ -1163,6 +1165,7 @@ function parseExamPortalMapping(formData: FormData) {
 
 export async function createExamPortalMapping(formData: FormData) {
   await requirePermission("manage_course");
+  await requireAutomaticExamImportsOpen();
   const parsed = parseExamPortalMapping(formData);
 
   const supabase = await createSupabaseServerClient();
@@ -1177,6 +1180,7 @@ export async function createExamPortalMapping(formData: FormData) {
 
 export async function updateExamPortalMapping(formData: FormData) {
   await requirePermission("manage_course");
+  await requireAutomaticExamImportsOpen();
   const mappingId = idSchema.parse(value(formData, "mapping_id"));
   const parsed = parseExamPortalMapping(formData);
 
@@ -1475,6 +1479,7 @@ async function recomputeTheoryResultsForTerm(termId: string): Promise<Map<string
 
 export async function syncExamPortalMapping(formData: FormData) {
   await requirePermission("manage_course");
+  await requireAutomaticExamImportsOpen();
   const mappingId = idSchema.parse(value(formData, "mapping_id"));
   const supabase = await createSupabaseServerClient();
 
@@ -1587,6 +1592,7 @@ export async function syncExamPortalMapping(formData: FormData) {
 
 export async function resolveExamPortalSubmission(formData: FormData) {
   await requirePermission("manage_course");
+  await requireAutomaticExamImportsOpen();
   if (assessmentWorkflowMode() === "live") throw new Error("Use Match imported result in the assessment workflow.");
   const submissionId = idSchema.parse(value(formData, "submission_id"));
   const studentId = idSchema.parse(value(formData, "student_id"));
