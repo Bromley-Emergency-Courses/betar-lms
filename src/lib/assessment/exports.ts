@@ -14,11 +14,12 @@ export function assessmentExportCsv(report: "outcomes" | "attempts" | "reconcili
     if (includeBasis) rows[0].push("Record basis", "Recorded Final mark", "Recorded Grade", "Original recorded status", "Original recorded credits");
     for (const row of outcomes) {
       const assessment = row.assessment;
+      const frozenHistorical = assessment.historical && !assessment.historical.scores_amended;
       const original = assessment.historical ?? assessment.activation?.original_record;
       rows.push([row.student_identifier, row.student_name, row.original_cohort, row.module_code, assessment.components?.theory?.score,
-        !assessment.historical && assessment.plan?.mode === "online" ? "N/A" : assessment.components?.practical?.score, assessment.historical?.protected ? assessment.effective_status : assessment.historical?.status ?? assessment.effective_status, assessment.historical ? "" : assessment.calculated_status,
+        !assessment.historical && assessment.plan?.mode === "online" ? "N/A" : assessment.components?.practical?.score, assessment.historical?.protected ? assessment.effective_status : assessment.historical?.status ?? assessment.effective_status, frozenHistorical ? "" : assessment.calculated_status,
         assessment.effective_indicators, assessment.components?.theory?.attempt_count, assessment.components?.practical?.attempt_count,
-        assessment.awarded_credits, assessment.historical ? "" : assessment.calculated_credits, assessment.historical && !assessment.historical.protected ? "" : assessment.overrides,
+        assessment.awarded_credits, frozenHistorical ? "" : assessment.calculated_credits, assessment.historical && !assessment.historical.protected ? "" : assessment.overrides,
         ...(includeBasis ? [assessment.historical ? "Historical record — original preserved; amendments audited" : assessment.activation ? `Activated current enrolment — original preserved; ${assessment.activation.preserved_credits === null ? "calculated credits" : "existing credits retained unless explicitly amended"}` : "New workflow", original?.final_mark, original?.grade, original?.status, original ? original.credits ?? row.legacy_credits : ""] : [])]);
     }
   } else if (report === "reconciliation") {
@@ -43,12 +44,13 @@ export function assessmentExportCsv(report: "outcomes" | "attempts" | "reconcili
           attempt.sitting_date, attempt.sitting_term, attempt.origin, attempt.is_current, attempt.previous_result_unavailable, ...(includeBasis ? ["New workflow", ""] : [])]);
     }
     for (const record of historicalResults.filter(record => !record.represented_by_attempt_id)) {
+      const basis = record.amendment_revision ? "Audited historical amendment — original retained in history" : "Historical record — as recorded; review required";
       rows.push(report === "cccu" ? [record.student_identifier, record.student_name, "", record.module_code, record.module_title,
         record.component, record.score, record.pass_mark, record.passed ? "Yes" : "No", record.resit_required ? "Yes" : "No",
         record.attempt_number, record.is_resit ? "Yes" : "No", record.prior_attempt_missing ? "Yes" : "No", record.taken_on,
-        record.source_system, record.original_cohort, "", "", "Historical record — as recorded; review required", record.id]
-        : [record.enrolment_id, "", record.attempt_number, "", record.component, record.score, record.pass_mark, record.passed,
-          record.taken_on, "", record.source_system, "", record.prior_attempt_missing ? "Recorded prior result missing" : "", "Historical record — as recorded; review required", record.id]);
+        record.source_system, record.original_cohort, record.amendment_revision ?? "", "", basis, record.id]
+        : [record.enrolment_id, "", record.attempt_number, record.amendment_revision ?? "", record.component, record.score, record.pass_mark, record.passed,
+          record.taken_on, "", record.source_system, "", record.prior_attempt_missing ? "Recorded prior result missing" : "", basis, record.id]);
     }
   }
   return rowsToCsv(rows.map((row) => row.map(cell)));

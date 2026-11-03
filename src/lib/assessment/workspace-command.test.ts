@@ -6,6 +6,16 @@ const attempt = { ...base, type: "AddManualAttempt", component: "theory", sittin
 const accepts = (command: unknown, expectedRevision: unknown = 3) => workspaceCommandSchema.safeParse({ command, expectedRevision }).success;
 
 describe("workspace assessment command boundary", () => {
+  it("allows reasoned historical score amendments but never editable pass marks, ownership or course plans", () => {
+    const correction = { ...base, type: "CorrectHistoricalScore", result_id: base.enrolment_id, score: 0, items: [] };
+    const missing = { ...base, type: "RecordHistoricalScore", component: "theory", entry_kind: "missing", expected_plan_id: base.enrolment_id, sitting_date: "2024-05-01", score: 70, items: [] };
+    expect(accepts(correction)).toBe(true);
+    expect(accepts(missing)).toBe(true);
+    for (const change of [{ reason: "" }, { score: 101 }, { score: -1 }, { pass_mark: 20 }, { student_id: base.enrolment_id }, { plan_id: base.enrolment_id }, { sitting_date: "2024-05-02" }]) expect(accepts({ ...correction, ...change })).toBe(false);
+    expect(accepts({ ...missing, expected_plan_id: undefined })).toBe(false);
+    expect(accepts({ ...missing, entry_kind: "overwrite" })).toBe(false);
+    expect(accepts({ ...missing, items: [{ kind: "physics", carried_from_item_id: base.enrolment_id }] })).toBe(false);
+  });
   it("restricts result lifecycle commands to reasoned exclusion or review of a known exclusion", () => {
     const exclusion = { ...base, type: "ExcludeAttempt", attempt_id: base.enrolment_id, category: "invalid" };
     const restoration = { ...base, type: "RestoreAttempt", attempt_id: base.enrolment_id, exclusion_id: base.enrolment_id };

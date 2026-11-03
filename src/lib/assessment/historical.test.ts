@@ -2,6 +2,7 @@ import React from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HistoricalAssessmentResults } from "@/components/historical-assessment-results";
+import { AssessmentTaskDialog } from "@/components/assessment-task-dialog";
 import { OutcomeBadge } from "@/components/assessment-register";
 import styles from "@/components/student-workspace.module.css";
 import { assessmentExportCsv } from "./exports";
@@ -11,6 +12,7 @@ import { historicalComponent, retainHistoricalOutcomes } from "./historical";
 import type { AssessmentAttempt, AssessmentEvaluation, AssessmentOutcome, HistoricalAssessmentResult } from "./types";
 
 vi.mock("@/app/assessments/workspace-actions", () => ({ saveWorkspaceAssessment: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 beforeAll(() => { vi.stubGlobal("React", React); });
 
 const result: HistoricalAssessmentResult = {
@@ -29,6 +31,54 @@ const outcome: AssessmentOutcome = {
 };
 
 describe("historical assessment continuity", () => {
+  it.each([false, true])("shows the correct exceptional decision basis after score amendment: %s", scoresAmended => {
+    const assessment = { ...outcome.assessment, effective_status: "Fail", calculated_status: "Fail", awarded_credits: 10,
+      calculated_indicators: [], effective_indicators: [], overrides: [],
+      historical: { protected: true, scores_amended: scoresAmended, status: "completed", credits: 10, final_mark: 73, grade: "Merit", review_flags: [] }
+    } as AssessmentEvaluation;
+    const html = renderToStaticMarkup(React.createElement(AssessmentTaskDialog, {
+      task: { kind: "decision" }, assessment, attempts: [], terms: [], close: vi.fn(), saved: vi.fn()
+    }));
+    expect(html).toContain(scoresAmended ? "Calculated recommendation: <strong>Fail</strong>" : "Historical baseline: <strong>completed</strong>");
+  });
+
+  it("retains explicitly recalculated historical outcomes and exports their calculation", () => {
+    const amended = { ...outcome, assessment: {
+      ...outcome.assessment, effective_status: "Fail", calculated_status: "Fail", awarded_credits: 10, calculated_credits: 0,
+      historical: { protected: true, editable_scores: true, scores_amended: true, teaching_requirements_ignored: true,
+        status: "completed", credits: 10, final_mark: 73, grade: "Merit", review_flags: [] },
+      components: { theory: historicalComponent([result], "theory") }, effective_indicators: ["theory:Resit required"], overrides: []
+    } as AssessmentEvaluation };
+    expect(retainHistoricalOutcomes([amended], [result])[0]).toBe(amended);
+    const csv = assessmentExportCsv("outcomes", [amended], [], [], [result]);
+    expect(csv).toContain(",Fail,Fail,");
+    expect(csv).toContain(",10,0,");
+    expect(csv).toContain("Merit,completed,10");
+  });
+
+  it("renders original scores, correction reasons and failed predecessors alongside resits", () => {
+    const corrected = { ...result, score: 30, amendment_revision: 1, original_score: 32,
+      amendment_history: [{ revision: 1, score: 30, reason: "Checked original marking sheet", actor_name: "Test administrator", created_at: "2026-11-03", items: [] }] };
+    const resit = { ...result, id: "resit", score: 75, passed: true, resit_required: false, taken_on: "2025-06-01",
+      attempt_number: 2, is_resit: true, resit_of_result_id: result.id };
+    const html = renderToStaticMarkup(React.createElement(HistoricalAssessmentResults, { results: [corrected, resit], onCorrect: vi.fn() }));
+    for (const text of ["Original recorded score: 32%", "Revision 1 · 30%", "Checked original marking sheet", "Test administrator", "Recorded attempt 2", "75%", "Correct this result"]) expect(html).toContain(text);
+    const csv = assessmentExportCsv("cccu", [], [], [], [corrected, resit]);
+    expect(csv.split("\n")).toHaveLength(3);
+    expect(csv).toContain(",30,50,No,Yes,1,");
+    expect(csv).toContain(",75,50,Yes,No,2,");
+    expect(csv).toContain("Original teaching term,1,,Audited historical amendment — original retained in history");
+  });
+
+  it("keeps unresolved history warnings without falsely requiring reconciliation for editable scores", () => {
+    const editable = { ...outcome, assessment: { ...outcome.assessment,
+      historical: { protected: true, editable_scores: true, status: "completed", credits: 10, final_mark: 73, grade: "Merit", review_flags: [] }
+    } as AssessmentEvaluation };
+    const [retained] = retainHistoricalOutcomes([editable], [result]);
+    expect(retained.assessment.historical?.review_flags).not.toContain("Historical results retained — reconciliation required");
+    expect(retained.assessment.historical?.review_flags).toContain("Historical failure / resit requires review");
+  });
+
   it.each([
     { original: "completed", effective: "Pass", label: "Passed", tone: styles.good },
     { original: "failed", effective: "Fail", label: "Failed", tone: styles.bad },

@@ -52,8 +52,11 @@ A completed sitting of one Assessment Component for which a score is recorded. A
 _Avoid_: Assessment booking, correction
 
 **Assessment Correction**:
-A reasoned administrator revision to a Manual result that preserves the Assessment Attempt's identity and retains immutable before/after history. Imported source values are not corrected in the LMS; an incorrect import is unmatched and replaced manually.
+A reasoned administrator revision to a Manual result that preserves the Assessment Attempt's identity and retains immutable before/after history. Current-workflow imported source values are not corrected in the LMS; an incorrect import is unmatched and replaced manually, while preserved historical results use a Historical Score Amendment.
 _Avoid_: Resit
+
+**Historical Score Amendment**:
+A reasoned administrator addition or correction to a preserved historical result, regardless of its original source, that retains the original evidence and all earlier sittings. It permits exam-outcome recalculation without treating missing historical attendance or presentations as failures, while existing positive credit awards remain independent.
 
 **Current Component Result**:
 The latest valid Assessment Attempt for an Assessment Component. Earlier attempts remain part of the component's history.
