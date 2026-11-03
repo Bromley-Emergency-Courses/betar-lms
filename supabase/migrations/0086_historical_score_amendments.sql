@@ -136,7 +136,13 @@ begin
     if decision->>'kind'='status' then effective_status:=decision->>'value';
     elsif decision->>'kind'='indicator' then
       select coalesce(jsonb_agg(value),'[]'::jsonb) into indicators from jsonb_array_elements(indicators) where value#>>'{}'<>decision->>'indicator';
-      if decision->'value'='true'::jsonb then indicators:=indicators||jsonb_build_array(decision->>'indicator'); end if;
+      if decision->'value'='true'::jsonb then
+        if decision->>'indicator' like '%:Resit %' then
+          select coalesce(jsonb_agg(value),'[]'::jsonb) into indicators from jsonb_array_elements(indicators)
+            where value#>>'{}' not in (split_part(decision->>'indicator',':',1)||':Resit required',split_part(decision->>'indicator',':',1)||':Resit scheduled');
+        end if;
+        indicators:=indicators||jsonb_build_array(decision->>'indicator');
+      end if;
     end if;
   end loop;
   recommended:=case when effective_status='Pass' then (change.calculation->>'module_credits')::integer else 0 end;
@@ -195,6 +201,10 @@ begin
     select * into previous from public.assessment_historical_results where enrolment_id=enrolment_key and component::text=component_name order by taken_on desc,attempt_number desc limit 1;
     resit:=command->>'entry_kind'='resit'; uses_plan:=resit;
     if resit then
+      if (select count(*) from public.assessment_historical_results where enrolment_id=enrolment_key and component::text=component_name
+        and taken_on=previous.taken_on and attempt_number=previous.attempt_number)>1 then
+        raise exception 'Multiple results identify the latest sitting. Review ambiguous history before amending.';
+      end if;
       if previous.id is null or previous.passed is distinct from false then raise exception 'A resit requires an existing failed component result'; end if;
       if sitting<previous.taken_on then raise exception 'A resit cannot precede its previous sitting'; end if;
       predecessor:=previous.id; number_value:=previous.attempt_number+1;

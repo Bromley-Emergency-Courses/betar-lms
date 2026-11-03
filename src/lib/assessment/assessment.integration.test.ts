@@ -169,6 +169,25 @@ describe("audited historical score editing", () => {
     expect(await evaluate()).toMatchObject({ effective_status: "Pass", components: { theory: { score: 80, attempt_count: 2 } } });
     expect(await scalar("select jsonb_agg(score order by taken_on) value from assessment_historical_results where enrolment_id=$1 and component='theory'", [enrolmentId])).toEqual([30,80]);
   });
+  it("rejects a resit when the latest historical predecessor is ambiguous", async () => {
+    await correct(30);
+    await db.query("insert into exam_results(student_id,offering_id,component_type,source_system,source_attempt_id,score,pass_mark,passed,resit_required,taken_on) values($1,$2,'theory','manual',$3,20,50,false,true,'2024-05-01')", [legacyPresentationStudent, protectedOffering, randomUUID()]);
+    const before = await scalar("select count(*)::int value from assessment_historical_score_changes");
+    await db.exec("savepoint ambiguous");
+    await expect(command({ type: "RecordHistoricalScore", component: "theory", entry_kind: "resit", sitting_date: "2024-06-01", items: [{ kind: "mcq", score: 80 }] })).rejects.toThrow("ambiguous history");
+    await db.exec("rollback to ambiguous");
+    expect(await scalar("select count(*)::int value from assessment_historical_score_changes")).toBe(before);
+  });
+  it("keeps historical resit flags exclusive and restores the calculated flag when cleared", async () => {
+    await correct(30);
+    await command({ type: "SetAssessmentOverride", kind: "indicator", indicator: "theory:Resit scheduled", value: true });
+    expect((await evaluate()).effective_indicators).toEqual(["theory:Resit scheduled"]);
+    await command({ type: "ClearAssessmentOverride", kind: "indicator", indicator: "theory:Resit scheduled" });
+    expect((await evaluate()).effective_indicators).toEqual(["theory:Resit required"]);
+    await command({ type: "SetAssessmentOverride", kind: "indicator", indicator: "theory:Resit scheduled", value: true });
+    await command({ type: "SetAssessmentOverride", kind: "indicator", indicator: "theory:Resit required", value: true });
+    expect((await evaluate()).effective_indicators).toEqual(["theory:Resit required"]);
+  });
   it("does not let later course or attendance changes recalculate the saved historical outcome", async () => {
     await correct(75);
     const before = (await evaluate()).components;
