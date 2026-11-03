@@ -103,8 +103,8 @@ Resolve or document every shadow difference. The comparison exposes complete new
 Production cutover is deliberately not performed by this change. Before enabling it:
 
 - Review the deployed read-only exception report and reconcile/document all differences.
-- Review all active module plans and assign a plan to every historical enrolment included in reporting.
-- Complete shadow ingestion/backfill and compare source hashes, counts, component results, statuses, indicators and credits.
+- Review all active module plans and the inherited plans required by non-archival enrolments. Explicitly preview and activate eligible protected current enrolments; leave reviewed, unchanged archival baselines without modern plans.
+- Reconcile the explicitly approved ingestion/backfill scope and compare source hashes, counts, component results, statuses, indicators and credits. Historical records retained as recorded do not require backfill merely to appear in reports or pass the cutover gate.
 - Agree a cohort/module pilot with administrators and exercise initial pass, independent component resits, carried supporting scores, import replacement, deferral, override and pass reversal in a browser.
 - Validate all three reports and the CCCU export, and obtain administrator sign-off and a verified backup/restore reference.
 
